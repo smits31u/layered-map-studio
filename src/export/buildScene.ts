@@ -7,7 +7,8 @@ import {projectDepthRegions,selectedThresholds} from '../bathymetry/depthGeometr
 import {resolvePlacement} from '../geometry/scene/overrides';
 import {buildPlaceLabelObjects} from '../geometry/scene/placeLabels';
 import {buildRoadLabelCandidates,resolveRoadLabelObject} from '../geometry/scene/roadLabels';
-import {compassPathData} from '../geometry/scene/compass';
+import {classicRoseGeometry,compassFootprintRadiusMm,compassPathData} from '../geometry/scene/compass';
+import {clipPolylineAgainstCircles,pointInsideAnyCircle,type Circle} from '../geometry/scene/keepOut';
 import {titleBackerPath} from '../geometry/scene/titleBacker';
 import {getLoadedFont} from '../text/fontRegistry';
 import {textPathData} from '../text/textVector';
@@ -63,7 +64,23 @@ export function buildGeometryLayers(project:MapProject,features:ExtractedFeature
 export function buildPresentationScene(project:MapProject,features:ExtractedFeatures,geometry:GeometryLayers):ManufacturingScene{
  const {widthMm:w,heightMm:h,model,projection,trueDepth,bathymetrySource}=geometry;
  const roads=projectRoads(features.roads,projection,project.roads.mode);
- const roadShapes:Shape[]=project.roads.mode==='off'?[]:roads.map((r,j)=>({id:`road-${j}`,operation:'engrave' as const,kind:'path' as const,d:linePath(r.points),group:MAJOR_CLASSES.includes(r.class)?'roads-major':'roads-minor',strokeWidthMm:MAJOR_CLASSES.includes(r.class)?project.roads.majorWidthMm:project.roads.minorWidthMm}));
+
+ // Compass keep-out (M-COMPASS): resolved before roads/labels become shapes, so engraving
+ // geometry can clear around the compass live. This never mutates `roads`/`features.places` (the
+ // source geometry) — only which *shapes* get pushed into `objects`/`layer-land` differs, exactly
+ // like every other presentation-tier edit in this function. Moving the compass, resizing it,
+ // adjusting clearance, or turning it off simply changes `keepOutCircles` on the next call, which
+ // is why previously-suppressed geometry always comes back — there is no separate "restore" step,
+ // because nothing was ever deleted from the source in the first place.
+ const compassPlacement=project.compass.position!=='off'?resolvePlacement({xMm:project.compass.xMm,yMm:project.compass.yMm,rotationDeg:project.compass.rotationDeg},project.overrides.compass):undefined;
+ const keepOutCircles:Circle[]=compassPlacement?.visible?[{cx:compassPlacement.xMm,cy:compassPlacement.yMm,r:compassFootprintRadiusMm(project.compass.style,project.compass.sizeMm)+Math.max(0,project.compass.keepOutPaddingMm)}]:[];
+ const labelExtraRadiusMm=(widthMm:number,sizeMm:number)=>widthMm+sizeMm/2; // conservative: covers the full text run plus half a letter-height, so a label is suppressed whenever any part of it could plausibly overlap, never half-clipped (per the brief's explicit preference)
+
+ const roadShapes:Shape[]=project.roads.mode==='off'?[]:roads.flatMap((r,j)=>{
+  const group=MAJOR_CLASSES.includes(r.class)?'roads-major':'roads-minor',strokeWidthMm=MAJOR_CLASSES.includes(r.class)?project.roads.majorWidthMm:project.roads.minorWidthMm;
+  const segments=keepOutCircles.length?clipPolylineAgainstCircles(r.points,keepOutCircles):(r.points.length>1?[r.points]:[]);
+  return segments.map((points,k):Shape=>({id:`road-${j}-${k}`,operation:'engrave',kind:'path',d:linePath(points),group,strokeWidthMm}));
+ });
  const layers=geometry.layers.map(layer=>layer.id==='layer-land'?{...layer,shapes:[...layer.shapes,...roadShapes]}:layer);
 
  // Every object below is pushed into `objects`, which the SVG serializers already merge onto
@@ -76,7 +93,8 @@ export function buildPresentationScene(project:MapProject,features:ExtractedFeat
   const font=requireFont(project.placeLabels.font);
   for(const label of placeLabelObjects){
    if(!label.visible)continue;
-   const {d}=textPathData(font,label.name,project.placeLabels.sizeMm,'left');
+   const {d,widthMm}=textPathData(font,label.name,project.placeLabels.sizeMm,'left');
+   if(pointInsideAnyCircle({x:label.xMm,y:label.yMm},keepOutCircles,labelExtraRadiusMm(widthMm,project.placeLabels.sizeMm)))continue; // suppressed whole, never half-clipped
    objects.push({id:label.id,operation:'engrave',kind:'path',d,transform:`translate(${label.xMm} ${label.yMm}) rotate(0)`,group:'place-labels',objectId:label.id});
    renderedPlaceLabels++;
   }
@@ -91,6 +109,7 @@ export function buildPresentationScene(project:MapProject,features:ExtractedFeat
     if(!label.visible)continue;
     const {d,widthMm}=textPathData(font,label.name,project.roadLabels.sizeMm,'center');
     if(widthMm>label.segmentLengthMm*.92){rejectedRoadLabels++;continue} // reject labels that don't fit
+    if(pointInsideAnyCircle({x:label.xMm,y:label.yMm},keepOutCircles,labelExtraRadiusMm(widthMm,project.roadLabels.sizeMm)))continue; // suppressed whole, never half-clipped
     objects.push({id:label.id,operation:'engrave',kind:'path',d,transform:`translate(${label.xMm} ${label.yMm}) rotate(${label.tangentAngleDeg})`,group:'road-labels',objectId:label.id});
     renderedRoadLabels++;
    }
@@ -116,11 +135,30 @@ export function buildPresentationScene(project:MapProject,features:ExtractedFeat
   objects.push({id:'subtitle-text',operation:'engrave',kind:'path',d,transform:`translate(${subtitlePlacement.xMm} ${subtitlePlacement.yMm}) rotate(${subtitlePlacement.rotationDeg})`,group:'subtitle',objectId:'subtitle'});
  }
 
- if(project.compass.position!=='off'){
-  const placement=resolvePlacement({xMm:project.compass.xMm,yMm:project.compass.yMm,rotationDeg:project.compass.rotationDeg},project.overrides.compass);
-  if(placement.visible){
+ if(compassPlacement?.visible){
+  const transform=`translate(${compassPlacement.xMm} ${compassPlacement.yMm}) rotate(${compassPlacement.rotationDeg})`;
+  // Classic Rose is several sub-shapes (ring/star/center boss/four letters) combined into ONE
+  // path's `d` (multiple M..Z subpaths) rather than several Shape entries. This is deliberate, not
+  // a shortcut: the drag/select code in GeneratedPreview.tsx resolves exactly one DOM element per
+  // data-object-id and reads/writes its single `transform` attribute live during a drag gesture
+  // (see the comment there) — splitting the compass into multiple Shapes with the same objectId
+  // would only move the first-matched piece during a drag, leaving the rest visibly frozen until
+  // release. One Shape, one transform keeps the existing (already load-bearing) drag architecture
+  // correct without any changes to it.
+  if(project.compass.style==='classic-rose'){
+   const geo=classicRoseGeometry(project.compass.sizeMm);
+   const font=requireFont('inter');
+   const letterD=(['N','E','S','W'] as const).map(point=>{
+    const {x,y}=geo.letterPositions[point];
+    const measured=textPathData(font,point,geo.letterSizeMm,'center');
+    const midY=(measured.bounds.minY+measured.bounds.maxY)/2; // vertical-center the glyph on its target point, since a baseline-anchored glyph otherwise sits visually low
+    return textPathData(font,point,geo.letterSizeMm,'center',x,y-midY).d;
+   });
+   const d=[geo.ringD,geo.starD,geo.centerD,...letterD].join(' ');
+   objects.push({id:'compass',operation:'engrave',kind:'path',d,transform,group:'compass',objectId:'compass'});
+  }else{
    const d=compassPathData(project.compass.style,project.compass.sizeMm);
-   objects.push({id:'compass',operation:'engrave',kind:'path',d,transform:`translate(${placement.xMm} ${placement.yMm}) rotate(${placement.rotationDeg})`,group:'compass',objectId:'compass'});
+   objects.push({id:'compass',operation:'engrave',kind:'path',d,transform,group:'compass',objectId:'compass'});
   }
  }
 

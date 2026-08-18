@@ -27,9 +27,10 @@ updated as each milestone lands — do not mark something done without a test pr
 - [x] **M13** Generated Map Edit Mode — selectable objects, drag positioning, editor
       zoom/pan (M-LIVE, below)
 - [x] **M14** Title/subtitle/backer
-- [~] **M15** Classic compass rose — three real styles implemented; **no N/E/S/W
-      lettering yet** on the rose (real gap)
-- [ ] **M16** Dynamic compass keep-out geometry — not started
+- [x] **M15** Classic compass rose — four styles now implemented, including a new
+      **Classic Rose** (outer ring, 8-point star, strong center boss, real vector
+      N/E/S/W lettering) — see "M-COMPASS results" below
+- [x] **M16** Dynamic compass keep-out geometry — see "M-COMPASS results" below
 - [ ] **M17** Address markers — not started
 - [x] **M18** Draggable place and road labels
 - [ ] **M19** Road-label candidate scoring / collision avoidance — not started (current
@@ -56,11 +57,14 @@ updated as each milestone lands — do not mark something done without a test pr
       dragging remains physically correct at any editor zoom level. See "M-LIVE
       results" below for exactly what's live vs. what still needs Generate, and the
       architectural changes made.
-- [ ] **M-COLLISION** Generalized keep-out/collision module (section 22), built once
-      and reused by compass (M16), road labels (M19), and later lake-info/frame. Not
-      started — M-LIVE's compass now exposes a stable position/size/rotation state
-      that a future keep-out mask can consume without further rework, but no masking
-      logic exists yet.
+- [x] **M-COLLISION** Generalized keep-out/collision module — landed as part of
+      M-COMPASS (`src/geometry/scene/keepOut.ts`). `KeepOutRegion`/`KeepOutTarget` are
+      not hard-coded to the compass; a future title/lake-info/marker keep-out is
+      "call `keepOutFootprint(...)` and pass the result into the same
+      `clipPolylineAgainstCircles`/`pointInsideAnyCircle` functions", not a new engine.
+      Only the compass actively produces a region today.
+- [x] **M-COMPASS** Classic Rose style + dynamic, non-destructive keep-out (done —
+      this milestone). See "M-COMPASS results" below.
 
 ### M-LIVE results
 
@@ -115,6 +119,88 @@ same thing would happen to a real user, who would naturally pan before dragging)
 the test to pan the target into view first; all three zoom levels (50%, 100%, 244%)
 then showed drag deltas matching the expected millimeter conversion to 6 decimal places.
 
+### M-COMPASS results
+
+**Classic Rose geometry** (`src/geometry/scene/compass.ts`): a new `'classic-rose'`
+`CompassStyle`, now the default. It is built from a strong outer ring circle, an 8-point
+star (4 long cardinal spikes + 4 shorter diagonal spikes — the same kite-point technique
+the existing `'rose'` style used, re-proportioned to leave a clear gap for lettering), a
+small center boss circle, and real vector N/E/S/W letters set in that gap — never
+touching the star tips or the ring. Letters are opentype.js glyph outlines (the same
+font engine every other text object in this app uses), not `<text>` and not hand-drawn
+paths. `classicRoseGeometry(sizeMm)` returns the ring/star/center path data plus letter
+positions/size as pure geometry; `buildScene.ts` is the only place that touches a
+loaded font, keeping `compass.ts` font-free like every other geometry module. Minimum-
+feature-size constants (`MIN_COMPASS_SIZE_MM=12`, `MIN_LETTER_SIZE_MM=3`,
+`MIN_FEATURE_GAP_MM=0.5`, `RECOMMENDED_MIN_COMPASS_SIZE_MM=18`) clamp the *effective*
+size used for proportional geometry so the ring/star/gap structure can't collapse below
+a laser-manufacturable scale even if a very small `sizeMm` is requested; the Controls
+"Size mm" field also sets `min={MIN_COMPASS_SIZE_MM}` so this is rarely a surprise.
+
+**Why the compass is one `Shape`, not several**: a classic-rose compass is
+conceptually multiple pieces (ring/star/center/4 letters), but they are combined into
+ONE path's `d` attribute (multiple `M..Z` subpaths in a single string) and pushed as a
+single `Shape` with `objectId:'compass'`, exactly like every other compass style before
+it. This was a deliberate choice, not a shortcut: `GeneratedPreview.tsx`'s drag code
+resolves exactly one DOM element per `data-object-id` and reads/writes its one
+`transform` attribute live during a drag gesture. Splitting the compass into several
+Shapes sharing that objectId (the way title/title-backer already do, incidentally) would
+only move the first-matched piece during a drag, leaving the rest visibly frozen until
+release — a real, visible regression this milestone was explicit about avoiding. Letter
+*positions* are instead baked directly into each glyph's path data via new
+`originX`/`originY` parameters on `textPathData()` (`src/text/textVector.ts`), so no
+second transform is ever needed.
+
+**Dynamic, non-destructive keep-out** (`src/geometry/scene/keepOut.ts`,
+new): `KeepOutRegion`/`KeepOutTarget`/`keepOutFootprint()` are generalized — not
+hard-coded to the compass — so a future title/lake-info/marker keep-out reuses the same
+`clipPolylineAgainstCircles()` (segment/circle intersection, splits a polyline into the
+sub-segments outside every circle) and `pointInsideAnyCircle()` (whole-label
+suppression) rather than a new engine. Today only the compass produces a region, sized
+`compassFootprintRadiusMm(style, sizeMm) + keepOutPaddingMm` and centered on the
+compass's resolved placement. This is computed once per `buildPresentationScene()` call
+and applied to: **roads-major/roads-minor** (clipped into sub-segments, never
+half-visible through the compass), and **road labels/place labels** (suppressed whole —
+never half-clipped text — if the label's anchor point falls within the padded circle).
+None of this touches `roads`/`features.places` (the source geometry) or the shoreline/
+depth/base cut panels — it only changes which *shapes* get pushed into
+`objects`/`layer-land` on that call, which is also why "restoring" suppressed geometry
+needs no special-case code: moving, resizing, or turning off the compass just changes
+`keepOutCircles` on the next (already-live, already-cached-geometry) call, and shapes
+that were never deleted from the source simply get included again.
+
+**Clearance control**: `project.compass.keepOutPaddingMm` (new field, default 4mm,
+Controls UI range 0–20mm). Keep-out is always active whenever the compass is visible —
+there is no separate enable/disable toggle, since the brief treats "roads/labels clear
+the compass" as a guarantee, not an opt-in.
+
+**Preserved from M-LIVE**: compass style/size/position/clearance changes all still hit
+the cheap presentation-tier rebuild (`geometryKeyOf()` was not touched — it still keys
+only on crop/dimensions/shoreline/bathymetry), so they update live with no Generate
+click. Editor zoom/pan independence and export-dimension invariance are unaffected
+(verified by dedicated tests and by live export diffing at 50/100/200% editor zoom).
+Manual drag position continues to survive unrelated edits via the existing
+`ObjectOverride` mechanism, unchanged.
+
+**Found and fixed during manual verification**: the classic-rose ring/star is a hollow,
+stroke-only shape (`fill="none"`, matching how this app has always rendered `engrave`
+geometry) — its bounding-box *center* is empty space, so a Playwright click at the exact
+bbox midpoint (which worked "by accident" on the old solid-looking arrow styles, whose
+strokes passed near center) misses entirely and falls through to a background pan. This
+was a test-script bug, not a product bug, in the same category M-LIVE hit with viewport
+clipping: real users click on the visible ring/star/letters they can see, not on
+invisible bounding-box math. Fixed the verification script to probe for a real hit point
+via `elementFromPoint` before dragging; all three zoom levels then dragged correctly.
+
+**Known limitations**: label suppression uses a circular approximation around each
+label's anchor point (anchor radius padded by the label's own text width) rather than
+an exact rotated-rectangle intersection — documented as a deliberate simplicity
+tradeoff per the brief's explicit preference for "suppress the whole label" over any
+partial-clip attempt. Road clipping only clears the compass's own circular footprint —
+it does not attempt to route roads *around* the compass along a path, only to remove the
+overlapping segment. Only the compass produces a `KeepOutRegion` today; wiring
+title/lake-info/markers into the same system is future work the types already support.
+
 ## V1.0 acceptance checklist (section 50 of the spec, verbatim structure)
 
 Legend: `[x]` implemented + tested · `[~]` partially implemented (see note) · `[ ]` not started
@@ -146,11 +232,13 @@ Legend: `[x]` implemented + tested · `[~]` partially implemented (see note) · 
 - [x] Title/subtitle converted to vector paths
 - [x] Draggable title
 - [x] Title backer
-- [~] Classic compass rose with N/E/S/W — rose shape yes, cardinal letters no
+- [x] Classic compass rose with N/E/S/W — Classic Rose style: ring, star, and real
+      vector cardinal letters
 - [x] Compass size control
 - [x] Compass drag positioning
-- [ ] Compass keep-out / vector knockout
-- [ ] Engraving restores when compass moves (depends on keep-out)
+- [x] Compass keep-out / vector knockout
+- [x] Engraving restores when compass moves (no separate restore step needed — see
+      "M-COMPASS results")
 - [ ] Address geocoding marker
 - [ ] Multiple markers
 - [ ] Selectable marker symbols

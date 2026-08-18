@@ -15,10 +15,16 @@ export function measureTextWidthMm(font:opentype.Font,text:string,sizeMm:number)
 // the result with an SVG group transform (translate/rotate) rather than baking world coordinates
 // into the path itself, so the same path data stays reusable if the object is moved. Also returns
 // the glyph bounding box in that same local space (used for backer geometry).
-export function textPathData(font:opentype.Font,text:string,sizeMm:number,anchorH:TextAnchorH='left'):{d:string;widthMm:number;bounds:{minX:number;minY:number;maxX:number;maxY:number}}{
+// originX/originY (default 0,0) let a caller bake an additional local offset directly into the
+// emitted path data itself, rather than relying on a second SVG transform — needed by the
+// classic-rose compass, whose N/E/S/W letters each sit at a different local position within a
+// single combined path/shared transform (see buildScene.ts's compass block for why: the object
+// model's drag/select code keys off exactly one element per objectId, so a multi-piece compass
+// must stay one Shape, one transform).
+export function textPathData(font:opentype.Font,text:string,sizeMm:number,anchorH:TextAnchorH='left',originX=0,originY=0):{d:string;widthMm:number;bounds:{minX:number;minY:number;maxX:number;maxY:number}}{
  const widthMm=measureTextWidthMm(font,text,sizeMm);
- const dx=anchorH==='center'?-widthMm/2:anchorH==='right'?-widthMm:0;
- const path=font.getPath(text,dx,0,sizeMm);
+ const dx=originX+(anchorH==='center'?-widthMm/2:anchorH==='right'?-widthMm:0);
+ const path=font.getPath(text,dx,originY,sizeMm);
  const box=path.getBoundingBox();
  return {d:path.toPathData(3),widthMm,bounds:{minX:box.x1,minY:box.y1,maxX:box.x2,maxY:box.y2}};
 }

@@ -30,7 +30,11 @@ export interface MapProject {
  roads:{mode:RoadMode;majorWidthMm:number;minorWidthMm:number};
  roadLabels:{visible:boolean;font:FontId;sizeMm:number;offsetMm:number;flipAllSides:boolean};
  placeLabels:{classes:Record<GeoPlace['class'],boolean>;font:FontId;sizeMm:number};
- compass:{style:'classic'|'rose'|'minimal';position:'top-left'|'top-right'|'bottom-left'|'bottom-right'|'custom'|'off';xMm:number;yMm:number;sizeMm:number;rotationDeg:number};
+ // keepOutPaddingMm: how far beyond the compass's own rendered edge (see compassFootprintRadiusMm)
+ // roads/labels must clear — always active whenever the compass is on (see docs/v1-milestones.md,
+ // M-COMPASS), not a separate opt-in toggle, since the brief requires this to be a guarantee, not
+ // an option someone could forget to enable.
+ compass:{style:'classic'|'rose'|'minimal'|'classic-rose';position:'top-left'|'top-right'|'bottom-left'|'bottom-right'|'custom'|'off';xMm:number;yMm:number;sizeMm:number;rotationDeg:number;keepOutPaddingMm:number};
  title:{text:string;font:FontId;sizeMm:number;xMm:number;yMm:number;visible:boolean;backer:'none'|'offset'|'rectangle';backerPaddingMm:number};
  subtitle:{text:string;font:FontId;sizeMm:number;xMm:number;yMm:number;visible:boolean;gapMm:number};
  exportSettings:{layout:ExportLayout;panelGapMm:number;annotations:boolean};

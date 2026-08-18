@@ -48,14 +48,12 @@ export type RoadLabel={
  visible:boolean;
 };
 
-// ---- Compass, extended for the not-yet-built keep-out milestone (M16) ----
-// The project's actual compass field (MapProject['compass']) does not have keepOut* fields
-// yet — adding them there is a small, additive change deferred to M16 so it lands together
-// with the collision engine that gives them meaning, rather than adding inert fields now.
-export type CompassObject=MapProject['compass']&{
- keepOutEnabled:boolean;
- keepOutPaddingMm:number;
-};
+// ---- Compass (M-COMPASS: landed) ----
+// MapProject['compass'] itself now carries keepOutPaddingMm — keep-out is always active whenever
+// the compass is visible (not a separate opt-in toggle; see docs/v1-milestones.md), so there is no
+// keepOutEnabled field to add here. This alias exists so other planning types (EditableMapObject
+// etc.) and any future object type can still refer to "a compass" by a stable name.
+export type CompassObject=MapProject['compass'];
 
 // ---- Brand new types for not-yet-implemented milestones ----
 
