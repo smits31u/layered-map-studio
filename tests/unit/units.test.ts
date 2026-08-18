@@ -1,0 +1,2 @@
+import{describe,expect,it}from'vitest';import{inchesToMm,mmToInches,validateDimensionMm}from'../../src/utils/units';
+describe('physical units',()=>{it('converts landscape exactly',()=>{expect(inchesToMm(14)).toBe(355.6);expect(inchesToMm(11)).toBe(279.4)});it('converts portrait exactly',()=>{expect(mmToInches(279.4)).toBe(11);expect(mmToInches(355.6)).toBe(14)});it('validates supported bounds',()=>{expect(validateDimensionMm(50)).toBe(true);expect(validateDimensionMm(1220)).toBe(true);expect(validateDimensionMm(49)).toBe(false)})});

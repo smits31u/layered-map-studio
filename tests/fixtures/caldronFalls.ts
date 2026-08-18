@@ -1,0 +1,5 @@
+import {defaultProject} from '../../src/state/defaultProject';
+import type {ExtractedFeatures,MapProject} from '../../src/types/project';
+export const caldronFallsProject:MapProject={...defaultProject,map:{latitude:45.3685,longitude:-88.207,zoom:11,bearing:0,crop:{nw:{lng:-88.32,lat:45.45},ne:{lng:-88.08,lat:45.45},se:{lng:-88.08,lat:45.29},sw:{lng:-88.32,lat:45.29},bbox:[-88.32,45.29,-88.08,45.45]}},dimensions:{widthMm:355.6,heightMm:279.4,displayUnit:'in',lockAspect:true}};
+// Deterministic provider-boundary fixture; live geographic acceptance remains a documented manual test.
+export const caldronFallsFeatures:ExtractedFeatures={water:[{id:'osm-water-sample',rings:[[{lng:-88.28,lat:45.40},{lng:-88.20,lat:45.42},{lng:-88.13,lat:45.37},{lng:-88.17,lat:45.32},{lng:-88.25,lat:45.34},{lng:-88.28,lat:45.40}]]}],roads:[{id:'road-1',class:'secondary',name:'County Road C',coordinates:[{lng:-88.3,lat:45.38},{lng:-88.1,lat:45.35}]},{id:'road-2',class:'service',coordinates:[{lng:-88.25,lat:45.31},{lng:-88.14,lat:45.43}]}],places:[{id:'place-1',name:'Caldron Falls',class:'hamlet',coordinate:{lng:-88.207,lat:45.3685}}]};

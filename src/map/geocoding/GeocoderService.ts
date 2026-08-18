@@ -1,0 +1,6 @@
+export type GeocoderResult={id:string;displayName:string;latitude:number;longitude:number;boundingBox?:[number,number,number,number];resultType?:string;provider:string};
+export interface GeocoderService{search(query:string,signal?:AbortSignal):Promise<GeocoderResult[]>}
+export class PhotonGeocoder implements GeocoderService{
+ constructor(private endpoint=import.meta.env.VITE_PHOTON_URL||'https://photon.komoot.io'){}
+ async search(query:string,signal?:AbortSignal){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),8000);signal?.addEventListener('abort',()=>controller.abort());try{const r=await fetch(`${this.endpoint}/api/?q=${encodeURIComponent(query)}&limit=8`,{signal:controller.signal});if(!r.ok)throw new Error(`Geocoder returned HTTP ${r.status}`);const j=await r.json();return j.features.map((f:any)=>{const p=f.properties;return{id:String(p.osm_id??f.id),displayName:[p.name,p.city,p.state,p.country].filter(Boolean).filter((x:string,i:number,a:string[])=>a.indexOf(x)===i).join(', '),longitude:f.geometry.coordinates[0],latitude:f.geometry.coordinates[1],boundingBox:f.bbox,resultType:p.osm_value??p.type,provider:'Photon'}})}catch(e){if((e as Error).name==='AbortError')throw new Error('Geocoder timed out');throw e}finally{clearTimeout(timer)}}
+}

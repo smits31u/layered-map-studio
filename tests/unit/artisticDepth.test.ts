@@ -1,0 +1,20 @@
+import {describe,expect,it} from 'vitest';
+import * as polygonClipping from 'polygon-clipping';
+import {ARTISTIC_DEPTH_PRESETS,artisticDepthOpenings,normalizedOffsetToMm,normalizedProductSize} from '../../src/geometry/shoreline/artisticDepth';
+import {multiPolygonArea,type MultiPolygonMm} from '../../src/geometry/shoreline/polygonEngine';
+import {artisticDepthReferences} from '../fixtures/artisticDepthReferences';
+const water:MultiPolygonMm=[[[[20,20],[180,20],[180,80],[20,80],[20,20]]]];
+describe('measured artistic depth model',()=>{
+ it('uses the measured nonlinear Normal sequence',()=>expect(ARTISTIC_DEPTH_PRESETS.normal).toMatchObject({normalizedOffsets:[3,9,20,34,52],measured:true}));
+ it('scales normalized erosion proportionally with product width',()=>{expect(normalizedOffsetToMm(3,254)).toBeCloseTo(1.524);expect(normalizedOffsetToMm(9,254)).toBeCloseTo(4.572);expect(normalizedOffsetToMm(20,254)).toBeCloseTo(10.16);expect(normalizedOffsetToMm(3,355.6)).toBeCloseTo(2.1336);expect(normalizedOffsetToMm(9,355.6)).toBeCloseTo(6.4008);expect(normalizedOffsetToMm(20,355.6)).toBeCloseTo(14.224);expect(normalizedProductSize(355.6,279.4)).toEqual({width:500,height:500*279.4/355.6})});
+ it('generates every opening independently from W0 at its absolute offset',()=>{const together=artisticDepthOpenings(water,[3,9,20],200,100,0),single=artisticDepthOpenings(water,[20],200,100,0);expect(together[2].geometry).toEqual(single[0].geometry)});
+ it('produces strictly nested monotonically decreasing openings',()=>{const openings=artisticDepthOpenings(water,[3,9,20],200,100,0),areas=[multiPolygonArea(water),...openings.map(item=>item.areaMm2)];expect(areas[0]).toBeGreaterThan(areas[1]);expect(areas[1]).toBeGreaterThan(areas[2]);expect(areas[2]).toBeGreaterThan(areas[3]);for(let i=1;i<openings.length;i++)expect(polygonClipping.difference(openings[i].geometry,openings[i-1].geometry)).toEqual([])});
+ it('keeps Normal within the measured reference tolerance without fitting retained-area percentages',()=>{const normal=ARTISTIC_DEPTH_PRESETS.normal.normalizedOffsets;for(const reference of [artisticDepthReferences.caldronFalls,artisticDepthReferences.lakeNoquebay,artisticDepthReferences.windPudding])reference.measured.forEach((value,index)=>expect(Math.abs(value-normal[index])).toBeLessThanOrEqual(1.5));expect(artisticDepthReferences.highFalls.measured).toEqual([4,9])});
+});
+
+describe('artistic depth cleanup',()=>{
+ const ring=(x1:number,y1:number,x2:number,y2:number)=>[[x1,y1],[x2,y1],[x2,y2],[x1,y2],[x1,y1]] as [number,number][];
+ it('removes tiny internal remnants while preserving a meaningful secondary basin',()=>{const geometry=[ [ring(20,20,120,120)], [ring(140,20,180,60)], [ring(190,80,193,83)] ],opening=artisticDepthOpenings(geometry,[3],200,140,undefined,{preOffsetSimplifyTolerance:0,postOffsetSimplifyTolerance:0,minimumComponentAreaNormalized:[1],minimumComponentAreaRatio:[.01],minimumHoleAreaNormalized:[0],cropEdgeMinimumAreaNormalized:.25})[0];expect(opening.componentCount).toBe(2);expect(opening.rejectedComponents).toBeGreaterThanOrEqual(1)});
+ it('preserves a clipped crop-edge component under the conservative edge rule',()=>{const geometry=[ [ring(0,10,6,40)], [ring(30,10,120,100)] ],opening=artisticDepthOpenings(geometry,[1],200,120,undefined,{preOffsetSimplifyTolerance:0,postOffsetSimplifyTolerance:0,minimumComponentAreaNormalized:[500],minimumComponentAreaRatio:[.5],minimumHoleAreaNormalized:[0],cropEdgeMinimumAreaNormalized:.1})[0];expect(opening.componentCount).toBe(2)});
+ it('removes tiny source holes before erosion but preserves significant islands',()=>{const geometry=[[ring(10,10,190,110),ring(40,40,40.1,40.1),ring(100,40,120,60)]],opening=artisticDepthOpenings(geometry,[1],200,120,undefined,{preOffsetSimplifyTolerance:0,postOffsetSimplifyTolerance:0,minimumComponentAreaNormalized:[0],minimumComponentAreaRatio:[0],minimumHoleAreaNormalized:[1],cropEdgeMinimumAreaNormalized:0})[0];expect(opening.holeCount).toBe(1);expect(opening.rejectedHoles).toBeGreaterThanOrEqual(1)});
+});
