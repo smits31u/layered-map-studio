@@ -11,6 +11,16 @@ export type BathymetryContour={depthMeters:number;geometry:GeoPolygon[]};
 export type BathymetryDataset={source:BathymetrySourceMetadata;depthUnit:'meters';minDepthMeters:number;maxDepthMeters:number;contours:BathymetryContour[]};
 export type GeoPlace = { id:string; coordinate:LngLat; name:string; class:'city'|'town'|'village'|'hamlet' };
 export type ExtractedFeatures = { water:GeoPolygon[]; roads:GeoLine[]; places:GeoPlace[] };
+
+export type FontId='inter'|'cinzel'|'great-vibes';
+
+// A per-object manual edit layered on top of that object's generated/default placement. Absent
+// fields fall back to the default; deleting an object's entry (or clearing a field) is "Reset" for
+// that field. Object ids: 'title', 'subtitle', 'compass', `place-${GeoPlace.id}`,
+// `road-label-${group id}`. This is the only place manual drag/nudge/flip/hide state lives — it is
+// plain serializable project state, never ephemeral UI state like selection.
+export type ObjectOverride={xMm?:number;yMm?:number;rotationDeg?:number;scale?:number;visible?:boolean;flipSide?:boolean};
+
 export interface MapProject {
  version:1;
  map:{latitude:number;longitude:number;zoom:number;bearing:number;crop?:CropGeography};
@@ -18,10 +28,11 @@ export interface MapProject {
  shoreline:{enabledLayers:boolean[];offsetsMm:number[];artisticOffsetsNormalized?:number[];preset:'xfine'|'fine'|'narrow'|'normal'|'wide'|'custom';waterMode?:'all'|'primary';minWaterAreaMm2?:number;minArtisticComponentAreaNormalized?:number};
  bathymetry:{mode:'true-bathymetry'|'decorative-offsets';provider?:BathymetrySourceMetadata['provider'];datasetId?:string;status?:'unchecked'|'available'|'unavailable'|'error';statusMessage?:string;selection:'automatic'|'manual';thresholdsMeters:number[];dataset?:BathymetryDataset};
  roads:{mode:RoadMode;majorWidthMm:number;minorWidthMm:number};
- roadLabels:{visible:boolean;font:string;sizeMm:number;offsetMm:number};
- placeLabels:{classes:Record<GeoPlace['class'],boolean>;font:string;sizeMm:number};
- compass:{style:'classic'|'rose'|'minimal';position:'top-left'|'top-right'|'bottom-left'|'bottom-right'|'custom'|'off';xMm:number;yMm:number;sizeMm:number};
- title:{text:string;font:string;sizeMm:number;xMm:number;yMm:number;backer:'none'|'offset'|'rectangle'};
- subtitle:{text:string;font:string;sizeMm:number;xMm:number;yMm:number;gapMm:number};
+ roadLabels:{visible:boolean;font:FontId;sizeMm:number;offsetMm:number;flipAllSides:boolean};
+ placeLabels:{classes:Record<GeoPlace['class'],boolean>;font:FontId;sizeMm:number};
+ compass:{style:'classic'|'rose'|'minimal';position:'top-left'|'top-right'|'bottom-left'|'bottom-right'|'custom'|'off';xMm:number;yMm:number;sizeMm:number;rotationDeg:number};
+ title:{text:string;font:FontId;sizeMm:number;xMm:number;yMm:number;visible:boolean;backer:'none'|'offset'|'rectangle';backerPaddingMm:number};
+ subtitle:{text:string;font:FontId;sizeMm:number;xMm:number;yMm:number;visible:boolean;gapMm:number};
  exportSettings:{layout:ExportLayout;panelGapMm:number;annotations:boolean};
+ overrides:Record<string,ObjectOverride>;
 }

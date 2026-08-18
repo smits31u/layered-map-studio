@@ -3,9 +3,10 @@ import type {ManufacturingScene,PhysicalLayer,Shape} from '../scene';
 export type PreviewMode='individual'|'composite'|'exploded';
 const n=(value:number)=>Number(value.toFixed(3));
 const palette=['#e8dfcf','#d8c8ac','#c5ac84','#ad8d62','#927047','#775735','#58819a'];
-const cutShape=(shape:Shape)=>shape.kind==='rect'?`<rect x="${shape.x}" y="${shape.y}" width="${shape.width}" height="${shape.height}"/>`:`<path d="${shape.d}" fill-rule="evenodd"/>`;
-const engraveShape=(shape:Shape)=>`<path d="${shape.d}" fill="none" stroke="#25211d" stroke-width="${shape.strokeWidthMm??.45}"/>`;
-const layerGroup=(scene:ManufacturingScene,layer:PhysicalLayer,index:number,transform='',showCutEdge=true)=>{const cuts=layer.shapes.filter(shape=>shape.operation==='cut').map(cutShape).join(''),engravings=layer.id==='layer-land'?[...layer.shapes,...scene.objects].filter(shape=>shape.operation==='engrave').map(engraveShape).join(''):'';return`<g data-preview-panel="${layer.id}"${transform?` transform="${transform}"`:''} fill="${palette[index%palette.length]}" stroke="${showCutEdge?'#38332d':'none'}" stroke-width="0.35">${cuts}${engravings}</g>`};
+const objectAttr=(shape:Shape)=>shape.objectId?` data-object-id="${shape.objectId}"`:'';
+const cutShape=(shape:Shape)=>shape.kind==='rect'?`<rect x="${shape.x}" y="${shape.y}" width="${shape.width}" height="${shape.height}"${shape.transform?` transform="${shape.transform}"`:''}${objectAttr(shape)}/>`:`<path d="${shape.d}" fill-rule="evenodd"${shape.transform?` transform="${shape.transform}"`:''}${objectAttr(shape)}/>`;
+const engraveShape=(shape:Shape)=>`<path d="${shape.d}" fill="none" stroke="#25211d" stroke-width="${shape.strokeWidthMm??.45}"${shape.transform?` transform="${shape.transform}"`:''}${objectAttr(shape)}/>`;
+const layerGroup=(scene:ManufacturingScene,layer:PhysicalLayer,index:number,transform='',showCutEdge=true)=>{const withObjects=layer.id==='layer-land'?[...layer.shapes,...scene.objects]:layer.shapes;const cuts=withObjects.filter(shape=>shape.operation==='cut').map(cutShape).join(''),engravings=withObjects.filter(shape=>shape.operation==='engrave').map(engraveShape).join('');return`<g data-preview-panel="${layer.id}"${transform?` transform="${transform}"`:''} fill="${palette[index%palette.length]}" stroke="${showCutEdge?'#38332d':'none'}" stroke-width="0.35">${cuts}${engravings}</g>`};
 
 export function scenePreviewSvg(scene:ManufacturingScene,mode:PreviewMode,selectedIndex=0){
  const selected=Math.max(0,Math.min(selectedIndex,scene.layers.length-1));

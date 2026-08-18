@@ -9,7 +9,14 @@ type FeatureMap={
 
 export type ExtractionDiagnostics={vectorSources:string[];styleLayers:Record<string,string[]>;renderedLayerIds:string[];rawCount:number;sample:Array<{source?:string;sourceLayer?:string;layerId?:string;geometryType:string;properties:Record<string,any>}>};
 
-const roadClass=(v:string):RoadClass|undefined=>({motorway:'motorway',trunk:'trunk',primary:'primary',secondary:'secondary',tertiary:'tertiary',minor:'minor',residential:'minor',unclassified:'minor',service:'service',track:'service'} as Record<string,RoadClass>)[v];
+// OpenMapTiles' `transportation_name` layer (where road names actually live) uses the same `class`
+// vocabulary as `transportation`, which is broader than this map previously covered — named local
+// roads/paths/tracks with a class outside the original narrow list (e.g. path, footway, cycleway,
+// pedestrian, living_street) were silently dropped entirely rather than classified as a minor/
+// service road, which is why named-road counts could read 0 for crops dominated by such roads.
+// Genuinely non-road transportation classes (rail, transit, aerialway, ferry) are intentionally
+// left unmapped — they are not roads and should not be engraved/labeled as one.
+const roadClass=(v:string):RoadClass|undefined=>({motorway:'motorway',trunk:'trunk',primary:'primary',secondary:'secondary',tertiary:'tertiary',minor:'minor',residential:'minor',unclassified:'minor',living_street:'minor',service:'service',track:'service',path:'service',footway:'service',cycleway:'service',pedestrian:'service',bridleway:'service',steps:'service',busway:'service',raceway:'service'} as Record<string,RoadClass>)[v];
 const point=(c:number[]):LngLat=>({lng:c[0],lat:c[1]});
 const relevantLayers=new Set(['water','transportation','transportation_name','place']);
 const fingerprint=(f:MapFeature)=>`${f.source??''}|${f.sourceLayer??''}|${String(f.id??'')}|${f.geometry.type}|${JSON.stringify(f.geometry.coordinates)}|${JSON.stringify(f.properties??{})}`;
