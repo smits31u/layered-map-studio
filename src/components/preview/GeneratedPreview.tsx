@@ -1,9 +1,10 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import type {ManufacturingScene} from '../../export/scene';
 import {scenePreviewSvg,type PreviewMode} from '../../export/svg/previewSvg';
 import {waterAreaOccupancy} from '../../geometry/shoreline/polygonEngine';
 import type {MapProject} from '../../types/project';
 import {resetOverrideFields,screenDeltaToMm,setOverride} from '../../geometry/scene/overrides';
+import {centeredViewport,cssTransform,fitZoom,panBy,zoomAroundPoint,type EditorViewport} from '../../geometry/scene/viewport';
 
 type ObjectKind='title'|'subtitle'|'compass'|'place-label'|'road-label';
 const kindOf=(objectId:string):ObjectKind=>objectId==='title'?'title':objectId==='subtitle'?'subtitle':objectId==='compass'?'compass':objectId.startsWith('place-')?'place-label':'road-label';
@@ -14,15 +15,51 @@ export function GeneratedPreview({scene,featuresLoaded=false,project,onCommitOve
  const[view,setView]=useState<PreviewMode>('individual'),[layer,setLayer]=useState(0);
  const[selectedId,setSelectedId]=useState<string>();
  const[selectedPose,setSelectedPose]=useState<{x:number;y:number;rotation:number}>();
- const containerRef=useRef<HTMLDivElement>(null);
+ // EDITOR VIEWPORT STATE (M-LIVE): purely a display concern — never touches project state, never
+ // exported, never affects physical coordinates. Reset only on first mount and on a genuine
+ // physical-dimension change (see the effect below), never on ordinary presentation edits.
+ const[viewport,setViewport]=useState<EditorViewport>({zoom:1,panXPx:0,panYPx:0});
+ const viewportValueRef=useRef(viewport); // always the latest value, read fresh at pan-gesture start without needing `viewport` in the drag effect's deps (which would otherwise re-subscribe the pointerdown listener on every pan frame)
+ viewportValueRef.current=viewport;
+ const containerRef=useRef<HTMLDivElement>(null); // the pannable/zoomable canvas (gets the CSS transform + injected SVG)
+ const viewportRef=useRef<HTMLDivElement>(null); // the fixed-size, overflow:hidden viewport window
+ const lastFitDimsRef=useRef<string|undefined>(undefined);
  const editable=Boolean(project&&onCommitOverride);
 
  const readPose=(objectId:string)=>{const el=containerRef.current?.querySelector(`[data-object-id="${CSS.escape(objectId)}"]`);setSelectedPose(parseTransform(el?.getAttribute('transform')??null))};
 
+ const fitViewport=()=>{
+  if(!scene||!viewportRef.current)return;
+  const rect=viewportRef.current.getBoundingClientRect();
+  setViewport(centeredViewport(fitZoom(scene.widthMm,scene.heightMm,rect.width,rect.height),scene.widthMm,scene.heightMm,rect.width,rect.height));
+ };
+ const resetTo100=()=>{
+  if(!scene||!viewportRef.current)return;
+  const rect=viewportRef.current.getBoundingClientRect();
+  setViewport(centeredViewport(1,scene.widthMm,scene.heightMm,rect.width,rect.height));
+ };
+ const zoomStep=(factor:number)=>{
+  if(!viewportRef.current)return;
+  const rect=viewportRef.current.getBoundingClientRect();
+  setViewport(v=>zoomAroundPoint(v,v.zoom*factor,rect.width/2,rect.height/2));
+ };
+
+ // Auto-fit only on first appearance of a scene, or when the physical product dimensions actually
+ // change — never on ordinary presentation edits (title/compass/roads/labels), which would
+ // otherwise reset the user's zoom/pan on every keystroke.
+ useLayoutEffect(()=>{
+  if(!scene)return;
+  const dimsKey=`${scene.widthMm}x${scene.heightMm}`;
+  if(lastFitDimsRef.current===dimsKey)return;
+  lastFitDimsRef.current=dimsKey;
+  fitViewport();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ },[scene?.widthMm,scene?.heightMm]);
+
  useEffect(()=>{
   if(!editable)return;
-  const container=containerRef.current;
-  if(!container)return;
+  const container=containerRef.current,viewportEl=viewportRef.current;
+  if(!container||!viewportEl)return;
   // A React state update inside this gesture (setSelectedId/setSelectedPose) causes a re-render,
   // which reassigns dangerouslySetInnerHTML and replaces the entire injected SVG subtree — even
   // when the generated string is byte-identical, since scenePreviewSvg doesn't know about the drag
@@ -31,10 +68,11 @@ export function GeneratedPreview({scene,featuresLoaded=false,project,onCommitOve
   // matrix (silently treating screen pixels as millimeters 1:1 instead of dividing by the real
   // scale). Fix: re-resolve both by stable selector on every move/up rather than caching a
   // reference, and defer the one state update that reflects the drag (for the side panel's number
-  // inputs) until pointerup so nothing invalidates the DOM mid-gesture.
-  const onPointerDown=(event:PointerEvent)=>{
-   const initialTarget=(event.target as Element).closest('[data-object-id]');
-   if(!initialTarget)return;
+  // inputs) until pointerup so nothing invalidates the DOM mid-gesture. getScreenCTM() already
+  // incorporates any CSS transform on ancestors (including the editor's own zoom/pan transform
+  // below), so object dragging stays physically correct at any editor zoom level with no special
+  // casing — verified in tests/manual browser checks at 50%/100%/200%.
+  const onObjectPointerDown=(event:PointerEvent,initialTarget:Element)=>{
    const objectId=initialTarget.getAttribute('data-object-id')!;
    event.preventDefault();
    const start=parseTransform(initialTarget.getAttribute('transform'));
@@ -65,8 +103,27 @@ export function GeneratedPreview({scene,featuresLoaded=false,project,onCommitOve
    window.addEventListener('pointermove',onMove);
    window.addEventListener('pointerup',onUp);
   };
-  container.addEventListener('pointerdown',onPointerDown);
-  return()=>container.removeEventListener('pointerdown',onPointerDown);
+  // Panning updates only local `viewport` state (never project/scene), so — unlike object
+  // dragging — there is no stale-DOM-reference concern: re-rendering during pan just updates the
+  // canvas wrapper's own inline transform, and never touches the injected SVG subtree.
+  const onPanPointerDown=(event:PointerEvent)=>{
+   event.preventDefault();
+   const startClientX=event.clientX,startClientY=event.clientY;
+   const startViewport=viewportValueRef.current;
+   const onMove=(moveEvent:PointerEvent)=>{
+    setViewport(panBy(startViewport,moveEvent.clientX-startClientX,moveEvent.clientY-startClientY));
+   };
+   const onUp=()=>{window.removeEventListener('pointermove',onMove);window.removeEventListener('pointerup',onUp)};
+   window.addEventListener('pointermove',onMove);
+   window.addEventListener('pointerup',onUp);
+  };
+  const onPointerDown=(event:PointerEvent)=>{
+   const initialTarget=(event.target as Element).closest('[data-object-id]');
+   if(initialTarget)onObjectPointerDown(event,initialTarget);
+   else if(event.button===1||event.button===0)onPanPointerDown(event); // middle button, or left-drag on empty background, pans
+  };
+  viewportEl.addEventListener('pointerdown',onPointerDown);
+  return()=>viewportEl.removeEventListener('pointerdown',onPointerDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
  },[editable,scene,view,layer]);
 
@@ -86,8 +143,20 @@ export function GeneratedPreview({scene,featuresLoaded=false,project,onCommitOve
  const currentOverride=selectedId&&project?project.overrides[selectedId]:undefined;
  const currentlyVisible=currentOverride?.visible??true;
 
- return <div className="generated"><div className="mode-badge generated-badge">GENERATED MAP MODE</div><div className="preview-controls"><button className={view==='individual'?'active':''} onClick={()=>setView('individual')}>Individual Layer</button><button className={view==='composite'?'active':''} onClick={()=>setView('composite')}>Composite</button><button className={view==='exploded'?'active':''} onClick={()=>setView('exploded')}>Exploded</button>{view==='individual'&&<select value={selected} onChange={e=>{setLayer(+e.target.value);setSelectedId(undefined)}}>{scene.layers.map((item,index)=><option value={index} key={item.id}>{item.name}</option>)}</select>}</div><div className="size-readout">{scene.widthMm.toFixed(3)} × {scene.heightMm.toFixed(3)} mm · {scene.layers.length} panels{occupancy!=null?` · Lake occupancy ${occupancy.toFixed(1)}%`:''}</div>{editable&&!canEditNow&&<p className="edit-hint">Select Individual Layer → Land/Top to edit road labels, place labels, title, subtitle, and compass directly.</p>}
-  <div className={`svg-preview${canEditNow?' editable':''}`} data-preview-mode={view} ref={containerRef} dangerouslySetInnerHTML={{__html:svg}}/>
+ const onWheel=(event:React.WheelEvent)=>{
+  if(!viewportRef.current)return;
+  event.preventDefault();
+  const rect=viewportRef.current.getBoundingClientRect();
+  const pointerX=event.clientX-rect.left,pointerY=event.clientY-rect.top;
+  setViewport(v=>zoomAroundPoint(v,v.zoom*(event.deltaY<0?1.12:1/1.12),pointerX,pointerY));
+ };
+
+ return <div className="generated"><div className="mode-badge generated-badge">GENERATED MAP MODE</div><div className="preview-controls"><button className={view==='individual'?'active':''} onClick={()=>setView('individual')}>Individual Layer</button><button className={view==='composite'?'active':''} onClick={()=>setView('composite')}>Composite</button><button className={view==='exploded'?'active':''} onClick={()=>setView('exploded')}>Exploded</button>{view==='individual'&&<select value={selected} onChange={e=>{setLayer(+e.target.value);setSelectedId(undefined)}}>{scene.layers.map((item,index)=><option value={index} key={item.id}>{item.name}</option>)}</select>}</div>
+  <div className="editor-toolbar"><button onClick={()=>zoomStep(1/1.25)} title="Zoom out">−</button><span className="zoom-readout">{Math.round(viewport.zoom*100)}%</span><button onClick={()=>zoomStep(1.25)} title="Zoom in">+</button><button onClick={fitViewport}>Fit</button><button onClick={resetTo100}>100%</button></div>
+  <div className="size-readout">{scene.widthMm.toFixed(3)} × {scene.heightMm.toFixed(3)} mm · {scene.layers.length} panels{occupancy!=null?` · Lake occupancy ${occupancy.toFixed(1)}%`:''}</div>{editable&&!canEditNow&&<p className="edit-hint">Select Individual Layer → Land/Top to edit road labels, place labels, title, subtitle, and compass directly.</p>}
+  <div className="svg-viewport" ref={viewportRef} onWheel={onWheel}>
+   <div className={`svg-preview${canEditNow?' editable':''}`} data-preview-mode={view} ref={containerRef} style={{transform:cssTransform(viewport)}} dangerouslySetInnerHTML={{__html:svg}}/>
+  </div>
   {canEditNow&&selectedId&&kind&&<div className="object-editor"><b>{kind.replace('-',' ')}</b><small>{selectedId}</small>
    {selectedPose&&<><label>X mm <input type="number" step="0.1" value={selectedPose.x.toFixed(2)} onChange={e=>{const x=+e.target.value;setSelectedPose(p=>p&&{...p,x});onCommitOverride!(p=>setOverride(p,selectedId,{xMm:x}))}}/></label>
    <label>Y mm <input type="number" step="0.1" value={selectedPose.y.toFixed(2)} onChange={e=>{const y=+e.target.value;setSelectedPose(p=>p&&{...p,y});onCommitOverride!(p=>setOverride(p,selectedId,{yMm:y}))}}/></label></>}

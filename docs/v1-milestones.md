@@ -24,8 +24,8 @@ updated as each milestone lands — do not mark something done without a test pr
       sub-segment of each named road; **not** full glyph-by-glyph curve-following (a
       documented simplification, not a gap to silently close later without deciding
       it's worth the complexity)
-- [x] **M13** Generated Map Edit Mode — selectable objects, drag positioning (editor
-      zoom/pan still pending, see M-ZOOM below)
+- [x] **M13** Generated Map Edit Mode — selectable objects, drag positioning, editor
+      zoom/pan (M-LIVE, below)
 - [x] **M14** Title/subtitle/backer
 - [~] **M15** Classic compass rose — three real styles implemented; **no N/E/S/W
       lettering yet** on the rose (real gap)
@@ -47,17 +47,73 @@ updated as each milestone lands — do not mark something done without a test pr
 
 ## New/reordered work this spec calls for that didn't have a milestone number
 
-- [ ] **M-LIVE** Make Controls-sidebar edits (title text, font, sizes, road width,
-      compass size, etc.) update the generated scene live, the same way drag/nudge/
-      hide/flip/reset already do — currently these still require clicking "Generate
-      scene" again. This is the biggest single gap against section 28's "reactive
-      generated map" requirement and should land before markers/keep-out/frame, since
-      those will all need the same live-update path.
-- [ ] **M-ZOOM** Editor zoom/pan independent of geographic zoom (section 29) —
-      currently the generated-map SVG only scales-to-fit via CSS; no independent
-      zoom control or space/middle-drag pan exists.
+- [x] **M-LIVE** (done — this milestone). Controls-sidebar edits (title text/size/font,
+      subtitle, backer mode/padding, compass style/size/rotation/position, road
+      visibility/width, road/place-label visibility/size, physical layer enable/disable)
+      now update the generated scene immediately, without clicking "Generate scene"
+      again. Editor zoom (25%–400%, Fit/100%/±) and pan are implemented, fully
+      independent of geographic zoom and physical export dimensions, and object
+      dragging remains physically correct at any editor zoom level. See "M-LIVE
+      results" below for exactly what's live vs. what still needs Generate, and the
+      architectural changes made.
 - [ ] **M-COLLISION** Generalized keep-out/collision module (section 22), built once
-      and reused by compass (M16), road labels (M19), and later lake-info/frame.
+      and reused by compass (M16), road labels (M19), and later lake-info/frame. Not
+      started — M-LIVE's compass now exposes a stable position/size/rotation state
+      that a future keep-out mask can consume without further rework, but no masking
+      logic exists yet.
+
+### M-LIVE results
+
+**Now live** (no Generate click needed): title text/font/size/visibility, subtitle
+text/font/size/gap/visibility, title backer mode/padding, compass style/size/rotation/
+position (corner presets and custom), road visibility mode (All/Main/Off) and major/
+minor width, road-label visibility/font/size/offset/flip-all, place-label visibility/
+font/size/per-class toggles, and physical layer enable/disable — all update the
+generated preview within ~120ms (a short debounce that coalesces rapid typing/clicking
+into one rebuild rather than one per keystroke). Drag, nudge, per-object hide/flip/
+reset — already live before this milestone — continue to work unchanged.
+
+**Still requires an explicit Generate/"Load visible vector features"**: anything that
+changes *which* geography is being used — search/pan/zoom the geographic map, or
+re-extract features. This is intentional (section 28 of the M-LIVE brief: "Generate
+may still be required" for source changes) and is enforced simply because those
+actions don't go through the live-rebuild path at all.
+
+**Architecture**: `buildScene` (src/export/buildScene.ts) is split into
+`buildGeometryLayers` (the expensive polygon-boolean shoreline/depth work — water
+union, erosion, panel differencing) and `buildPresentationScene` (roads, road/place
+labels, title/subtitle/backer, compass — no polygon booleans, safe to re-run on every
+edit). `buildScene` itself is now a thin wrapper composing the two, so every existing
+caller/test is unaffected. `src/export/geometryCache.ts` provides a pure,
+independently-tested cache keyed on exactly the fields that affect the expensive stage
+(crop, dimensions, shoreline, bathymetry) — anything else (roads.mode/width, labels,
+title, compass, manual overrides) reuses the cached geometry. `App.tsx` holds this
+cache in a `useRef` and lightly debounces (120ms) the Controls-driven rebuild path;
+drag/nudge/reset from the generated-map editor stay undebounced (they already fire
+once per discrete action). Editor viewport state (`src/geometry/scene/viewport.ts`:
+zoom, pan) is deliberately framework-free pure math, lives only as local React state in
+`GeneratedPreview.tsx`, is never part of `MapProject`, and is never passed to any
+`buildScene`/export function — verified by dedicated tests
+(`tests/unit/editorViewportIsolation.test.ts`) proving there is no parameter for it to
+leak through.
+
+**Known limitation**: `enabledLayers` (physical layer toggles) is deliberately included
+in the expensive-stage cache key (it also affects True Bathymetry's automatic threshold
+selection, which does need to change when the enabled count changes), so toggling a
+layer still triggers a fresh `buildGeometryLayers` call rather than a free filter over
+already-computed panels. In practice this remains fast (single-digit milliseconds even
+for complex real lake geometry, per the existing Artistic Depth test suite) and was
+verified live in-browser, but it is not the fully isolated "layer toggle never touches
+geometry" design a future optimization pass could pursue if profiling ever shows it's
+needed.
+
+**Found and fixed during manual verification**: the drag-under-zoom Playwright checks
+initially reported failures at 100%/200% zoom that turned out to be a test-script bug,
+not a product bug — the compass, positioned near the physical top-left corner, was
+legitimately clipped outside the visible viewport at those zoom/pan combinations (the
+same thing would happen to a real user, who would naturally pan before dragging). Fixed
+the test to pan the target into view first; all three zoom levels (50%, 100%, 244%)
+then showed drag deltas matching the expected millimeter conversion to 6 decimal places.
 
 ## V1.0 acceptance checklist (section 50 of the spec, verbatim structure)
 
@@ -105,13 +161,14 @@ Legend: `[x]` implemented + tested · `[~]` partially implemented (see note) · 
 - [ ] Optional lake information
 - [ ] Editable lake information
 - [ ] Draggable lake-information block
-- [~] Live changes after generation — true for drag/nudge/hide/flip/reset; not yet
-      true for sidebar text/select/number-field edits (see M-LIVE)
-- [ ] Generated editor pan
-- [ ] Generated editor zoom
-- [x] Editor zoom does not change physical dimensions (holds by construction — scene
-      geometry is mm-based and independent of any display scale — will stay true once
-      M-ZOOM is implemented)
+- [x] Live changes after generation — drag/nudge/hide/flip/reset AND sidebar text/
+      select/number-field edits (title, compass, roads, labels, layer toggles) now all
+      update immediately; only a genuine geographic/source change still needs Generate
+- [x] Generated editor pan — middle-mouse or left-drag on empty background
+- [x] Generated editor zoom — 25%–400%, wheel-to-cursor, Fit, 100%
+- [x] Editor zoom does not change physical dimensions — verified both architecturally
+      (viewport state is not a parameter of any export function) and by exporting the
+      same project at 50%/100%/200% editor zoom and diffing the resulting SVGs
 - [x] Composite preview
 - [x] Production strip
 - [x] Individual layer preview

@@ -1,6 +1,6 @@
-import type {ExtractedFeatures,FontId,MapProject} from '../types/project';
+import type {BathymetrySourceMetadata,ExtractedFeatures,FontId,MapProject} from '../types/project';
 import {CropProjection} from '../geometry/projection/cropProjection';
-import {buildWaterModel,geometryPath,multiPolygonArea,panelFromWater,validatePanel} from '../geometry/shoreline/polygonEngine';
+import {buildWaterModel,geometryPath,multiPolygonArea,panelFromWater,validatePanel,type WaterModel} from '../geometry/shoreline/polygonEngine';
 import {artisticDepthOpenings,normalizedProductSize,presetOffsets} from '../geometry/shoreline/artisticDepth';
 import {projectRoads} from '../geometry/roads/roads';
 import {projectDepthRegions,selectedThresholds} from '../bathymetry/depthGeometry';
@@ -21,7 +21,24 @@ function requireFont(id:FontId){
  return font;
 }
 
-export function buildScene(project:MapProject,features:ExtractedFeatures):ManufacturingScene{
+// GEOMETRY CHANGE tier (M-LIVE): the expensive part — polygon union/erosion/differencing for
+// every physical panel. Depends only on the crop, physical dimensions, shoreline/bathymetry
+// settings, and the cached extracted features; independent of roads.mode/width, labels, title,
+// and compass, so callers can cache this by that narrower key and skip straight to
+// buildPresentationScene (below) for everything else. Road *strokes* are deliberately NOT added
+// to layer-land here — road projection/filtering is cheap (no polygon booleans) and lives in the
+// presentation tier so that changing roads.mode or width never re-triggers this expensive stage.
+export type GeometryLayers={
+ widthMm:number;
+ heightMm:number;
+ layers:PhysicalLayer[]; // cut-only panels; layer-land's shapes has no road/label/title/compass content yet
+ model:WaterModel;
+ projection:CropProjection;
+ trueDepth:boolean;
+ bathymetrySource?:BathymetrySourceMetadata;
+};
+
+export function buildGeometryLayers(project:MapProject,features:ExtractedFeatures):GeometryLayers{
  if(!project.map.crop)throw new Error('Select a geographic crop before generation');
  if(!features.water.length)throw new Error('No water features found in the selected crop');
  const {widthMm:w,heightMm:h}=project.dimensions,projection=new CropProjection(project.map.crop,w,h),layers:PhysicalLayer[]=[];
@@ -31,13 +48,23 @@ export function buildScene(project:MapProject,features:ExtractedFeatures):Manufa
  const depthIndexes=[1,2,3,4,5].filter(index=>project.shoreline.enabledLayers[index]),thresholds=trueDepth?selectedThresholds(project.bathymetry.dataset!,depthIndexes.length,project.bathymetry.selection,project.bathymetry.thresholdsMeters):[],regions=trueDepth?projectDepthRegions(project.bathymetry.dataset!,model.water,projection,w,h,thresholds):[],depthByIndex=new Map(depthIndexes.map((index,position)=>[index,regions[position]]));
  const normalizedOffsets=presetOffsets(project.shoreline.preset,project.shoreline.artisticOffsetsNormalized??[]),artisticOpenings=trueDepth?[]:artisticDepthOpenings(model.water,normalizedOffsets,w,h,project.shoreline.minArtisticComponentAreaNormalized),artisticByIndex=new Map(artisticOpenings.map((opening,index)=>[index+1,opening]));
  if(!trueDepth){model.metrics.normalizedProductSize=normalizedProductSize(w,h);model.metrics.artisticOffsetsNormalized=normalizedOffsets;model.metrics.artisticOpenings=artisticOpenings.map(opening=>({offsetNormalized:opening.normalizedOffset,areaMm2:opening.areaMm2,components:opening.componentCount,holes:opening.holeCount,vertices:opening.vertexCount,smallestComponentAreaMm2:opening.smallestComponentAreaMm2,largestComponentAreaMm2:opening.largestComponentAreaMm2,rejectedComponents:opening.rejectedComponents,rejectedHoles:opening.rejectedHoles}));model.metrics.rejectedArtisticComponents=artisticOpenings.reduce((sum,opening)=>sum+opening.rejectedComponents,0);model.metrics.rejectedArtisticHoles=artisticOpenings.reduce((sum,opening)=>sum+opening.rejectedHoles,0)}
- const roads=projectRoads(features.roads,projection,project.roads.mode);
  for(let i=0;i<7;i++){if(!project.shoreline.enabledLayers[i])continue;const id=i===0?'layer-land':i===6?'layer-base':`layer-depth-${i+1}`,shapes:Shape[]=[];
   if(i===6)shapes.push({id:`${id}-panel`,operation:'cut',kind:'rect',x:0,y:0,width:w,height:h});
   else{const region=depthByIndex.get(i),artistic=artisticByIndex.get(i),opening=i===0?model.water:trueDepth?region!.geometry:artistic!.geometry,panel=panelFromWater(opening,w,h),label=i===0?'Land':trueDepth?`Depth ${region!.depthMeters} m`:`Artistic Depth ${i}`;validatePanel(panel,w,h,label);model.metrics.openingAreasMm2.push(multiPolygonArea(opening));shapes.push({id:`${id}-panel`,operation:'cut',kind:'path',d:geometryPath(panel)})}
-  if(i===0&&project.roads.mode!=='off')shapes.push(...roads.map((r,j)=>({id:`road-${j}`,operation:'engrave' as const,kind:'path' as const,d:linePath(r.points),group:MAJOR_CLASSES.includes(r.class)?'roads-major':'roads-minor',strokeWidthMm:MAJOR_CLASSES.includes(r.class)?project.roads.majorWidthMm:project.roads.minorWidthMm})));
   const region=depthByIndex.get(i);layers.push({id,name:i===6?'Base / Backer':i===0?'Land / Top':trueDepth?`Depth ${region!.depthMeters.toFixed(2)} m`:`Artistic Depth ${i}`,shapes,...(region?{depthMeters:region.depthMeters}:{})});
  }
+ return{widthMm:w,heightMm:h,layers,model,projection,trueDepth,...(trueDepth?{bathymetrySource:project.bathymetry.dataset!.source}:{})};
+}
+
+// PRESENTATION CHANGE tier (M-LIVE): roads, road labels, place labels, title/subtitle/backer,
+// and compass — no polygon boolean operations, safe to re-run on every keystroke/drag. Takes the
+// (possibly cached) GeometryLayers from buildGeometryLayers and layers presentation content on
+// top without mutating it, so the same cached geometry can be reused across many calls.
+export function buildPresentationScene(project:MapProject,features:ExtractedFeatures,geometry:GeometryLayers):ManufacturingScene{
+ const {widthMm:w,heightMm:h,model,projection,trueDepth,bathymetrySource}=geometry;
+ const roads=projectRoads(features.roads,projection,project.roads.mode);
+ const roadShapes:Shape[]=project.roads.mode==='off'?[]:roads.map((r,j)=>({id:`road-${j}`,operation:'engrave' as const,kind:'path' as const,d:linePath(r.points),group:MAJOR_CLASSES.includes(r.class)?'roads-major':'roads-minor',strokeWidthMm:MAJOR_CLASSES.includes(r.class)?project.roads.majorWidthMm:project.roads.minorWidthMm}));
+ const layers=geometry.layers.map(layer=>layer.id==='layer-land'?{...layer,shapes:[...layer.shapes,...roadShapes]}:layer);
 
  // Every object below is pushed into `objects`, which the SVG serializers already merge onto
  // layer-land only (never intermediate depth layers or Base) — see exportSvg.ts/previewSvg.ts.
@@ -97,5 +124,9 @@ export function buildScene(project:MapProject,features:ExtractedFeatures):Manufa
   }
  }
 
- return{widthMm:w,heightMm:h,layers,objects,geometryMetrics:model.metrics,labelMetrics:{placeLabels:renderedPlaceLabels,roadLabels:renderedRoadLabels,rejectedRoadLabels},depthMode:project.bathymetry.mode,...(trueDepth?{bathymetrySource:project.bathymetry.dataset!.source}:{})};
+ return{widthMm:w,heightMm:h,layers,objects,geometryMetrics:model.metrics,labelMetrics:{placeLabels:renderedPlaceLabels,roadLabels:renderedRoadLabels,rejectedRoadLabels},depthMode:project.bathymetry.mode,...(trueDepth?{bathymetrySource:bathymetrySource!}:{})};
+}
+
+export function buildScene(project:MapProject,features:ExtractedFeatures):ManufacturingScene{
+ return buildPresentationScene(project,features,buildGeometryLayers(project,features));
 }
