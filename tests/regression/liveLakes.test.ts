@@ -1,32 +1,20 @@
 import {describe,expect,it} from 'vitest';
 import * as polygonClipping from 'polygon-clipping';
-import {caldronWater,caldronBbox,highfallsWater,highfallsBbox,noquebayWater,noquebayBbox,windpuddingWater,windpuddingBbox} from '../fixtures/liveLakes';
 import {buildWaterModel,multiPolygonArea,panelFromWater,validatePanel} from '../../src/geometry/shoreline/polygonEngine';
-import {CropProjection,cropFromCorners} from '../../src/geometry/projection/cropProjection';
+import {CropProjection} from '../../src/geometry/projection/cropProjection';
+import {applyCropSnapshot,cropGeographyFromSnapshot,serializeCropSnapshot} from '../../src/geometry/projection/cropSnapshot';
 import {artisticDepthOpenings,ARTISTIC_DEPTH_PRESETS} from '../../src/geometry/shoreline/artisticDepth';
-import type {CropGeography,GeoPolygon} from '../../src/types/project';
+import {defaultProject} from '../../src/state/defaultProject';
+import type {MapProject} from '../../src/types/project';
+import {regressionFixtures,caldronFixture,type RegressionFixture} from '../fixtures/regressionFixtures';
 
 // Real OSM shoreline geometry for the four Artistic Depth reference lakes (Regressions #001-#004),
-// fetched live from Overpass. Unlike the synthetic hexagon used in caldronFalls.ts, this exercises
-// actual branched reservoirs, islands, and narrow flowages against the production pipeline.
+// fetched live from Overpass, framed with an explicit, frozen crop per lake (see regressionFixtures.ts)
+// rather than a padding ratio recomputed at test time. This exercises actual branched reservoirs,
+// islands, and narrow flowages against the production pipeline.
 
-type Bbox = {minLng:number;minLat:number;maxLng:number;maxLat:number};
-
-const cropFor=(bbox:Bbox):CropGeography=>cropFromCorners(
- {lng:bbox.minLng,lat:bbox.maxLat},{lng:bbox.maxLng,lat:bbox.maxLat},
- {lng:bbox.maxLng,lat:bbox.minLat},{lng:bbox.minLng,lat:bbox.minLat},
-);
-
-const physicalSizeFor=(bbox:Bbox)=>{
- const midLat=(bbox.minLat+bbox.maxLat)/2;
- const dLng=(bbox.maxLng-bbox.minLng)*Math.cos(midLat*Math.PI/180);
- const dLat=bbox.maxLat-bbox.minLat;
- const widthMm=300;
- return {widthMm,heightMm:Number((widthMm*dLat/dLng).toFixed(3))};
-};
-
-function buildLake(water:GeoPolygon[],bbox:Bbox){
- const crop=cropFor(bbox),{widthMm,heightMm}=physicalSizeFor(bbox);
+function buildLake(fixture:RegressionFixture){
+ const {water,crop,dimensions:{widthMm,heightMm}}=fixture;
  const projection=new CropProjection(crop,widthMm,heightMm);
  const model=buildWaterModel(water,projection,widthMm,heightMm,{mode:'primary',minAreaMm2:1});
  const offsets=ARTISTIC_DEPTH_PRESETS.normal.normalizedOffsets;
@@ -34,15 +22,8 @@ function buildLake(water:GeoPolygon[],bbox:Bbox){
  return {widthMm,heightMm,model,openings};
 }
 
-const lakes:Array<[string,GeoPolygon[],Bbox]>=[
- ['Caldron Falls Reservoir',caldronWater,caldronBbox],
- ['High Falls Reservoir',highfallsWater,highfallsBbox],
- ['Lake Noquebay',noquebayWater,noquebayBbox],
- ['Wind Pudding Lake',windpuddingWater,windpuddingBbox],
-];
-
-describe.each(lakes)('Regression: %s (real OSM shoreline geometry)',(name,water,bbox)=>{
- const {widthMm,heightMm,model,openings}=buildLake(water,bbox);
+describe.each(regressionFixtures)('Regression: $lake (real OSM shoreline geometry, explicit crop)',(fixture)=>{
+ const {widthMm,heightMm,model,openings}=buildLake(fixture);
 
  it('produces a nonzero, finite original water area',()=>{
   expect(model.metrics.originalWaterAreaMm2).toBeGreaterThan(0);
@@ -98,5 +79,58 @@ describe('Normal preset calibration sanity on real shoreline data',()=>{
   expect(d1).toBeGreaterThanOrEqual(2.7);expect(d1).toBeLessThanOrEqual(3.3);
   expect(d2).toBeGreaterThanOrEqual(8.0);expect(d2).toBeLessThanOrEqual(9.2);
   expect(d3).toBeGreaterThanOrEqual(19.0);expect(d3).toBeLessThanOrEqual(21.5);
+ });
+});
+
+describe('Reference retained-area comparison (lakes with a known target)',()=>{
+ // Informational, not a pass/fail gate on exact percentages — retained-area % is inherently
+ // framing-sensitive (see the crop-sensitivity investigation) and the brief explicitly says not
+ // to fit erosion distance to a target %. These assertions only guard against gross regressions:
+ // a future change should not make an already-close match dramatically worse.
+ it.each(regressionFixtures.filter(f=>f.referenceMetrics))('$lake stays within a generous band of its reference retained %',(fixture)=>{
+  const {model,openings}=buildLake(fixture);
+  const target=[fixture.referenceMetrics!.shallowPct,fixture.referenceMetrics!.midPct,fixture.referenceMetrics!.deepPct];
+  const measured=openings.slice(0,3).map(o=>o.areaMm2/model.metrics.originalWaterAreaMm2*100);
+  measured.forEach((value,index)=>expect(Math.abs(value-target[index])).toBeLessThan(25));
+ });
+});
+
+describe('Regression fixture crop model',()=>{
+ it('stores an explicit, non-degenerate crop per lake rather than deriving one implicitly at test time',()=>{
+  for(const fixture of regressionFixtures){
+   expect(fixture.crop.nw.lat).toBeGreaterThan(fixture.crop.sw.lat);
+   expect(fixture.crop.ne.lng).toBeGreaterThan(fixture.crop.nw.lng);
+   expect(fixture.crop.bbox[2]).toBeGreaterThan(fixture.crop.bbox[0]);
+   expect(fixture.crop.bbox[3]).toBeGreaterThan(fixture.crop.bbox[1]);
+   expect(fixture.dimensions.widthMm).toBeGreaterThan(0);
+   expect(fixture.dimensions.heightMm).toBeGreaterThan(0);
+  }
+ });
+
+ it('Caldron Falls specifically carries its documented reference metrics and sweep provenance note',()=>{
+  expect(caldronFixture.referenceMetrics).toEqual({shallowPct:72,midPct:52,deepPct:24});
+  expect(caldronFixture.note.length).toBeGreaterThan(0);
+ });
+});
+
+describe('Debug crop serialization does not alter the geometry engine',()=>{
+ it('produces byte-identical opening geometry whether the crop comes directly from the fixture or via a serialize/apply round trip',()=>{
+  const project:MapProject={...defaultProject,map:{...defaultProject.map,crop:caldronFixture.crop},dimensions:{...defaultProject.dimensions,...caldronFixture.dimensions}};
+  const snapshot=serializeCropSnapshot(project);
+  const restoredCrop=cropGeographyFromSnapshot(snapshot);
+  const direct=buildLake(caldronFixture);
+  const viaSnapshot=buildLake({...caldronFixture,crop:restoredCrop});
+  expect(viaSnapshot.model.metrics.originalWaterAreaMm2).toBe(direct.model.metrics.originalWaterAreaMm2);
+  expect(viaSnapshot.openings.map(o=>o.areaMm2)).toEqual(direct.openings.map(o=>o.areaMm2));
+  expect(viaSnapshot.openings.map(o=>o.geometry)).toEqual(direct.openings.map(o=>o.geometry));
+ });
+
+ it('applying a crop snapshot to a fresh project reproduces the same downstream engine output',()=>{
+  const project:MapProject={...defaultProject,map:{...defaultProject.map,crop:caldronFixture.crop},dimensions:{...defaultProject.dimensions,...caldronFixture.dimensions}};
+  const snapshot=serializeCropSnapshot(project);
+  const restoredProject=applyCropSnapshot({...defaultProject,map:{...defaultProject.map,crop:undefined}},snapshot);
+  const direct=buildLake(caldronFixture);
+  const viaRestoredProject=buildLake({...caldronFixture,crop:restoredProject.map.crop!,dimensions:restoredProject.dimensions});
+  expect(viaRestoredProject.model.metrics.originalWaterAreaMm2).toBe(direct.model.metrics.originalWaterAreaMm2);
  });
 });

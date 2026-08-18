@@ -19,6 +19,19 @@ const ringArea=(ring:RingMm)=>Math.abs(signedArea(ring));
 export const polygonArea=(polygon:PolygonMm)=>Math.max(0,ringArea(polygon[0]??[])-polygon.slice(1).reduce((sum,ring)=>sum+ringArea(ring),0));
 export const multiPolygonArea=(geometry:MultiPolygonMm)=>geometry.reduce((sum,polygon)=>sum+polygonArea(polygon),0);
 
+// Framing diagnostics: how much of the physical crop the selected water actually occupies.
+// Retained-area percentages after erosion are extremely sensitive to this — the same normalized
+// offsets remove proportionally more of a lake that occupies less of the crop. Report both the
+// area-based and bounding-box-based occupancy since they answer slightly different questions
+// (fraction of the page that is water vs. how tightly the crop is framed around the lake).
+export const waterAreaOccupancy=(waterAreaMm2:number,widthMm:number,heightMm:number)=>waterAreaMm2/(widthMm*heightMm);
+export function waterBoundingBoxOccupancy(water:MultiPolygonMm,widthMm:number,heightMm:number):number{
+ if(!water.length)return 0;
+ let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+ for(const polygon of water)for(const ring of polygon)for(const [x,y] of ring){if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y}
+ return(maxX-minX)*(maxY-minY)/(widthMm*heightMm);
+}
+
 function cleanRing(points:PointMm[]):RingMm|undefined{
  const ring:RingMm=[];
  for(const p of points){const pair:[number,number]=[p.x,p.y];if(!finite(pair)||ring.length&&same(ring.at(-1)!,pair))continue;ring.push(pair)}
