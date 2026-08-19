@@ -6,8 +6,8 @@ import type {MapProject} from '../../types/project';
 import {resetOverrideFields,screenDeltaToMm,setOverride} from '../../geometry/scene/overrides';
 import {centeredViewport,cssTransform,fitZoom,panBy,zoomAroundPoint,type EditorViewport} from '../../geometry/scene/viewport';
 
-type ObjectKind='title'|'subtitle'|'compass'|'place-label'|'road-label';
-const kindOf=(objectId:string):ObjectKind=>objectId==='title'?'title':objectId==='subtitle'?'subtitle':objectId==='compass'?'compass':objectId.startsWith('place-')?'place-label':'road-label';
+type ObjectKind='title'|'subtitle'|'compass'|'place-label'|'road-label'|'marker';
+const kindOf=(objectId:string):ObjectKind=>objectId==='title'?'title':objectId==='subtitle'?'subtitle':objectId==='compass'?'compass':objectId.startsWith('place-')?'place-label':objectId.startsWith('marker-')?'marker':'road-label';
 const parseTransform=(transform:string|null)=>{const t=/translate\(([-\d.]+)[ ,]+([-\d.]+)\)/.exec(transform??''),r=/rotate\(([-\d.]+)/.exec(transform??'');return{x:t?+t[1]:0,y:t?+t[2]:0,rotation:r?+r[1]:0}};
 const MOVE_THRESHOLD_MM=.05;
 
@@ -160,7 +160,7 @@ export function GeneratedPreview({scene,featuresLoaded=false,project,onCommitOve
   {canEditNow&&selectedId&&kind&&<div className="object-editor"><b>{kind.replace('-',' ')}</b><small>{selectedId}</small>
    {selectedPose&&<><label>X mm <input type="number" step="0.1" value={selectedPose.x.toFixed(2)} onChange={e=>{const x=+e.target.value;setSelectedPose(p=>p&&{...p,x});onCommitOverride!(p=>setOverride(p,selectedId,{xMm:x}))}}/></label>
    <label>Y mm <input type="number" step="0.1" value={selectedPose.y.toFixed(2)} onChange={e=>{const y=+e.target.value;setSelectedPose(p=>p&&{...p,y});onCommitOverride!(p=>setOverride(p,selectedId,{yMm:y}))}}/></label></>}
-   {(kind==='compass'||kind==='title'||kind==='subtitle')&&selectedPose&&<label>Rotation ° <input type="number" step="1" value={selectedPose.rotation.toFixed(0)} onChange={e=>setRotation(+e.target.value)}/></label>}
+   {(kind==='compass'||kind==='title'||kind==='subtitle'||kind==='marker')&&selectedPose&&<label>Rotation ° <input type="number" step="1" value={selectedPose.rotation.toFixed(0)} onChange={e=>setRotation(+e.target.value)}/></label>}
    <div className="nudge-row"><span>Nudge</span><button onClick={()=>nudge(0,-1)}>↑1</button><button onClick={()=>nudge(0,1)}>↓1</button><button onClick={()=>nudge(-1,0)}>←1</button><button onClick={()=>nudge(1,0)}>→1</button><button onClick={()=>nudge(0,-.25)}>↑.25</button><button onClick={()=>nudge(0,.25)}>↓.25</button></div>
    <label><input type="checkbox" checked={currentlyVisible} onChange={e=>toggleVisible(e.target.checked)}/> Visible</label>
    {kind==='road-label'&&<button onClick={toggleFlip}>Flip Side</button>}

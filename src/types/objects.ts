@@ -57,29 +57,20 @@ export type CompassObject=MapProject['compass'];
 
 // ---- Brand new types for not-yet-implemented milestones ----
 
-export type MarkerStyle='pin'|'star'|'heart'|'house'|'cabin'|'campfire'|'fish'|'boat'|'anchor'|'crosshair'|'circle'|'diamond'|'flag'|'custom';
-
-export type MapMarker={
- id:string;
- style:MarkerStyle;
- customSvgPath?:string; // only meaningful when style === 'custom'
- address?:string; // the geocoded search text, kept for display/re-lookup, not re-parsed
- lat:number;
- lng:number;
- // True projected position (from the canonical CropProjection, same pipeline as every other
- // feature) — always recomputed from lat/lng, never hand-edited. Reset restores xMm/yMm to
- // exactly this pair.
- projectedXMm:number;
- projectedYMm:number;
- xMm:number;
- yMm:number;
- rotationDeg:number;
- sizeMm:number;
- operation:'cut'|'engrave';
- label?:string;
- showLabel:boolean;
- visible:boolean;
-};
+// ---- Markers (M-MARKERS: landed) ----
+// MapProject['markers'][number] is the real, wired-in shape — this is a stable alias, the same
+// pattern CompassObject above uses. Two differences from this file's original sketch, both because
+// the real implementation reuses architecture that already existed rather than inventing a
+// marker-specific one: (1) no projectedXMm/projectedYMm/xMm/yMm fields — the projected position is
+// recomputed every scene build from lat/lng via the shared CropProjection (geometry/scene/
+// markers.ts), and manual drag position lives in MapProject.overrides[marker.id], the same
+// ObjectOverride/resolvePlacement mechanism every other draggable object uses; (2) no 'custom'
+// MarkerType/customSvgPath yet — the marker registry (geometry/scene/markerRegistry.ts) is
+// factory-based specifically so a future CUSTOM_SVG type can be added without touching UI/export
+// switch statements, but no UI for uploading one exists yet (out of scope; see
+// docs/v1-milestones.md).
+export type MarkerType=MapProject['markers'][number]['markerType'];
+export type MapMarker=MapProject['markers'][number];
 
 export type LakeInfoField='name'|'county'|'state'|'acreage'|'maxDepthFt'|'shorelineLengthMi'|'elevationFt'|'lakeType';
 

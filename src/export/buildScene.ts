@@ -8,7 +8,9 @@ import {resolvePlacement} from '../geometry/scene/overrides';
 import {buildPlaceLabelObjects} from '../geometry/scene/placeLabels';
 import {buildRoadLabelCandidates,resolveRoadLabelObject} from '../geometry/scene/roadLabels';
 import {classicRoseGeometry,compassFootprintRadiusMm,compassPathData} from '../geometry/scene/compass';
-import {clipPolylineAgainstCircles,pointInsideAnyCircle,type Circle} from '../geometry/scene/keepOut';
+import {clipPolylineAgainstCircles,keepOutFootprint,pointInsideAnyCircle,type KeepOutRegion} from '../geometry/scene/keepOut';
+import {buildMarkerSceneObjects} from '../geometry/scene/markers';
+import {markerDefinition,markerFootprintRadiusMm,markerPathData} from '../geometry/scene/markerRegistry';
 import {titleBackerPath} from '../geometry/scene/titleBacker';
 import {getLoadedFont} from '../text/fontRegistry';
 import {textPathData} from '../text/textVector';
@@ -65,20 +67,34 @@ export function buildPresentationScene(project:MapProject,features:ExtractedFeat
  const {widthMm:w,heightMm:h,model,projection,trueDepth,bathymetrySource}=geometry;
  const roads=projectRoads(features.roads,projection,project.roads.mode);
 
- // Compass keep-out (M-COMPASS): resolved before roads/labels become shapes, so engraving
- // geometry can clear around the compass live. This never mutates `roads`/`features.places` (the
- // source geometry) — only which *shapes* get pushed into `objects`/`layer-land` differs, exactly
- // like every other presentation-tier edit in this function. Moving the compass, resizing it,
- // adjusting clearance, or turning it off simply changes `keepOutCircles` on the next call, which
- // is why previously-suppressed geometry always comes back — there is no separate "restore" step,
- // because nothing was ever deleted from the source in the first place.
+ // Keep-out (M-COMPASS, extended in M-MARKERS): resolved before roads/labels become shapes, so
+ // engraving geometry can clear around the compass and any keep-out-enabled marker live. This
+ // never mutates `roads`/`features.places` (the source geometry) — only which *shapes* get pushed
+ // into `objects`/`layer-land` differs, exactly like every other presentation-tier edit in this
+ // function. Moving/resizing/disabling a region simply changes `keepOutRegions` on the next call,
+ // which is why previously-suppressed geometry always comes back — there is no separate "restore"
+ // step, because nothing was ever deleted from the source in the first place.
+ //
+ // KeepOutRegion.affects is what actually distinguishes the two kinds of region: the compass
+ // clears roads AND labels (its long-standing M-COMPASS behavior, unchanged here), while a marker's
+ // optional keep-out only clears road engraving — per the M-MARKERS brief's explicit scope
+ // reduction ("apply keep-out only to road engraving for now" if label collisions add too much
+ // scope). This is the generalized KeepOutRegion system's first second consumer.
+ const markerObjects=buildMarkerSceneObjects(project.markers,projection,w,h,project.overrides);
  const compassPlacement=project.compass.position!=='off'?resolvePlacement({xMm:project.compass.xMm,yMm:project.compass.yMm,rotationDeg:project.compass.rotationDeg},project.overrides.compass):undefined;
- const keepOutCircles:Circle[]=compassPlacement?.visible?[{cx:compassPlacement.xMm,cy:compassPlacement.yMm,r:compassFootprintRadiusMm(project.compass.style,project.compass.sizeMm)+Math.max(0,project.compass.keepOutPaddingMm)}]:[];
+ const keepOutRegions:KeepOutRegion[]=[];
+ if(compassPlacement?.visible)keepOutRegions.push(keepOutFootprint('compass-keepout','compass',compassPlacement.xMm,compassPlacement.yMm,compassFootprintRadiusMm(project.compass.style,project.compass.sizeMm),project.compass.keepOutPaddingMm,['roads-major','roads-minor','road-labels','place-labels']));
+ for(const m of markerObjects){
+  if(m.visible&&m.marker.keepOutEnabled)keepOutRegions.push(keepOutFootprint(`marker-keepout-${m.id}`,m.id,m.xMm,m.yMm,markerFootprintRadiusMm(Math.max(m.marker.sizeMm,markerDefinition(m.marker.markerType).minimumSizeMm)),m.marker.keepOutPaddingMm,['roads-major','roads-minor']));
+ }
+ const roadCircles=keepOutRegions.filter(r=>r.affects.includes('roads-major')||r.affects.includes('roads-minor')).flatMap(r=>r.circles);
+ const roadLabelCircles=keepOutRegions.filter(r=>r.affects.includes('road-labels')).flatMap(r=>r.circles);
+ const placeLabelCircles=keepOutRegions.filter(r=>r.affects.includes('place-labels')).flatMap(r=>r.circles);
  const labelExtraRadiusMm=(widthMm:number,sizeMm:number)=>widthMm+sizeMm/2; // conservative: covers the full text run plus half a letter-height, so a label is suppressed whenever any part of it could plausibly overlap, never half-clipped (per the brief's explicit preference)
 
  const roadShapes:Shape[]=project.roads.mode==='off'?[]:roads.flatMap((r,j)=>{
   const group=MAJOR_CLASSES.includes(r.class)?'roads-major':'roads-minor',strokeWidthMm=MAJOR_CLASSES.includes(r.class)?project.roads.majorWidthMm:project.roads.minorWidthMm;
-  const segments=keepOutCircles.length?clipPolylineAgainstCircles(r.points,keepOutCircles):(r.points.length>1?[r.points]:[]);
+  const segments=roadCircles.length?clipPolylineAgainstCircles(r.points,roadCircles):(r.points.length>1?[r.points]:[]);
   return segments.map((points,k):Shape=>({id:`road-${j}-${k}`,operation:'engrave',kind:'path',d:linePath(points),group,strokeWidthMm}));
  });
  const layers=geometry.layers.map(layer=>layer.id==='layer-land'?{...layer,shapes:[...layer.shapes,...roadShapes]}:layer);
@@ -94,7 +110,7 @@ export function buildPresentationScene(project:MapProject,features:ExtractedFeat
   for(const label of placeLabelObjects){
    if(!label.visible)continue;
    const {d,widthMm}=textPathData(font,label.name,project.placeLabels.sizeMm,'left');
-   if(pointInsideAnyCircle({x:label.xMm,y:label.yMm},keepOutCircles,labelExtraRadiusMm(widthMm,project.placeLabels.sizeMm)))continue; // suppressed whole, never half-clipped
+   if(pointInsideAnyCircle({x:label.xMm,y:label.yMm},placeLabelCircles,labelExtraRadiusMm(widthMm,project.placeLabels.sizeMm)))continue; // suppressed whole, never half-clipped
    objects.push({id:label.id,operation:'engrave',kind:'path',d,transform:`translate(${label.xMm} ${label.yMm}) rotate(0)`,group:'place-labels',objectId:label.id});
    renderedPlaceLabels++;
   }
@@ -109,7 +125,7 @@ export function buildPresentationScene(project:MapProject,features:ExtractedFeat
     if(!label.visible)continue;
     const {d,widthMm}=textPathData(font,label.name,project.roadLabels.sizeMm,'center');
     if(widthMm>label.segmentLengthMm*.92){rejectedRoadLabels++;continue} // reject labels that don't fit
-    if(pointInsideAnyCircle({x:label.xMm,y:label.yMm},keepOutCircles,labelExtraRadiusMm(widthMm,project.roadLabels.sizeMm)))continue; // suppressed whole, never half-clipped
+    if(pointInsideAnyCircle({x:label.xMm,y:label.yMm},roadLabelCircles,labelExtraRadiusMm(widthMm,project.roadLabels.sizeMm)))continue; // suppressed whole, never half-clipped
     objects.push({id:label.id,operation:'engrave',kind:'path',d,transform:`translate(${label.xMm} ${label.yMm}) rotate(${label.tangentAngleDeg})`,group:'road-labels',objectId:label.id});
     renderedRoadLabels++;
    }
@@ -159,6 +175,33 @@ export function buildPresentationScene(project:MapProject,features:ExtractedFeat
   }else{
    const d=compassPathData(project.compass.style,project.compass.sizeMm);
    objects.push({id:'compass',operation:'engrave',kind:'path',d,transform,group:'compass',objectId:'compass'});
+  }
+ }
+
+ // Markers (M-MARKERS): each visible, geocoded marker pushes its glyph (operation-appropriate
+ // group: 'markers-cut' or 'markers-engrave') and, if it has a label, a *separate* Shape sharing
+ // the same objectId — the same "two Shapes, one objectId" pattern title/title-backer already use.
+ // Deliberately not combined into one path like the compass's classic-rose: the label must stay
+ // upright (rotate 0) even when the marker glyph itself is rotated for orientation (a boat/flag
+ // pointing a direction), and baking that counter-rotation into a shared transform would need
+ // per-point path rotation math for no real benefit here — the accepted cost is the same one
+ // title+backer already has (the second shape doesn't visibly follow a live drag/rotate until
+ // release, when the override-driven re-render catches it up). hitRadiusMm gives the glyph an
+ // invisible, editor-only click target (previewSvg.ts only; exportSvg.ts never reads it) since a
+ // hollow/thin marker outline would otherwise be hard to grab by its bounding-box interior — same
+ // reasoning as the M-COMPASS classic-rose ring.
+ for(const m of markerObjects){
+  if(!m.visible)continue;
+  const sizeMm=Math.max(m.marker.sizeMm,markerDefinition(m.marker.markerType).minimumSizeMm);
+  const radiusMm=markerFootprintRadiusMm(sizeMm);
+  const d=markerPathData(m.marker.markerType,sizeMm);
+  const group=m.marker.operation==='cut'?'markers-cut':'markers-engrave';
+  objects.push({id:m.id,operation:m.marker.operation,kind:'path',d,transform:`translate(${m.xMm} ${m.yMm}) rotate(${m.rotationDeg})`,group,objectId:m.id,hitRadiusMm:radiusMm*1.15});
+  if(m.marker.showLabel&&m.marker.label){
+   const font=requireFont('inter');
+   const {d:labelD}=textPathData(font,m.marker.label,m.marker.labelSizeMm,'center');
+   const labelYMm=m.yMm+radiusMm+m.marker.labelSizeMm*.9+1.5;
+   objects.push({id:`${m.id}-label`,operation:'engrave',kind:'path',d:labelD,transform:`translate(${m.xMm} ${labelYMm}) rotate(0)`,group:'marker-labels',objectId:m.id});
   }
  }
 

@@ -8,7 +8,9 @@ updated as each milestone lands — do not mark something done without a test pr
 ## Milestones 1–19 (already substantially complete)
 
 - [x] **M1** Repository + application shell + Docker
-- [x] **M2** MapLibre map viewer + location search (Photon; Nominatim fallback pending)
+- [x] **M2** MapLibre map viewer + location search (Photon; Nominatim fallback now exists
+      as `FallbackGeocoder`, used by markers — see M-MARKERS results — the main Location
+      search still uses Photon directly, unchanged, to avoid touching working code)
 - [x] **M3** Physical dimensions + geographic crop/aspect ratio
 - [x] **M4** Canonical geographic → mm projection — isotropy verified by dedicated tests
 - [x] **M5** Water/road/place feature extraction
@@ -31,7 +33,7 @@ updated as each milestone lands — do not mark something done without a test pr
       **Classic Rose** (outer ring, 8-point star, strong center boss, real vector
       N/E/S/W lettering) — see "M-COMPASS results" below
 - [x] **M16** Dynamic compass keep-out geometry — see "M-COMPASS results" below
-- [ ] **M17** Address markers — not started
+- [x] **M17** Address markers — see "M-MARKERS results" below
 - [x] **M18** Draggable place and road labels
 - [ ] **M19** Road-label candidate scoring / collision avoidance — not started (current
       placement is deterministic, not scored against other objects)
@@ -62,9 +64,12 @@ updated as each milestone lands — do not mark something done without a test pr
       not hard-coded to the compass; a future title/lake-info/marker keep-out is
       "call `keepOutFootprint(...)` and pass the result into the same
       `clipPolylineAgainstCircles`/`pointInsideAnyCircle` functions", not a new engine.
-      Only the compass actively produces a region today.
-- [x] **M-COMPASS** Classic Rose style + dynamic, non-destructive keep-out (done —
-      this milestone). See "M-COMPASS results" below.
+      Compass and (optionally) markers both produce regions now — see "M-MARKERS
+      results" below for the second consumer.
+- [x] **M-COMPASS** Classic Rose style + dynamic, non-destructive keep-out (done). See
+      "M-COMPASS results" below.
+- [x] **M-MARKERS** Address/location markers (done — this milestone). See "M-MARKERS
+      results" below.
 
 ### M-LIVE results
 
@@ -201,6 +206,113 @@ it does not attempt to route roads *around* the compass along a path, only to re
 overlapping segment. Only the compass produces a `KeepOutRegion` today; wiring
 title/lake-info/markers into the same system is future work the types already support.
 
+### M-MARKERS results
+
+**State model** (`MapProject.markers: MapMarker[]`, `src/types/project.ts`): each marker
+has a stable `id` (`marker-${crypto.randomUUID()}`, assigned once at creation — never a
+derived array index), optional `address`/`lat`/`lng` (undefined until geocoded), a
+`markerType`, `sizeMm`/`rotationDeg`, optional `label`/`showLabel`/`labelSizeMm`,
+`visible`, `operation` (`'engrave'|'cut'`), and `keepOutEnabled`/`keepOutPaddingMm`.
+
+**Geographic anchor vs. artistic offset** (the milestone's central requirement): a
+marker's `lat`/`lng` is its permanent, never-rewritten identity. The projected physical
+position is *not* stored — `buildMarkerSceneObjects()` (`src/geometry/scene/markers.ts`)
+recomputes it on every scene build by calling the same `CropProjection` every other
+geographic feature uses, exactly like `buildPlaceLabelObjects` already does for places.
+Manual drag position reuses the *existing* `ObjectOverride`/`resolvePlacement` mechanism
+(`overrides[marker.id]`) that title/compass/labels already have — there is no separate
+`offsetXMm`/`offsetYMm` field. This means "Reset to Exact Address" is exactly
+`resetOverrideFields(project, marker.id)`, the same Reset every other object type uses,
+and dragging a marker provably never touches `lat`/`lng` (see
+`tests/unit/markers.test.ts`). A side effect of always recomputing rather than caching:
+a marker survives geographic regeneration (a new crop/dimensions) automatically,
+reprojected fresh — nothing needed to "detect regeneration and recalculate."
+
+**Geocoding**: `FallbackGeocoder` (`src/map/geocoding/GeocoderService.ts`, new) tries
+Photon first, falls back to a new `NominatimGeocoder` only on an outright failure or a
+genuinely empty result set (an empty result from provider #1 does *not* get retried as
+an error — it's treated as "provider #1 says not found," and only escalates to provider
+#2). Used only for marker search; the main Location search still calls `PhotonGeocoder`
+directly, unchanged. Zero or ambiguous (multiple) results are never silently resolved:
+zero shows "Not Found"; more than one shows a picklist (reusing the same `.results`
+list UI pattern as the main Location search) for the user to disambiguate.
+
+**Marker registry** (`src/geometry/scene/markerRegistry.ts`, new): a `MarkerDefinition`
+factory array (`MARKER_REGISTRY`), not a switch statement — `markerDefinition(type)`/
+`markerPathData(type, sizeMm)` are the only entry points UI and export code call. All 13
+V1 types from the brief are implemented (pin, star, heart, house, cabin, campfire, fish,
+boat, anchor, crosshair, circle, diamond, flag), each centered at local (0,0) with
+`sizeMm` as the shared bounding-height convention (matching compass.ts's `h=sizeMm/2`),
+so drag/rotate/keep-out math never needs per-type special-casing. Adding a future
+`CUSTOM_SVG` type means adding one more registry entry, not touching UI or export code.
+An unrecognized type falls back to the first registered definition rather than throwing
+— the same "never silently lose a scene object" philosophy used elsewhere in this
+codebase.
+
+**Rendering** (`buildScene.ts`): each visible, geocoded marker pushes its glyph into
+`markers-engrave` or `markers-cut` (by `operation`), and — if it has a label — a
+*separate* Shape into `marker-labels`, both sharing the marker's `objectId` so the
+existing single-selection drag code treats them as one editable object. This is the same
+"two Shapes, one objectId" pattern title/title-backer already use, not a new one; the
+label is deliberately its own Shape (not combined into the glyph's path like the
+compass's classic-rose sub-shapes are) because the label must stay upright
+(`rotate(0)`) even when the glyph itself is rotated for orientation — baking that
+counter-rotation into one shared transform would need per-point path rotation, for no
+real benefit here. The accepted cost is the same one title+backer already has: the
+second shape doesn't visibly follow a live drag/rotate gesture until release, when the
+override-driven re-render catches it up (see "Known limitations").
+
+**Editor-only hit area**: `Shape.hitRadiusMm` (new, `src/export/scene.ts`) — when set,
+`previewSvg.ts` renders an additional invisible `fill="transparent"` circle so a
+hollow/thin marker outline (e.g. Map Pin's circular head, rendered as a stroke like
+every other engrave shape in this app) is easy to click anywhere within its footprint,
+not just exactly on the visible stroke. `exportSvg.ts` never reads `hitRadiusMm`, so it
+is structurally impossible for it to reach manufacturing output.
+
+**Optional keep-out**: a marker with `keepOutEnabled` produces a `KeepOutRegion` scoped
+to `['roads-major', 'roads-minor']` only (not labels), per the brief's explicit scope
+reduction — this is the generalized `KeepOutRegion` system's first second consumer after
+the compass, which is why `buildScene.ts` was refactored from a single flat keep-out
+circle list into per-`KeepOutTarget` circle lists (`roadCircles`/`roadLabelCircles`/
+`placeLabelCircles`), filtered from `KeepOutRegion.affects` — the compass's own
+behavior (roads + both label types) is unchanged and still fully test-covered.
+
+**Operation modes / SVG groups**: `markers-engrave`, `markers-cut`, and `marker-labels`
+are named export groups, added to `exportSvg.ts`'s `GROUP_ORDER`. A cut marker never
+merges into road/land engraving groups (operation-based split, same as every other
+shape type). Markers are pushed into `scene.objects`, which the SVG serializers already
+merge onto `layer-land` only — the same mechanism that already keeps title/compass/
+labels off the depth/base panels — so "land/top panel only" needed no new code.
+
+**Outside-bounds handling**: `markerGeographicStatus(project, marker)` (pure function,
+reuses the shared `CropProjection` — not a duplicate of the projection math) lets
+Controls.tsx show "Address is outside the current map area." immediately after
+geocoding, before Generate. The marker is always kept (never silently deleted or
+rejected) — only warned about, matching the brief's "Keep Address" default. Explicit
+"Reposition Map" tooling was scoped out (see Known limitations).
+
+**Found and fixed during manual verification**: identical to the M-COMPASS finding but
+for a new object type — Map Pin's stroke-only circular head is hollow at its visual
+center, so a Playwright click at the marker's exact bounding-box center misses (same
+root cause, same fix: probe for a real hit point via `elementFromPoint` before
+dragging). Also found and fixed in the *test script* (not the product): an address that
+geocodes to a real place several kilometers outside the currently generated crop is
+correctly kept off-screen and flagged "outside the current map area" — exactly as
+designed — which meant an early verification script's marker (geocoded to a real but
+distant town) was never reachable by any reasonable amount of panning; switched the
+script to an address inside the generated area.
+
+**Known limitations**: no independent marker-label dragging — the label always follows
+the marker at a fixed default offset (explicitly permitted by the brief, "leave
+independent marker-label dragging for the later label-edit milestone"). No per-marker
+font selection (hardcoded to Inter, matching the same decision already made for compass
+letters). No "Reposition Map" action from the outside-bounds warning (only the warning
+itself + "Keep Address" as the implicit default — no map bounds are ever silently
+altered). No custom SVG marker upload (the registry/factory architecture is
+future-compatible with it; no UI exists). The marker glyph and its label share one
+`objectId` but are two Shapes, so — like title+backer already — the label doesn't
+visibly track a live drag/rotate gesture until release.
+
 ## V1.0 acceptance checklist (section 50 of the spec, verbatim structure)
 
 Legend: `[x]` implemented + tested · `[~]` partially implemented (see note) · `[ ]` not started
@@ -239,11 +351,11 @@ Legend: `[x]` implemented + tested · `[~]` partially implemented (see note) · 
 - [x] Compass keep-out / vector knockout
 - [x] Engraving restores when compass moves (no separate restore step needed — see
       "M-COMPASS results")
-- [ ] Address geocoding marker
-- [ ] Multiple markers
-- [ ] Selectable marker symbols
-- [ ] Marker drag
-- [ ] Marker reset to true address
+- [x] Address geocoding marker
+- [x] Multiple markers
+- [x] Selectable marker symbols
+- [x] Marker drag
+- [x] Marker reset to true address
 - [ ] Frame/artwork inset in exact physical units
 - [ ] Safe area guide
 - [ ] Optional lake information

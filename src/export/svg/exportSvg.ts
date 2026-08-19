@@ -9,7 +9,7 @@ const shapeXml=(s:Shape)=>s.kind==='rect'?`<rect id="${s.id}" x="${s.x}" y="${s.
 // order) rather than being silently dropped — this list documents the expected set, it is not a
 // filter, so a future object type can never lose its geometry just because nobody remembered to add
 // its group name here.
-const GROUP_ORDER=['roads-major','roads-minor','road-labels','place-labels','title','title-backer','subtitle','compass'];
+const GROUP_ORDER=['roads-major','roads-minor','road-labels','place-labels','title','title-backer','subtitle','compass','markers-engrave','markers-cut','marker-labels'];
 function groupedXml(shapes:Shape[]):string{
  const grouped=shapes.filter(s=>s.group),ungrouped=shapes.filter(s=>!s.group);
  const groupNames=[...GROUP_ORDER.filter(g=>grouped.some(s=>s.group===g)),...new Set(grouped.map(s=>s.group!).filter(g=>!GROUP_ORDER.includes(g)))];

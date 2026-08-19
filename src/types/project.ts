@@ -14,6 +14,36 @@ export type ExtractedFeatures = { water:GeoPolygon[]; roads:GeoLine[]; places:Ge
 
 export type FontId='inter'|'cinzel'|'great-vibes';
 
+export type MarkerType='pin'|'star'|'heart'|'house'|'cabin'|'campfire'|'fish'|'boat'|'anchor'|'crosshair'|'circle'|'diamond'|'flag';
+
+// lat/lng are the true, permanent geographic identity of a marker (undefined until geocoded, or
+// for a marker added directly by dragging with no address yet). The projected physical position
+// is deliberately NOT stored here — it is recomputed on every scene build from lat/lng through the
+// same CropProjection every other geographic feature uses (see geometry/scene/markers.ts), so a
+// marker survives a crop/dimension regeneration without going stale, and reprojecting never
+// requires special-case "recalculate markers" code. Manual drag position lives in
+// MapProject.overrides[marker.id] (the same ObjectOverride/resolvePlacement mechanism title/
+// compass/labels already use) rather than an offsetXMm/offsetYMm pair on the marker itself — the
+// override's absence *is* "at the exact geocoded position", and deleting it (Reset) is exactly the
+// existing resetOverrideFields, so dragging a marker changes nothing about lat/lng, matching the
+// "true location vs artistic offset" requirement with no new mechanism.
+export type MapMarker={
+ id:string; // stable across reorders/deletes — never a derived array index
+ address?:string;
+ lat?:number;
+ lng?:number;
+ markerType:MarkerType;
+ sizeMm:number;
+ rotationDeg:number;
+ label?:string;
+ showLabel:boolean;
+ labelSizeMm:number;
+ visible:boolean;
+ operation:'engrave'|'cut';
+ keepOutEnabled:boolean;
+ keepOutPaddingMm:number;
+};
+
 // A per-object manual edit layered on top of that object's generated/default placement. Absent
 // fields fall back to the default; deleting an object's entry (or clearing a field) is "Reset" for
 // that field. Object ids: 'title', 'subtitle', 'compass', `place-${GeoPlace.id}`,
@@ -39,4 +69,5 @@ export interface MapProject {
  subtitle:{text:string;font:FontId;sizeMm:number;xMm:number;yMm:number;visible:boolean;gapMm:number};
  exportSettings:{layout:ExportLayout;panelGapMm:number;annotations:boolean};
  overrides:Record<string,ObjectOverride>;
+ markers:MapMarker[];
 }
