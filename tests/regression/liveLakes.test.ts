@@ -80,6 +80,11 @@ describe('Normal preset calibration sanity on real shoreline data',()=>{
   expect(d2).toBeGreaterThanOrEqual(8.0);expect(d2).toBeLessThanOrEqual(9.2);
   expect(d3).toBeGreaterThanOrEqual(19.0);expect(d3).toBeLessThanOrEqual(21.5);
  });
+ it.each(regressionFixtures)('$lake keeps six distinct positive opening stages before Base',(fixture)=>{
+  const {model,openings}=buildLake(fixture),areas=[model.metrics.originalWaterAreaMm2,...openings.map(o=>o.areaMm2)];
+  expect(openings.at(-1)!.areaMm2).toBeGreaterThan(.01);
+  for(let i=1;i<areas.length;i++)expect(areas[i]).toBeLessThan(areas[i-1]);
+ });
 });
 
 describe('Reference retained-area comparison (lakes with a known target)',()=>{

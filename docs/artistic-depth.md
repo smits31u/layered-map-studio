@@ -10,10 +10,12 @@ normalizedHeight = 500 × physicalHeightMm / physicalWidthMm
 physicalOffsetMm = normalizedOffset × physicalWidthMm / 500
 ```
 
-Normal uses absolute offsets from the original shoreline of `3, 9, 20, 34, 52` normalized units. The measured reference evidence supports `3, 9, 20`; `34, 52` are provisional extensions for Layers 5 and 6. Every opening is computed independently from `W0`, not recursively from the preceding result.
+Normal uses absolute offsets from the original shoreline of `3, 9, 20, 25, 30` normalized units. The measured reference evidence supports `3, 9, 20`; `25, 30` are generalized extensions selected by a deterministic cross-lake geometry search and remain pending deeper template references. Every opening is computed independently from `W0`, not recursively from the preceding result.
 
 Clipper uses round joins. A separate working copy is simplified by `0.08` normalized units before offset and `0.04` after offset; the accurate `W0` used by Land is unchanged. Cleanup applies depth-indexed minimum component areas (`0.5/1/2/3/4` normalized square units), ratios to the largest current component (`0.1%/0.3%/1%/1.5%/2%`), and minimum hole areas (`0.2/0.5/1/1.5/2` normalized square units). The largest component always survives. Crop-edge components use a conservative `0.25` normalized-square-unit floor. Every result is intersected with `W0` to guarantee ancestry and nesting.
 
 Collapsed geometry disappears naturally. No retained-area percentage is imposed: lake shape determines survival. Manufacturing panels remain `R − Wi`, while Base remains `R`.
+
+An enabled Artistic Depth opening at or below `0.01 mm²` is marked collapsed. The scene reports that the affected layer duplicates Base, and manufacturing SVG export is blocked until the layer is disabled or its offsets are changed.
 
 Reference calibration metadata is retained for Caldron Falls, High Falls, Lake Noquebay, and Wind Pudding Lake in `tests/fixtures/artisticDepthReferences.ts`.

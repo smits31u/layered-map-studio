@@ -4,8 +4,12 @@ export const NORMALIZED_DESIGN_WIDTH=500;
 export type ArtisticDepthPresetName='xfine'|'fine'|'narrow'|'normal'|'wide'|'custom';
 export type ArtisticDepthPreset={name:ArtisticDepthPresetName;normalizedOffsets:number[];measured:boolean};
 export const ARTISTIC_DEPTH_PRESETS:Record<Exclude<ArtisticDepthPresetName,'custom'>,ArtisticDepthPreset>={
- xfine:{name:'xfine',normalizedOffsets:[1,3,7,12,19],measured:false},fine:{name:'fine',normalizedOffsets:[2,6,13,22,34],measured:false},narrow:{name:'narrow',normalizedOffsets:[2.5,7.5,16,27,41],measured:false},normal:{name:'normal',normalizedOffsets:[3,9,20,34,52],measured:true},wide:{name:'wide',normalizedOffsets:[5,14,30,49,73],measured:false},
+ xfine:{name:'xfine',normalizedOffsets:[1,3,7,12,19],measured:false},fine:{name:'fine',normalizedOffsets:[2,6,13,22,34],measured:false},narrow:{name:'narrow',normalizedOffsets:[2.5,7.5,16,27,41],measured:false},normal:{name:'normal',normalizedOffsets:[3,9,20,25,30],measured:true},wide:{name:'wide',normalizedOffsets:[5,14,30,49,73],measured:false},
 };
+// 3/9/20 reproduce measured template behavior. 25/30 are generalized deep-layer extensions,
+// selected by a deterministic cross-lake search; they remain provisional until deeper template
+// references exist and deliberately avoid any lake-specific retained-area target.
+export const COLLAPSED_ARTISTIC_OPENING_AREA_MM2=.01;
 // closingEpsilonNormalized is optional so existing custom cleanup configs (e.g. in tests) that omit
 // it keep their exact prior behavior (treated as [0] — no closing) without needing to be updated.
 export type ArtisticDepthCleanup={preOffsetSimplifyTolerance:number;postOffsetSimplifyTolerance:number;minimumComponentAreaNormalized:number[];minimumComponentAreaRatio:number[];minimumHoleAreaNormalized:number[];cropEdgeMinimumAreaNormalized:number;closingEpsilonNormalized?:number[]};

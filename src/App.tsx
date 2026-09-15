@@ -5,7 +5,7 @@ import {MapViewer} from './map/mapViewer/MapViewer';
 import {defaultProject} from './state/defaultProject';
 import type {ExtractedFeatures,MapProject} from './types/project';
 import type {GeocoderResult} from './map/geocoding/GeocoderService';
-import type {ManufacturingScene} from './export/scene';
+import {assertManufacturingSceneUsable,type ManufacturingScene} from './export/scene';
 import {buildScene,buildPresentationScene} from './export/buildScene';
 import {getCachedGeometryLayers,type GeometryCache} from './export/geometryCache';
 import {individualSvgs,sceneToSvg} from './export/svg/exportSvg';
@@ -58,7 +58,7 @@ export default function App(){
  // no longer required after routine presentation edits (title/compass/roads/labels/layers), which
  // update live via setProjectLive/commitOverride above and below.
  const generate=()=>{setStatus('Processing shoreline and roads…');try{const {cache,result}=getCachedGeometryLayers(geometryCacheRef.current,project,features);geometryCacheRef.current=cache;setScene(buildPresentationScene(project,features,result));setMode('generated');setStatus('Done')}catch(e){setStatus((e as Error).message)}};
- const exportIt=()=>{try{const s=scene??buildScene(project,features);setStatus('Building SVG…');if(project.exportSettings.layout==='individual')Object.entries(individualSvgs(s)).forEach(([n,v])=>download(n,v));else download(`layered-map-${project.exportSettings.layout}.svg`,sceneToSvg(s,project.exportSettings.layout,project.exportSettings.panelGapMm,project.exportSettings.annotations));setStatus('Export complete')}catch(e){setStatus(`SVG export failed: ${(e as Error).message}`)}};
+ const exportIt=()=>{try{const s=scene??buildScene(project,features);assertManufacturingSceneUsable(s);setStatus('Building SVG…');if(project.exportSettings.layout==='individual')Object.entries(individualSvgs(s)).forEach(([n,v])=>download(n,v));else download(`layered-map-${project.exportSettings.layout}.svg`,sceneToSvg(s,project.exportSettings.layout,project.exportSettings.panelGapMm,project.exportSettings.annotations));setStatus('Export complete')}catch(e){setStatus(`SVG export failed: ${(e as Error).message}`)}};
  // Drag/nudge/flip/hide/reset from the generated-map editor: never debounced (each already fires
  // once per discrete user action, not per keystroke) but goes through the same cache-aware path.
  const commitOverride=(updater:(p:MapProject)=>MapProject)=>{

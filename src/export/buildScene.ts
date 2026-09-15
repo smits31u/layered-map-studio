@@ -1,7 +1,7 @@
 import type {BathymetrySourceMetadata,ExtractedFeatures,FontId,MapProject} from '../types/project';
 import {CropProjection} from '../geometry/projection/cropProjection';
 import {buildWaterModel,geometryPath,multiPolygonArea,panelFromWater,validatePanel,type WaterModel} from '../geometry/shoreline/polygonEngine';
-import {artisticDepthOpenings,normalizedProductSize,presetOffsets} from '../geometry/shoreline/artisticDepth';
+import {artisticDepthOpenings,COLLAPSED_ARTISTIC_OPENING_AREA_MM2,normalizedProductSize,presetOffsets} from '../geometry/shoreline/artisticDepth';
 import {projectRoads} from '../geometry/roads/roads';
 import {projectDepthRegions,selectedThresholds} from '../bathymetry/depthGeometry';
 import {resolvePlacement} from '../geometry/scene/overrides';
@@ -38,13 +38,14 @@ export type GeometryLayers={
  model:WaterModel;
  projection:CropProjection;
  trueDepth:boolean;
+ manufacturingWarnings:string[];
  bathymetrySource?:BathymetrySourceMetadata;
 };
 
 export function buildGeometryLayers(project:MapProject,features:ExtractedFeatures):GeometryLayers{
  if(!project.map.crop)throw new Error('Select a geographic crop before generation');
  if(!features.water.length)throw new Error('No water features found in the selected crop');
- const {widthMm:w,heightMm:h}=project.dimensions,projection=new CropProjection(project.map.crop,w,h),layers:PhysicalLayer[]=[];
+ const {widthMm:w,heightMm:h}=project.dimensions,projection=new CropProjection(project.map.crop,w,h),layers:PhysicalLayer[]=[],manufacturingWarnings:string[]=[];
  const model=buildWaterModel(features.water,projection,w,h,{mode:project.shoreline.waterMode,minAreaMm2:project.shoreline.minWaterAreaMm2,focus:{lng:project.map.longitude,lat:project.map.latitude}});
  const trueDepth=project.bathymetry.mode==='true-bathymetry';
  if(trueDepth&&!project.bathymetry.dataset)throw new Error('TRUE BATHYMETRY selected, but no verified depth-valued dataset is loaded. Import bathymetry or choose Decorative Offsets.');
@@ -53,10 +54,10 @@ export function buildGeometryLayers(project:MapProject,features:ExtractedFeature
  if(!trueDepth){model.metrics.normalizedProductSize=normalizedProductSize(w,h);model.metrics.artisticOffsetsNormalized=normalizedOffsets;model.metrics.artisticOpenings=artisticOpenings.map(opening=>({offsetNormalized:opening.normalizedOffset,areaMm2:opening.areaMm2,components:opening.componentCount,holes:opening.holeCount,vertices:opening.vertexCount,smallestComponentAreaMm2:opening.smallestComponentAreaMm2,largestComponentAreaMm2:opening.largestComponentAreaMm2,rejectedComponents:opening.rejectedComponents,rejectedHoles:opening.rejectedHoles}));model.metrics.rejectedArtisticComponents=artisticOpenings.reduce((sum,opening)=>sum+opening.rejectedComponents,0);model.metrics.rejectedArtisticHoles=artisticOpenings.reduce((sum,opening)=>sum+opening.rejectedHoles,0)}
  for(let i=0;i<7;i++){if(!project.shoreline.enabledLayers[i])continue;const id=i===0?'layer-land':i===6?'layer-base':`layer-depth-${i+1}`,shapes:Shape[]=[];
   if(i===6)shapes.push({id:`${id}-panel`,operation:'cut',kind:'rect',x:0,y:0,width:w,height:h});
-  else{const region=depthByIndex.get(i),artistic=artisticByIndex.get(i),opening=i===0?model.water:trueDepth?region!.geometry:artistic!.geometry,panel=panelFromWater(opening,w,h),label=i===0?'Land':trueDepth?`Depth ${region!.depthMeters} m`:`Artistic Depth ${i}`;validatePanel(panel,w,h,label);model.metrics.openingAreasMm2.push(multiPolygonArea(opening));shapes.push({id:`${id}-panel`,operation:'cut',kind:'path',d:geometryPath(panel)})}
+  else{const region=depthByIndex.get(i),artistic=artisticByIndex.get(i),opening=i===0?model.water:trueDepth?region!.geometry:artistic!.geometry,panel=panelFromWater(opening,w,h),label=i===0?'Land':trueDepth?`Depth ${region!.depthMeters} m`:`Artistic Depth ${i}`,openingArea=multiPolygonArea(opening);validatePanel(panel,w,h,label);model.metrics.openingAreasMm2.push(openingArea);if(!trueDepth&&i>0&&openingArea<=COLLAPSED_ARTISTIC_OPENING_AREA_MM2)manufacturingWarnings.push(`Layer ${i+1} collapsed at the selected Artistic Depth offset and duplicates the Base geometry.`);shapes.push({id:`${id}-panel`,operation:'cut',kind:'path',d:geometryPath(panel)})}
   const region=depthByIndex.get(i);layers.push({id,name:i===6?'Base / Backer':i===0?'Land / Top':trueDepth?`Depth ${region!.depthMeters.toFixed(2)} m`:`Artistic Depth ${i}`,shapes,...(region?{depthMeters:region.depthMeters}:{})});
  }
- return{widthMm:w,heightMm:h,layers,model,projection,trueDepth,...(trueDepth?{bathymetrySource:project.bathymetry.dataset!.source}:{})};
+ return{widthMm:w,heightMm:h,layers,model,projection,trueDepth,manufacturingWarnings,...(trueDepth?{bathymetrySource:project.bathymetry.dataset!.source}:{})};
 }
 
 // PRESENTATION CHANGE tier (M-LIVE): roads, road labels, place labels, title/subtitle/backer,
@@ -64,7 +65,7 @@ export function buildGeometryLayers(project:MapProject,features:ExtractedFeature
 // (possibly cached) GeometryLayers from buildGeometryLayers and layers presentation content on
 // top without mutating it, so the same cached geometry can be reused across many calls.
 export function buildPresentationScene(project:MapProject,features:ExtractedFeatures,geometry:GeometryLayers):ManufacturingScene{
- const {widthMm:w,heightMm:h,model,projection,trueDepth,bathymetrySource}=geometry;
+ const {widthMm:w,heightMm:h,model,projection,trueDepth,bathymetrySource,manufacturingWarnings}=geometry;
  const roads=projectRoads(features.roads,projection,project.roads.mode);
 
  // Keep-out (M-COMPASS, extended in M-MARKERS): resolved before roads/labels become shapes, so
@@ -205,7 +206,7 @@ export function buildPresentationScene(project:MapProject,features:ExtractedFeat
   }
  }
 
- return{widthMm:w,heightMm:h,layers,objects,geometryMetrics:model.metrics,labelMetrics:{placeLabels:renderedPlaceLabels,roadLabels:renderedRoadLabels,rejectedRoadLabels},depthMode:project.bathymetry.mode,...(trueDepth?{bathymetrySource:bathymetrySource!}:{})};
+ return{widthMm:w,heightMm:h,layers,objects,manufacturingWarnings,geometryMetrics:model.metrics,labelMetrics:{placeLabels:renderedPlaceLabels,roadLabels:renderedRoadLabels,rejectedRoadLabels},depthMode:project.bathymetry.mode,...(trueDepth?{bathymetrySource:bathymetrySource!}:{})};
 }
 
 export function buildScene(project:MapProject,features:ExtractedFeatures):ManufacturingScene{

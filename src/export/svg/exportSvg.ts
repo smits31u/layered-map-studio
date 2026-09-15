@@ -1,7 +1,7 @@
-import type {ManufacturingScene,Shape} from '../scene';
+import {assertManufacturingSceneUsable,type ManufacturingScene,type Shape} from '../scene';
 import type {ExportLayout} from '../../types/project';
 const n=(v:number)=>Number(v.toFixed(3));
-export function layoutDimensions(scene:ManufacturingScene,layout:ExportLayout,gap:number){return layout==='production'?{width:scene.layers.length*scene.widthMm+Math.max(0,scene.layers.length-1)*gap,height:scene.heightMm}:{width:scene.widthMm,height:scene.heightMm}}
+export function layoutDimensions(scene:ManufacturingScene,layout:ExportLayout,gap:number){assertManufacturingSceneUsable(scene);return layout==='production'?{width:scene.layers.length*scene.widthMm+Math.max(0,scene.layers.length-1)*gap,height:scene.heightMm}:{width:scene.widthMm,height:scene.heightMm}}
 const shapeXml=(s:Shape)=>s.kind==='rect'?`<rect id="${s.id}" x="${s.x}" y="${s.y}" width="${s.width}" height="${s.height}"${s.transform?` transform="${s.transform}"`:''}/>`:`<path id="${s.id}" d="${s.d}" fill-rule="evenodd"${s.strokeWidthMm?` stroke-width="${s.strokeWidthMm}"`:''}${s.transform?` transform="${s.transform}"`:''}/>`;
 // Named sub-groups (Phase 10: roads-major, roads-minor, road-labels, place-labels, title,
 // title-backer, subtitle, compass) — only emitted when they actually have content, in a fixed,
