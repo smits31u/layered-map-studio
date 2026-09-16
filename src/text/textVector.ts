@@ -10,6 +10,12 @@ export function measureTextWidthMm(font:opentype.Font,text:string,sizeMm:number)
  return font.getAdvanceWidth(text,sizeMm);
 }
 
+// opentype.js 2.x ends every glyph contour on a point coincident with its start but never emits a Z
+// closepath command. That renders identically when filled, but a cut path is not a fill: CAM/laser
+// importers that treat a Z-less subpath as an open polyline will skip kerf compensation on it or cut
+// a lead-out artifact. The geometry is already closed, so this only states what is already true.
+const withExplicitCloses=(d:string)=>d?d.split('M').filter(Boolean).map(s=>{const sub=`M${s}`.trimEnd();return sub.endsWith('Z')?sub:`${sub}Z`}).join(''):d;
+
 // Builds path data for `text` at physical size sizeMm with its baseline anchored at (0,0) in local
 // (unrotated, unpositioned) space, horizontally aligned per `anchorH`. The caller positions/rotates
 // the result with an SVG group transform (translate/rotate) rather than baking world coordinates
@@ -26,5 +32,5 @@ export function textPathData(font:opentype.Font,text:string,sizeMm:number,anchor
  const dx=originX+(anchorH==='center'?-widthMm/2:anchorH==='right'?-widthMm:0);
  const path=font.getPath(text,dx,originY,sizeMm);
  const box=path.getBoundingBox();
- return {d:path.toPathData(3),widthMm,bounds:{minX:box.x1,minY:box.y1,maxX:box.x2,maxY:box.y2}};
+ return {d:withExplicitCloses(path.toPathData(3)),widthMm,bounds:{minX:box.x1,minY:box.y1,maxX:box.x2,maxY:box.y2}};
 }

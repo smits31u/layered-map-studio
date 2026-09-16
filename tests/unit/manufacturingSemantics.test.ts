@@ -50,6 +50,28 @@ describe('manufacturing semantics for labels, title, subtitle, and compass',()=>
   for(const individual of Object.values(individualSvgs(scene)))expect(individual).not.toContain('<text');
  });
 
+ // The string check above catches a literal "<text" regression; this parses instead, so a <text>
+ // node arriving by any other spelling (namespaced, whitespace in the tag) still fails the build.
+ it('parses every export layout and finds zero text nodes in the DOM',()=>{
+  const documents=[sceneToSvg(scene,'production'),sceneToSvg(scene,'registered'),...Object.values(individualSvgs(scene))];
+  for(const svg of documents){
+   const doc=new DOMParser().parseFromString(svg,'image/svg+xml');
+   expect(doc.querySelector('parsererror')).toBeNull();
+   expect(doc.querySelectorAll('text')).toHaveLength(0);
+   expect(doc.getElementsByTagNameNS('http://www.w3.org/2000/svg','text')).toHaveLength(0);
+  }
+ });
+
+ // Every glyph must close its contours or the cutter has an open path to chase. A letter can
+ // contribute more than one closed contour (the counter inside an A or O), never fewer than one.
+ it('vectorizes each title character into at least one closed contour',()=>{
+  const title=scene.objects.find(o=>o.id==='title-text')!;
+  const letters=[...'CALDRON FALLS'].filter(c=>c!==' ').length;
+  expect(title.d).toBeDefined();
+  expect((title.d!.match(/Z/gi)??[]).length).toBeGreaterThanOrEqual(letters);
+  expect(title.d!.trimStart().startsWith('M')).toBe(true);
+ });
+
  it('every label/title/compass path is valid finite path data with no NaN/Infinity',()=>{
   for(const shape of scene.objects){
    expect(shape.d).toBeDefined();

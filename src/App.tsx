@@ -8,10 +8,10 @@ import type {GeocoderResult} from './map/geocoding/GeocoderService';
 import {assertManufacturingSceneUsable,type ManufacturingScene} from './export/scene';
 import {buildScene,buildPresentationScene} from './export/buildScene';
 import {getCachedGeometryLayers,type GeometryCache} from './export/geometryCache';
-import {individualSvgs,sceneToSvg} from './export/svg/exportSvg';
+import {individualSvgsZip,individualZipName,sceneToSvg} from './export/svg/exportSvg';
 import {preloadAllFonts} from './text/fontRegistry';
 const empty:ExtractedFeatures={water:[],roads:[],places:[]};
-const download=(name:string,data:string)=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'image/svg+xml'}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
+const download=(name:string,data:string|Uint8Array,type='image/svg+xml')=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data as BlobPart],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
 // M-LIVE: presentation-tier edits from the Controls sidebar (text/number/select fields) are
 // lightly debounced so rapid typing/clicking coalesces into one rebuild instead of one per
 // keystroke, while still feeling live — see docs/v1-milestones.md.
@@ -58,7 +58,7 @@ export default function App(){
  // no longer required after routine presentation edits (title/compass/roads/labels/layers), which
  // update live via setProjectLive/commitOverride above and below.
  const generate=()=>{setStatus('Processing shoreline and roads…');try{const {cache,result}=getCachedGeometryLayers(geometryCacheRef.current,project,features);geometryCacheRef.current=cache;setScene(buildPresentationScene(project,features,result));setMode('generated');setStatus('Done')}catch(e){setStatus((e as Error).message)}};
- const exportIt=()=>{try{const s=scene??buildScene(project,features);assertManufacturingSceneUsable(s);setStatus('Building SVG…');if(project.exportSettings.layout==='individual')Object.entries(individualSvgs(s)).forEach(([n,v])=>download(n,v));else download(`layered-map-${project.exportSettings.layout}.svg`,sceneToSvg(s,project.exportSettings.layout,project.exportSettings.panelGapMm,project.exportSettings.annotations));setStatus('Export complete')}catch(e){setStatus(`SVG export failed: ${(e as Error).message}`)}};
+ const exportIt=()=>{try{const s=scene??buildScene(project,features);assertManufacturingSceneUsable(s);setStatus('Building SVG…');if(project.exportSettings.layout==='individual')download(individualZipName(s),individualSvgsZip(s),'application/zip');else download(`layered-map-${project.exportSettings.layout}.svg`,sceneToSvg(s,project.exportSettings.layout,project.exportSettings.panelGapMm,project.exportSettings.annotations));setStatus('Export complete')}catch(e){setStatus(`SVG export failed: ${(e as Error).message}`)}};
  // Drag/nudge/flip/hide/reset from the generated-map editor: never debounced (each already fires
  // once per discrete user action, not per keystroke) but goes through the same cache-aware path.
  const commitOverride=(updater:(p:MapProject)=>MapProject)=>{
