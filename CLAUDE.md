@@ -57,8 +57,8 @@ Layered Map Studio is a React + MapLibre GL tool that generates manufacturing-pr
 
 ## Status as of this write (2026-09-16)
 
-- Last commit: `61a11e9`, "Fix: block export on collapsed Artistic Depth layers; retune deep offsets" — the collapse-guard fix (`assertManufacturingSceneUsable()` rejecting ≤0.01mm² openings) is shipped.
-- Text outlining (opentype.js, `src/text/textVector.ts`) and ZIP export of individual layer files (`fflate`, `src/export/svg/exportSvg.ts`) are complete and about to be committed on top of `61a11e9`.
+- Last commit: `f039aaf`, "Add ornament Phase 3: feature geometry (capture/dedup, road/water geometry, land-island detection, Web Worker pipeline)".
+- Ornament generator (see `docs/ornament-implementation-status.md` and `CLAUDE_MAP_ORNAMENT_BUILD_PLAN.md`): Phases 0-3 committed and tested — domain model/SVG shell, the original ornament editor, MapLibre map/search/crop, and now feature geometry (capture, dedupe, road/water buffering, land-island detection, off-main-thread Web Worker pipeline with golden-fixture regression coverage). 707 tests passing repo-wide. Phase 4 (SVG export and preflight against the disk shape) and Phase 5 (hardening) are not started.
 
 ## Environment
 

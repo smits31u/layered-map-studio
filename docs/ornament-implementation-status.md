@@ -7,7 +7,7 @@ Tracks `CLAUDE_MAP_ORNAMENT_BUILD_PLAN.md` against what exists in this repositor
 | 0 — shared scaffold and decisions | complete |
 | 1 — original ornament editor shell | complete |
 | 2 — map and search | complete |
-| 3 — feature geometry | not started |
+| 3 — feature geometry | complete |
 | 4 — SVG export and preflight | not started |
 | 5 — hardening | not started |
 
@@ -179,6 +179,40 @@ two explicit actions: "Move marker to map centre" and "Return marker to selected
   reporting path (`moveend` → store) is the same path the zoom control uses and is covered.
 - **`fast-check`.** Still not set up; swept loops over fixed ranges stand in.
 
+## Phase 3 — complete
+
+- [x] `src/ornament/capture/mapCapture.ts` snapshots rendered road and water features from the
+      MapLibre style Phase 2 defined, keyed to the viewport the capture belongs to.
+- [x] `src/ornament/capture/dedupe.ts` deduplicates features captured across tiles/layers before
+      geometry work runs (`tests/unit/ornamentFeatureDedupe.test.ts`).
+- [x] `src/ornament/geometry/mapProjection.ts` projects captured coordinates to millimetres through
+      `mapWindowLayout().scalePxPerMm` (`tests/unit/ornamentMapProjection.test.ts`).
+- [x] `src/ornament/geometry/roadGeometry.ts` / `roadWidths.ts` turn clipped road polylines into
+      buffered, unioned road geometry per detail tier (`tests/unit/ornamentRoadGeometry.test.ts`).
+- [x] `src/ornament/geometry/waterGeometry.ts` builds clipped, unioned water polygons
+      (`tests/unit/ornamentWaterGeometry.test.ts`).
+- [x] `src/ornament/geometry/landIslands.ts` detects land islands within water bodies so they are
+      not silently filled (`tests/unit/ornamentLandIslands.test.ts`).
+- [x] `src/ornament/geometry/polygonRepair.ts` repairs degenerate polygons (self-intersections,
+      collapsed rings) coming out of capture/clip/union before they reach export.
+- [x] `src/ornament/geometry/featureGeometry.ts` is the Phase 3 entry point tying capture, clip,
+      buffer/union and repair together into a single `GeometrySnapshot`.
+- [x] `src/ornament/worker/` (`geometryWorker.ts`, `geometryRunner.ts`, `protocol.ts`) moves this
+      pipeline off the main thread via a Web Worker with a typed request/response protocol
+      (`tests/unit/ornamentGeometryWorker.test.ts`).
+- [x] Golden fixtures for city/coast/lake/rural scenes in both classic and water-cutout modes
+      (`tests/fixtures/ornament/golden/*.json`) pin known-good output for the whole pipeline.
+- [x] Exit criteria: capture, dedupe, project, clip, buffer/union and repair run end to end for real
+      captured features, off the main thread, with golden-fixture regression coverage — 707 tests
+      passing repo-wide.
+
+## Next concrete phase
+
+Phase 4 — SVG export and preflight. Point the manufacturing scene / SVG export path at the disk
+ornament shape and the Phase 3 `GeometrySnapshot` output (roads, water, land islands) rather than
+the lake tool's rectangular `ManufacturingScene`, and add the preflight checks (min feature size,
+open paths, self-intersections) called out in the plan before export is enabled end to end.
+
 ## Known gaps carried into later phases
 
 - **Arc/curved text is not implemented.** `textVector.ts` sets straight baselines only. If the
@@ -199,10 +233,3 @@ two explicit actions: "Move marker to map centre" and "Return marker to selected
 - **Marker dragging.** The plan's preview pane lists a draggable marker with "return to selected
   place". The return action exists; dragging does not.
 
-## Next concrete phase
-
-Phase 3 — feature geometry. Snapshot and deduplicate the rendered roads and water the Phase 2 style
-draws, project them to millimetres through `mapWindowLayout().scalePxPerMm`, clip them with
-`clipPolylinesToMapWindow`, then buffer and union. The "Capture map geometry" action and the
-dirty-state check are already in place and are what Phase 3 fills in; `GeometrySnapshot.featureCount`
-is the field waiting for it.
