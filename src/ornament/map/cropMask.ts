@@ -61,8 +61,14 @@ export interface MapWindowLayout{
  // Pixels per millimetre inside the map element. Its reciprocal is the mm-per-pixel figure Phase 3
  // projects captured features with.
  scalePxPerMm:number;
- // A CSS clip-path value: `path('...')`, in the map element's own pixel coordinates.
+ // A CSS clip-path value: `path('...')`, in the map element's own pixel coordinates. No longer
+ // applied to the map element itself (the preview shows the full map with the area outside this
+ // mask dimmed rather than hard-clipping it away), but kept for anything that still wants a literal
+ // clip — e.g. `maskPathPx` un-wrapped for the dim-overlay's own `<path>` `d`.
  clipPath:string;
+ // `maskPathPx` without the `path('...')` wrapper — the same ring, in the map element's own pixel
+ // coordinates, for drawing (not clipping) the ornament boundary.
+ maskPathPx:string;
  // The same crop as an SVG path in millimetre coordinates, for the preview overlay.
  outlinePathMm:string;
 }
@@ -85,11 +91,12 @@ export function mapWindowLayout(geometry:OrnamentGeometry,viewBox:ViewBoxMm,tran
  const [leftPx,topPx]=mmToContainerPx(viewBox,transform,-radius,-radius);
  const sizePx=sizeMm*transform.scale;
  // Translating by +radius moves the ornament's centre to the map element's top-left origin, which
- // is the coordinate system a CSS clip-path is resolved in.
- const clipPath=geometry.mapOpening.length&&transform.scale>0
-  ?`path('${geometryToPath(geometry.mapOpening,radius,radius,transform.scale)}')`
-  :'none';
- return {leftPx,topPx,sizePx,sizeMm,scalePxPerMm:transform.scale,clipPath,outlinePathMm:geometryToPath(geometry.mapOpening)};
+ // is the coordinate system a CSS clip-path (and the dim-overlay's own SVG) is resolved in.
+ const maskPathPx=geometry.mapOpening.length&&transform.scale>0
+  ?geometryToPath(geometry.mapOpening,radius,radius,transform.scale)
+  :'';
+ const clipPath=maskPathPx?`path('${maskPathPx}')`:'none';
+ return {leftPx,topPx,sizePx,sizeMm,scalePxPerMm:transform.scale,clipPath,maskPathPx,outlinePathMm:geometryToPath(geometry.mapOpening)};
 }
 
 // Converts a position inside the map element back to ornament millimetres. Used to ask whether a

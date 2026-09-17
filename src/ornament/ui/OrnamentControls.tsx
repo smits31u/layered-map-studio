@@ -1,4 +1,4 @@
-import {useId} from 'react';
+import {useEffect,useId,useState} from 'react';
 import {FONT_REGISTRY} from '../../text/fontRegistry';
 import {mmToInches} from '../../utils/units';
 import type {GeocodeCandidate} from '../../server/geocode/types';
@@ -9,7 +9,7 @@ import type {OrnamentAction,OrnamentTextKey} from '../store';
 import {ORNAMENT_LIMITS,type BuildMode,type ExportPreset,type NumericLimit,type OrnamentProject,type RoadDetail,type TextLine} from '../types';
 import {fromDisplay} from '../validation';
 import type {OrnamentTextLayout} from '../text/ornamentText';
-import type {OrnamentGeometry,OrnamentIssue} from '../geometry/ornamentShape';
+import type {OrnamentGeometry} from '../geometry/ornamentShape';
 import type {ExportReadiness,GeometrySnapshot} from '../snapshot';
 import {preflightSummary,type PreflightReport} from '../export/preflight';
 import {StackDiagram} from './StackDiagram';
@@ -90,21 +90,63 @@ const ISLAND_POLICY_LABELS:Record<LandIslandPolicy,string>={
  'omit-below-threshold':'Omit below threshold',
 };
 
+// The sidebar used to show findings from five independent sources (geometry, text, feature
+// geometry, map capture, preflight) in up to three separate lists, with the same problem often
+// showing up more than once. This is the one place that merges them into a single deduplicated,
+// severity-ordered list for the collapsible status badge — deduped on severity+message since two
+// sources reporting the same human-readable finding are the same finding as far as the user is
+// concerned, whatever internal code produced it.
+type DisplayIssue={severity:'error'|'warning';message:string};
+
+function combineIssues(sources:DisplayIssue[][]):DisplayIssue[]{
+ const seen=new Set<string>();
+ const combined:DisplayIssue[]=[];
+ for(const list of sources)for(const item of list){
+  const key=`${item.severity}|${item.message}`;
+  if(seen.has(key))continue;
+  seen.add(key);
+  combined.push(item);
+ }
+ // Array.prototype.sort is stable, so this only reorders errors ahead of warnings and otherwise
+ // keeps each source's own ordering.
+ return combined.sort((a,b)=>(a.severity===b.severity?0:a.severity==='error'?-1:1));
+}
+
 export function OrnamentControls({project,dispatch,geometry,textLayout,readiness,snapshot,featureGeometry,captureWarnings,building,offMainThread,exporting,preflight,onReset,onFitText,onSelectPlace,onCaptureGeometry,onExport}:Props){
  const unit=project.displayUnit;
  const diameterLimit:NumericLimit=unit==='in'
   ?{min:Number(mmToInches(ORNAMENT_LIMITS.diameterMm.min).toFixed(3)),max:Number(mmToInches(ORNAMENT_LIMITS.diameterMm.max).toFixed(3)),step:.05}
   :ORNAMENT_LIMITS.diameterMm;
- const issues=[...geometry.issues,...textLayout.issues,...(featureGeometry?.warnings??[])];
- const errors=issues.filter(i=>i.severity==='error');
  const selectedPlace=project.viewport.selectedPlaceCenter;
+
+ // All five finding sources, merged into the one list the status badge shows. Capture warnings have
+ // no severity of their own (the capture module never produces a blocking one), so they map to
+ // 'warning'; preflight findings already carry the same severity type as the others.
+ const allIssues=combineIssues([
+  geometry.issues,
+  textLayout.issues,
+  featureGeometry?.warnings??[],
+  captureWarnings.map(w=>({severity:'warning' as const,message:w.message})),
+  (preflight?.findings??[]).map(f=>({severity:f.severity,message:f.message})),
+ ]);
+ const errorCount=allIssues.filter(i=>i.severity==='error').length;
+
+ // Auto-opens the moment a preflight run blocks export — the one case where the finding belongs in
+ // front of the user without a click — but otherwise leaves the section exactly as the user last
+ // left it; a controlled `open`/`onToggle` pair is what makes that possible without a frequent parent
+ // re-render (every keystroke in this panel) silently closing a section the user opened by hand.
+ const [preflightOpen,setPreflightOpen]=useState(false);
+ useEffect(()=>{if(preflight?.blocked)setPreflightOpen(true)},[preflight?.blocked]);
 
  return <aside>
   <h1>Ornament Studio</h1>
 
-  <p className="ornament-status" role="status" aria-live="polite">
-   {errors.length?`${errors.length} problem${errors.length>1?'s':''} to resolve`:issues.length?`${issues.length} warning${issues.length>1?'s':''}`:'Ornament geometry is valid'}
-  </p>
+  <details className="ornament-status">
+   <summary role="status" aria-live="polite" className={errorCount?'error':''}>{allIssues.length?`${allIssues.length} issue${allIssues.length>1?'s':''}`:'✓ valid'}</summary>
+   {allIssues.length?<ul className="ornament-issues">
+    {allIssues.map((issue,index)=><li key={index} className={issue.severity}>{issue.message}</li>)}
+   </ul>:null}
+  </details>
 
   <details open>
    <summary>Place</summary>
@@ -165,7 +207,8 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,readiness
    {/* The plan's §Water requires this to be the user's decision, in these three words: "Offer three
        explicit policies: keep as separate pieces, bridge automatically using user-visible tabs, or
        omit below a size threshold. Default to warning, never silently discard meaningful islands."
-       Every policy still reports what it found — see the warnings list at the bottom of this pane. */}
+       Every policy still reports what it found — see the combined status badge at the top of this
+       pane. */}
    <Segmented<LandIslandPolicy>
     label="When a water cutout leaves loose land"
     value={project.land.islandPolicy}
@@ -199,26 +242,29 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,readiness
     {`${featureGeometry.metrics.roads.clippedPieces} road piece(s) at ${featureGeometry.metrics.roads.widthsMm.map(width=>width.toFixed(2)).join('/')}mm · ${featureGeometry.metrics.water.components} water area(s) with ${featureGeometry.metrics.water.holes} island(s) · ${featureGeometry.metrics.roads.vertices+featureGeometry.metrics.water.vertices} vertices`}
     {offMainThread?' · built in a background worker.':' · built on the main thread (no Web Worker available).'}
    </p>:null}
-   {captureWarnings.length?<ul className="ornament-issues">{captureWarnings.map(warning=><li key={warning.code} className="warning">{warning.message}</li>)}</ul>:null}
+   {/* Capture warnings are folded into the combined status badge at the top of the pane rather than
+       listed again here — this used to be its own always-expanded block. */}
    <button type="button" disabled={!readiness.ready||exporting} onClick={onExport} aria-describedby="ornament-export-blocked">
     {exporting?'Running preflight…':'Export SVG'}
    </button>
-   {/* Preflight findings live here rather than in the general warning list at the bottom, because
-       they are the answer to "why did nothing download". A blocked export produces no file at all
-       (see exportOrnament.ts), so this list is the only account of what happened. */}
-   <ul id="ornament-export-blocked" className="ornament-issues">
-    {!readiness.ready
-     ?readiness.reasons.map(reason=><li key={reason.code}>{reason.message}</li>)
-     :preflight
-      ?[
-        <li key="preflight-summary" className={preflight.blocked?'error':''}>{preflightSummary(preflight)}</li>,
-        ...preflight.findings.map((item,index)=><li key={`${item.code}-${index}`} className={item.severity}>{item.message}</li>),
-       ]
-      :<li>Ready to export.</li>}
-   </ul>
+   {/* Preflight findings live here rather than in the combined badge, because they are the specific
+       answer to "why did nothing download" and belong next to the button that triggered them. A
+       blocked export produces no file at all (see exportOrnament.ts), so this is the only account of
+       what happened — which is why a blocked result forces this section open instead of leaving the
+       user to notice it collapsed. */}
+   <details open={preflightOpen} onToggle={e=>setPreflightOpen(e.currentTarget.open)}>
+    <summary>{!readiness.ready
+     ?`Export blocked · ${readiness.reasons.length} reason${readiness.reasons.length===1?'':'s'}`
+     :preflight?preflightSummary(preflight):'Export readiness'}</summary>
+    <ul id="ornament-export-blocked" className="ornament-issues">
+     {!readiness.ready
+      ?readiness.reasons.map(reason=><li key={reason.code}>{reason.message}</li>)
+      :preflight
+       ?preflight.findings.map((item,index)=><li key={`${item.code}-${index}`} className={item.severity}>{item.message}</li>)
+       :<li>Ready to export.</li>}
+    </ul>
+   </details>
   </details>
-
-  {issues.length?<ul className="ornament-issues">{issues.map((issue,index)=><li key={`${issue.code}-${index}`} className={issue.severity}>{issue.message}</li>)}</ul>:null}
 
   <button type="button" className="ornament-reset" onClick={onReset}>Reset to defaults</button>
  </aside>;

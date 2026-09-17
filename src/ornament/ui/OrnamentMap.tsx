@@ -163,12 +163,25 @@ export function OrnamentMap({layout,center,zoom,detail,chordYMm,provider=OPENFRE
   // eslint-disable-next-line react-hooks/exhaustive-deps
  },[captureRequest?.token]);
 
- const style={left:`${layout.leftPx}px`,top:`${layout.topPx}px`,width:`${layout.sizePx}px`,height:`${layout.sizePx}px`,clipPath:layout.clipPath,WebkitClipPath:layout.clipPath};
+ // The map element itself is no longer hard-clipped to the ornament's circle+chord: the plan wants
+ // the full map visible so a user can see the geography they are panning past, not just what is
+ // already inside the frame. The mask still exists — `layout.maskPathPx` — but now drives a dimming
+ // overlay drawn over the map instead of a CSS clip-path, so the crop that decides what actually
+ // exports (`cropMask.ts`'s geometry-derived path, unchanged) stays the single source of truth for
+ // both. `maskPathPx` only changes when the ornament's geometry does, never on pan/zoom, so this
+ // costs nothing per frame.
+ const style={left:`${layout.leftPx}px`,top:`${layout.topPx}px`,width:`${layout.sizePx}px`,height:`${layout.sizePx}px`};
 
  if(error&&!mapRef.current)return <div className="ornament-map ornament-map-unavailable" style={style} role="note">{error}</div>;
 
  return <div className="ornament-map" style={style}>
   <div className="ornament-map-canvas" ref={host} aria-label="Map of the selected place" role="application"/>
+  {layout.maskPathPx?<svg className="ornament-map-mask" width={layout.sizePx} height={layout.sizePx} aria-hidden="true">
+   {/* Evenodd punches the mask shape out of the full square, so only the area that will actually be
+       cut away is dimmed; the ornament's own map opening is left at full clarity. */}
+   <path d={`M0 0H${layout.sizePx}V${layout.sizePx}H0Z ${layout.maskPathPx}`} fillRule="evenodd" className="ornament-map-mask-dim"/>
+   <path d={layout.maskPathPx} className="ornament-map-mask-outline"/>
+  </svg>:null}
   {error?<p className="ornament-map-error" role="status">{error}</p>:null}
  </div>;
 }
