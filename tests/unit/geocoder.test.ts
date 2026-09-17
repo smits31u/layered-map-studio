@@ -1,43 +1,84 @@
-import {afterEach,describe,expect,it,vi} from 'vitest';
-import {FallbackGeocoder,NominatimGeocoder,PhotonGeocoder,type GeocoderService} from '../../src/map/geocoding/GeocoderService';
+import {describe,expect,it,vi} from 'vitest';
+import {candidateToResult,FallbackGeocoder,GeocodeError,ProxyGeocoder,type GeocoderService} from '../../src/map/geocoding/GeocoderService';
+import type {GeocodeCandidate} from '../../src/server/geocode/types';
 
-const jsonResponse=(body:unknown,ok=true,status=200)=>({ok,status,json:async()=>body}) as Response;
+// Browser-side geocoding is now a client for this app's own `/api/geocode`, so these tests assert
+// what the client sends and how it handles the proxy's answers. The provider-specific parsing that
+// used to live in the browser moved server-side and is covered by geocodeProxy.test.ts.
 
-afterEach(()=>{vi.unstubAllGlobals()});
+const candidate=(over:Partial<GeocodeCandidate>={}):GeocodeCandidate=>({
+ id:'nominatim:1',
+ label:'Crivitz, Marinette County, Wisconsin',
+ coordinates:[-88.004,45.2352],
+ boundingBox:[-88.02,45.22,-87.99,45.25],
+ provider:'nominatim',
+ attribution:'© OpenStreetMap contributors',
+ kind:'village',
+ ...over,
+});
 
-describe('PhotonGeocoder',()=>{
- it('maps Photon features into GeocoderResult',async()=>{
-  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(jsonResponse({features:[{id:'1',properties:{osm_id:42,name:'Crivitz',state:'Wisconsin',country:'USA'},geometry:{coordinates:[-88.2,45.25]},bbox:[-88.3,45.2,-88.1,45.3]}]})));
-  const results=await new PhotonGeocoder().search('Crivitz, WI');
-  expect(results).toHaveLength(1);
-  expect(results[0]).toMatchObject({latitude:45.25,longitude:-88.2,provider:'Photon'});
- });
+const proxyResponse=(over:Record<string,unknown>={})=>({
+ ok:true,
+ status:200,
+ json:async()=>({query:'Crivitz, WI',provider:'nominatim',attribution:'© OpenStreetMap contributors',results:[candidate()],cached:false,providers:[{id:'nominatim',label:'Nominatim',attribution:'a',note:'n'}],...over}),
+} as unknown as Response);
 
- it('throws a clear error on a non-OK HTTP response',async()=>{
-  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(jsonResponse({},false,500)));
-  await expect(new PhotonGeocoder().search('x')).rejects.toThrow(/HTTP 500/);
- });
-
- it('throws a clear timeout error on abort',async()=>{
-  vi.stubGlobal('fetch',vi.fn().mockRejectedValue(Object.assign(new Error('aborted'),{name:'AbortError'})));
-  await expect(new PhotonGeocoder().search('x')).rejects.toThrow(/timed out/);
+describe('candidateToResult',()=>{
+ it('splits the GeoJSON coordinate pair into the lat/lng shape the lake tool consumes',()=>{
+  expect(candidateToResult(candidate())).toMatchObject({latitude:45.2352,longitude:-88.004,displayName:expect.stringContaining('Crivitz'),provider:'nominatim',resultType:'village'});
  });
 });
 
-describe('NominatimGeocoder',()=>{
- it('maps Nominatim results into GeocoderResult',async()=>{
-  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(jsonResponse([{place_id:99,display_name:'123 Lakeview Rd, Crivitz, WI 54114',lat:'45.25',lon:'-88.2',boundingbox:['45.2','45.3','-88.3','-88.1'],type:'house'}])));
-  const results=await new NominatimGeocoder().search('123 Lakeview Rd, Crivitz WI');
-  expect(results).toHaveLength(1);
-  expect(results[0]).toMatchObject({latitude:45.25,longitude:-88.2,provider:'Nominatim',displayName:'123 Lakeview Rd, Crivitz, WI 54114'});
+describe('ProxyGeocoder',()=>{
+ it('calls this app own proxy rather than any public provider',async()=>{
+  const fetchImpl=vi.fn().mockResolvedValue(proxyResponse());
+  await new ProxyGeocoder(undefined,'/api/geocode',fetchImpl as unknown as typeof fetch).search('Crivitz, WI');
+  const url=String(fetchImpl.mock.calls[0][0]);
+  expect(url.startsWith('/api/geocode?')).toBe(true);
+  expect(url).toContain('q=Crivitz%2C%20WI');
+  expect(url).not.toMatch(/https?:\/\//);
  });
 
- it('rejects a malformed (non-array) response instead of silently returning garbage',async()=>{
-  vi.stubGlobal('fetch',vi.fn().mockResolvedValue(jsonResponse({error:'nope'})));
-  await expect(new NominatimGeocoder().search('x')).rejects.toThrow();
+ it('passes an explicitly chosen provider through and omits it otherwise',async()=>{
+  const fetchImpl=vi.fn().mockResolvedValue(proxyResponse());
+  await new ProxyGeocoder('photon','/api/geocode',fetchImpl as unknown as typeof fetch).search('x');
+  expect(String(fetchImpl.mock.calls[0][0])).toContain('provider=photon');
+  const plain=vi.fn().mockResolvedValue(proxyResponse());
+  await new ProxyGeocoder(undefined,'/api/geocode',plain as unknown as typeof fetch).search('x');
+  expect(String(plain.mock.calls[0][0])).not.toContain('provider=');
+ });
+
+ it('returns the proxy attribution and provider list alongside the candidates',async()=>{
+  const fetchImpl=vi.fn().mockResolvedValue(proxyResponse({cached:true}));
+  const detailed=await new ProxyGeocoder(undefined,'/api/geocode',fetchImpl as unknown as typeof fetch).searchDetailed('Crivitz, WI');
+  expect(detailed.attribution).toMatch(/OpenStreetMap/);
+  expect(detailed.cached).toBe(true);
+  expect(detailed.providers.map(p=>p.id)).toEqual(['nominatim']);
+ });
+
+ it('surfaces the proxy error message and code rather than a generic failure',async()=>{
+  const fetchImpl=vi.fn().mockResolvedValue({ok:false,status:504,json:async()=>({error:'Nominatim did not respond within 8000ms.',code:'upstream-timeout'})} as unknown as Response);
+  await expect(new ProxyGeocoder(undefined,'/api/geocode',fetchImpl as unknown as typeof fetch).search('x'))
+   .rejects.toMatchObject({code:'upstream-timeout',message:/did not respond/});
+ });
+
+ it('explains that the proxy itself is missing when the request cannot be made at all',async()=>{
+  const fetchImpl=vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+  const error=await new ProxyGeocoder(undefined,'/api/geocode',fetchImpl as unknown as typeof fetch).search('x').catch(e=>e as GeocodeError);
+  expect(error).toBeInstanceOf(GeocodeError);
+  expect((error as GeocodeError).code).toBe('proxy-unreachable');
+ });
+
+ it('re-throws an abort instead of relabelling it as a proxy outage',async()=>{
+  const fetchImpl=vi.fn().mockRejectedValue(Object.assign(new Error('aborted'),{name:'AbortError'}));
+  await expect(new ProxyGeocoder(undefined,'/api/geocode',fetchImpl as unknown as typeof fetch).search('x')).rejects.toMatchObject({name:'AbortError'});
  });
 });
 
+// The lake map tool's marker lookup has always advanced to a second provider when the first one
+// outright fails or finds nothing at all. That is preserved unchanged; what changed is that each
+// hop now goes through the proxy. It still never advances on a merely ambiguous result, which is
+// the behaviour the ornament plan forbids.
 describe('FallbackGeocoder',()=>{
  const okResult=[{id:'1',displayName:'ok',latitude:1,longitude:2,provider:'test'}];
  const failing:GeocoderService={search:async()=>{throw new Error('primary down')}};
@@ -45,18 +86,15 @@ describe('FallbackGeocoder',()=>{
  const succeeding:GeocoderService={search:async()=>okResult};
 
  it('returns the primary provider result when it succeeds with matches',async()=>{
-  const results=await new FallbackGeocoder([succeeding,failing]).search('x');
-  expect(results).toEqual(okResult);
+  expect(await new FallbackGeocoder([succeeding,failing]).search('x')).toEqual(okResult);
  });
 
  it('falls back to the next provider when the primary throws',async()=>{
-  const results=await new FallbackGeocoder([failing,succeeding]).search('x');
-  expect(results).toEqual(okResult);
+  expect(await new FallbackGeocoder([failing,succeeding]).search('x')).toEqual(okResult);
  });
 
  it('falls back to the next provider when the primary returns zero results',async()=>{
-  const results=await new FallbackGeocoder([empty,succeeding]).search('x');
-  expect(results).toEqual(okResult);
+  expect(await new FallbackGeocoder([empty,succeeding]).search('x')).toEqual(okResult);
  });
 
  it('surfaces the last error when every provider fails',async()=>{
@@ -64,7 +102,14 @@ describe('FallbackGeocoder',()=>{
  });
 
  it('returns an empty array (not-found, not an error) when every provider genuinely finds nothing',async()=>{
-  const results=await new FallbackGeocoder([empty,empty]).search('x');
-  expect(results).toEqual([]);
+  expect(await new FallbackGeocoder([empty,empty]).search('x')).toEqual([]);
+ });
+
+ it('stops immediately on abort instead of trying the next provider',async()=>{
+  const aborting:GeocoderService={search:async()=>{throw Object.assign(new Error('aborted'),{name:'AbortError'})}};
+  let reached=false;
+  const after:GeocoderService={search:async()=>{reached=true;return okResult}};
+  await expect(new FallbackGeocoder([aborting,after]).search('x')).rejects.toMatchObject({name:'AbortError'});
+  expect(reached).toBe(false);
  });
 });

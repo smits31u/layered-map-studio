@@ -6,7 +6,7 @@ Tracks `CLAUDE_MAP_ORNAMENT_BUILD_PLAN.md` against what exists in this repositor
 |-------|-------|
 | 0 — shared scaffold and decisions | complete |
 | 1 — original ornament editor shell | complete |
-| 2 — map and search | not started |
+| 2 — map and search | complete |
 | 3 — feature geometry | not started |
 | 4 — SVG export and preflight | not started |
 | 5 — hardening | not started |
@@ -20,16 +20,20 @@ says to "reuse shared map/domain/geometry/SVG packages when present".
 **No such workspace exists.** `layered-map-studio` is a single flat Vite package. The ornament code
 therefore lives beside the lake tool under `src/ornament/` rather than in `packages/*`.
 
+
 Converting the repository to workspaces was rejected for now: it would touch every import in a
 shipped, deployed, Docker-built application in service of a directory layout, while the plan's own
 execution rules require preserving existing work and keeping the app runnable after every phase.
 The sharing the plan actually cares about is already happening — the ornament imports the lake
 tool's font registry, text vectorizer, polygon helpers and SVG path serializer directly.
 
-This is worth revisiting if a second consumer appears (a server package for the Phase 2 geocoder
-proxy is the likely trigger), at which point the split has a concrete payoff rather than being
-purely organisational.
-
+Phase 1 predicted that a server package for the geocoder proxy would be the trigger to revisit this.
+Phase 2 built that server and the prediction did not hold. The server-side code is small, has no
+dependencies the web app does not already have, and is consumed from exactly two places — the Vite
+dev middleware and `server/index.ts`. It lives in `src/server/geocode/` with a rule stated at the
+top of `types.ts`: nothing under `src/server/**` may import React, MapLibre or anything DOM-only.
+A workspace boundary would enforce that rule mechanically; a comment and a code review do not. That
+is the whole of what is being given up, and it is not yet worth rewriting every import to buy.
 ## What is reused rather than rebuilt
 
 | Need | Source | Notes |
@@ -40,7 +44,7 @@ purely organisational.
 | Path offsets | `clipper-lib` | New generalised wrapper, see ADR 0001 |
 | SVG path serialisation | `geometryPath()` from `polygonEngine.ts` | Verbatim |
 | Unit conversion | `src/utils/units.ts` | `inchesToMm`/`mmToInches` |
-| Geocoding | `src/map/geocoding/GeocoderService.ts` | Untouched — Phase 2 |
+| Geocoding | `src/map/geocoding/GeocoderService.ts` | Rewritten in Phase 2 as a client for `/api/geocode`; provider code moved to `src/server/geocode/adapters/`. See ADR 0003 |
 | ZIP packaging | `src/export/svg/exportSvg.ts` | Untouched — Phase 4 |
 
 ## Phase 0 — complete
@@ -83,6 +87,98 @@ Original, not derived from the reference tool: 101.6mm diameter, 6mm rim, 16/8mm
 overlap and a 3mm minimum neck, map/text boundary at y=+14mm. At these values the loop joins the
 body over 11.90mm with 4mm of loop material, and the text band is 30.8mm tall.
 
+## Phase 2 — complete
+
+- [x] MapLibre with a minimal original road/water style (`src/ornament/map/style.ts`): neutral land
+      background, water fill, and one road line layer per detail tier. No labels, buildings, landuse
+      or boundaries — the style is also the query filter Phase 3 will capture through.
+- [x] Policy-compliant geocoder proxy at `/api/geocode?q=...` (`src/server/geocode/`), result
+      chooser, map fitting from a result's bounding box, and provider attribution in the UI.
+- [x] Frozen bearing/pitch, zoom 7–19 in 0.5 steps defaulting to 14, road-detail control,
+      circular/text-band crop mask, and marker modes.
+- [x] Dirty-state tracking and export-disabled conditions (`src/ornament/snapshot.ts`).
+- [x] Exit criteria: search, choose a result, pan/zoom, switch detail and place the marker with
+      preview and state in step — driven end to end in `tests/unit/ornamentMapUi.test.tsx`.
+
+### The geocoder proxy
+
+| Requirement (plan §Geocoding plan) | Where |
+|---|---|
+| `/api/geocode?q=...` on localhost | `server/index.ts` in production, a Vite plugin in dev — both mount the same handler |
+| Search on explicit submit only | `PlaceSearch.tsx` is a form; no autocomplete, no debounce, no search-as-you-type |
+| Descriptive server-side User-Agent | `buildUserAgent()`; `GEOCODER_CONTACT` supplies the contact and the header says so when it is unset |
+| One request per second for public Nominatim | `createRateLimiter(1000)`, one queue per provider, asserted against a virtual clock |
+| Cache responses | `createLruCache`, bounded and expiring — see the note on query history below |
+| Up to five normalized candidates | `MAX_RESULTS`; id, label, coordinates, bounding box, provider attribution |
+| Providers behind adapters | `adapters/{nominatim,photon,census}.ts`; a self-hosted instance is a constructor argument |
+| No automatic fallback | The handler calls exactly one provider. A miss offers the others as buttons |
+| No stored address history | The server cache is bounded and expires; the browser is sent `Cache-Control: no-store`; nothing is persisted to the project |
+
+Scope decision (retrofit the existing `GeocoderService` rather than build ornament-only) and its
+consequences: `docs/adr/0003-geocoder-proxy-and-map-runtime.md`.
+
+### The crop mask is the Phase 1 geometry
+
+`mapWindowLayout()` clips the map with `buildOrnamentGeometry(...).mapOpening` — the same
+MultiPolygon subtracted from the frame — rather than re-deriving a circle and a chord. The map
+element is the square circumscribing the inner opening, centred on the ornament centre, so the
+plan's export scale rule (`diameterMm / renderedMapDiameterPx`) is one division.
+`tests/unit/ornamentCropMask.test.ts` asserts the serialized crop is byte-identical to the frame's
+own opening, so replacing it with a lookalike fails.
+
+### Circle and chord line clipping
+
+`src/ornament/geometry/clipLine.ts` implements the analytic clip the plan permits, and
+`tests/unit/ornamentClipLine.test.ts` covers the cases it names as the reason to be careful:
+tangents, endpoints exactly on the circle, polylines that leave and re-enter (two and three times),
+zero-length lines, repeated vertices, lines lying along the chord, non-finite coordinates and
+non-positive radii. Pieces shorter than `MIN_PIECE_LENGTH_MM` are dropped, because a zero-length
+piece offset with round caps engraves as a dot.
+
+Phase 3 consumes this for real captured features; it exists now because the crop mask and the
+clipper have to describe the same region, and a test is the only thing that keeps them agreeing.
+
+### Marker artwork
+
+Reuses `src/geometry/scene/markerRegistry.ts` — this repository's own parameterised heart, pin and
+house, written for the lake tool, not traced from the reference generator. What Phase 2 adds is the
+part the lake tool never needed: an anchor (a pin's tip sits on the coordinate, a heart and a house
+centre on it) and a conservative path bounding box, so the fit check can warn when a symbol would
+overhang the rim or the text chord. It warns; it never moves the marker.
+
+The marker goes to the selected place's coordinate and stays there when the map pans. Moving it is
+two explicit actions: "Move marker to map centre" and "Return marker to selected place".
+
+### Departures and judgment calls
+
+- **`viewport.selectedPlaceCenter` added.** The plan's domain model declares only
+  `selectedPlaceLabel`, while its prose needs the coordinate for both "not automatically at the
+  current map center after panning" and "return to selected place". Optional, so older persisted
+  projects still load.
+- **Scroll-zoom settles onto the nearest half step.** The plan asks for the zoom control to move in
+  0.5 increments and Phase 1 already snapped the stored value. Rather than letting the map hold a
+  zoom the control cannot display, the map is corrected to the snapped value when a gesture ends.
+  The correction is at most 0.25.
+- **The map element is registered to the ornament centre, not the map-window centroid.** The window
+  is the disk above the chord, so its centroid is above centre; centring the map there would make
+  the projection an offset rather than a division, for no gain.
+- **`vite.config.js` and `vite.config.d.ts` deleted.** They were committed `tsc -b` emit artifacts,
+  and Vite resolves `vite.config.js` *before* `vite.config.ts` — so the geocode dev middleware
+  added to the `.ts` file would have been silently ignored. `tsconfig.node.json` now emits to
+  `node_modules/.tmp/` instead of the repository root.
+
+### Not done in Phase 2, deliberately
+
+- **Marker dragging.** The plan's preview pane lists a draggable marker; Phase 2's own task list
+  does not, and the two actions above cover placing it. Carried to a later phase.
+- **Feature capture.** "Capture map geometry" records which viewport a capture belongs to and is
+  what the dirty check compares against. Extracting and deduplicating the features themselves is
+  Phase 3, and the button says so.
+- **Playwright.** Still not set up. The exit criteria are covered by jsdom component tests, which
+  can drive everything except the map's own pan and zoom gestures — those need WebGL. The map's
+  reporting path (`moveend` → store) is the same path the zoom control uses and is covered.
+- **`fast-check`.** Still not set up; swept loops over fixed ranges stand in.
+
 ## Known gaps carried into later phases
 
 - **Arc/curved text is not implemented.** `textVector.ts` sets straight baselines only. If the
@@ -92,19 +188,21 @@ body over 11.90mm with 4mm of loop material, and the text band is 30.8mm tall.
   outside `width × height`, so the lake tool's SVG/ZIP export path cannot be pointed at a disk
   as-is. Phase 4 needs either a bounding-box convention for round products or a generalised
   validator.
-- **Playwright is not set up.** The plan's acceptance suite calls for end-to-end coverage; the
-  reset acceptance item is currently covered by a jsdom component test
-  (`tests/unit/ornamentResetUi.test.tsx`) that asserts on rendered control values, which is the
-  failure mode the reference bug actually had. Browser-level E2E arrives with Phase 2, when there
-  is a map and a geocoder worth driving.
+- **Playwright is still not set up.** Phase 1 expected browser-level E2E to arrive with Phase 2.
+  It did not: the acceptance items are covered by jsdom component tests
+  (`tests/unit/ornamentResetUi.test.tsx`, `tests/unit/ornamentMapUi.test.tsx`) that assert on
+  rendered control values, which is the failure mode the reference bugs actually had. What those
+  cannot reach is the map's own pan and zoom gestures, which need WebGL — the map's reporting path
+  into the store is the same one the zoom control drives and is covered.
 - **`fast-check` is not set up.** The property-style assertions in the acceptance suite are
   currently expressed as swept loops over fixed ranges.
-- **MapLibre is a CDN `<script>`, not an npm dependency** (`index.html`, with
-  `declare const maplibregl:any`). Phase 2 should decide whether to keep that or pin it properly;
-  the current arrangement has no lockfile pinning and no types.
+- **Marker dragging.** The plan's preview pane lists a draggable marker with "return to selected
+  place". The return action exists; dragging does not.
 
 ## Next concrete phase
 
-Phase 2 — map and search. First task is the localhost geocoder proxy
-(`/api/geocode?q=...`), since the plan forbids calling public providers directly from the browser
-and the existing `GeocoderService` implementations do exactly that today.
+Phase 3 — feature geometry. Snapshot and deduplicate the rendered roads and water the Phase 2 style
+draws, project them to millimetres through `mapWindowLayout().scalePxPerMm`, clip them with
+`clipPolylinesToMapWindow`, then buffer and union. The "Capture map geometry" action and the
+dirty-state check are already in place and are what Phase 3 fills in; `GeometrySnapshot.featureCount`
+is the field waiting for it.

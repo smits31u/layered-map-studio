@@ -26,11 +26,26 @@ The top sheet uses the normalized water opening. Successive shoreline sheets use
 npm install
 npm run dev                 # http://192.168.0.137:5173
 npm test
-npm run build
-docker compose up -d --build # http://192.168.0.137:8080
+npm run build               # web app to dist/, localhost server to dist-server/
+npm run serve               # serve the built app plus /api/geocode
+docker compose up -d --build # http://192.168.0.137:8088
 ```
 
-Map style and Photon endpoints are configurable in `.env` using `.env.example`. The default OpenFreeMap style exposes OpenMapTiles-compatible `openmaptiles` source layers. Automated tests mock the provider boundary and never depend on external network availability. Run the Caldron Falls suite with `npx vitest run tests/regression`.
+The app is no longer a pure static bundle. Geocoding goes through a localhost proxy at
+`/api/geocode?q=...`, which enforces the provider policies a browser cannot — a descriptive
+server-side User-Agent, one request per second to public Nominatim, and response caching. In
+development the Vite dev server mounts it; in production `dist-server/index.js` serves the built
+`dist/` alongside it. Opening `dist/index.html` straight from the filesystem will load the app but
+not geocode.
+
+Set `GEOCODER_CONTACT` to an address whoever runs the instance can be reached at. Nominatim's usage
+policy requires a contactable identifier in the User-Agent; when it is unset the server warns at
+startup and the outgoing header says so rather than pretending otherwise.
+
+Map style and provider endpoints are configurable in `.env` using `.env.example`. The default
+OpenFreeMap style exposes OpenMapTiles-compatible `openmaptiles` source layers. Automated tests mock
+the provider boundary and never depend on external network availability. Run the Caldron Falls suite
+with `npx vitest run tests/regression`.
 
 ## Export modes
 

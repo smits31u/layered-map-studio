@@ -1,20 +1,28 @@
 import {useId} from 'react';
 import {FONT_REGISTRY} from '../../text/fontRegistry';
 import {mmToInches} from '../../utils/units';
+import type {GeocodeCandidate} from '../../server/geocode/types';
 import type {OrnamentAction,OrnamentTextKey} from '../store';
 import {ORNAMENT_LIMITS,type BuildMode,type ExportPreset,type MarkerKind,type MarkerOutput,type NumericLimit,type OrnamentProject,type RoadDetail,type TextLine} from '../types';
 import {fromDisplay} from '../validation';
 import type {OrnamentTextLayout} from '../text/ornamentText';
-import type {OrnamentGeometry} from '../geometry/ornamentShape';
+import type {OrnamentGeometry,OrnamentIssue} from '../geometry/ornamentShape';
+import type {ExportReadiness,GeometrySnapshot} from '../snapshot';
 import {StackDiagram} from './StackDiagram';
+import {PlaceSearch} from './PlaceSearch';
 
 type Props={
  project:OrnamentProject;
  dispatch:(action:OrnamentAction)=>void;
  geometry:OrnamentGeometry;
  textLayout:OrnamentTextLayout;
+ markerIssues:OrnamentIssue[];
+ readiness:ExportReadiness;
+ snapshot:GeometrySnapshot|undefined;
  onReset:()=>void;
  onFitText:()=>void;
+ onSelectPlace:(candidate:GeocodeCandidate,fitBounds:boolean)=>void;
+ onCaptureGeometry:()=>void;
 };
 
 const displayNumber=(mm:number,unit:OrnamentProject['displayUnit'])=>Number((unit==='in'?mmToInches(mm):mm).toFixed(3));
@@ -63,13 +71,16 @@ function TextLineFields({keyName,line,dispatch}:{keyName:OrnamentTextKey;line:Te
  </div>;
 }
 
-export function OrnamentControls({project,dispatch,geometry,textLayout,onReset,onFitText}:Props){
+const coordinate=(pair:[number,number])=>`${pair[1].toFixed(5)}, ${pair[0].toFixed(5)}`;
+
+export function OrnamentControls({project,dispatch,geometry,textLayout,markerIssues,readiness,snapshot,onReset,onFitText,onSelectPlace,onCaptureGeometry}:Props){
  const unit=project.displayUnit;
  const diameterLimit:NumericLimit=unit==='in'
   ?{min:Number(mmToInches(ORNAMENT_LIMITS.diameterMm.min).toFixed(3)),max:Number(mmToInches(ORNAMENT_LIMITS.diameterMm.max).toFixed(3)),step:.05}
   :ORNAMENT_LIMITS.diameterMm;
- const issues=[...geometry.issues,...textLayout.issues];
+ const issues=[...geometry.issues,...textLayout.issues,...markerIssues];
  const errors=issues.filter(i=>i.severity==='error');
+ const selectedPlace=project.viewport.selectedPlaceCenter;
 
  return <aside>
   <h1>Ornament Studio</h1>
@@ -77,6 +88,19 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,onReset,o
   <p className="ornament-status" role="status" aria-live="polite">
    {errors.length?`${errors.length} problem${errors.length>1?'s':''} to resolve`:issues.length?`${issues.length} warning${issues.length>1?'s':''}`:'Ornament geometry is valid'}
   </p>
+
+  <details open>
+   <summary>Place</summary>
+   <PlaceSearch selectedLabel={project.viewport.selectedPlaceLabel} onSelect={onSelectPlace}/>
+  </details>
+
+  <details open>
+   <summary>Map</summary>
+   <NumberField label="Zoom" value={project.viewport.zoom} limit={ORNAMENT_LIMITS.zoom} onChange={n=>dispatch({type:'setViewport',patch:{zoom:n}})}/>
+   <Segmented<RoadDetail> label="Road detail" value={project.roads.detail} options={[{value:'low',label:'Low'},{value:'medium',label:'Medium'},{value:'high',label:'High'}]} onChange={v=>dispatch({type:'setRoads',patch:{detail:v}})}/>
+   <NumberField label="Road width scale" value={project.roads.widthScale} limit={ORNAMENT_LIMITS.roadWidthScale} onChange={n=>dispatch({type:'setRoads',patch:{widthScale:n}})}/>
+   <p className="ornament-readout">Centre {coordinate(project.viewport.center)} · bearing and tilt are fixed at 0 for this release.</p>
+  </details>
 
   <details open>
    <summary>Ornament</summary>
@@ -124,14 +148,36 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,onReset,o
    <Segmented<MarkerKind> label="Symbol" value={project.marker.kind} options={[{value:'heart',label:'Heart'},{value:'pin',label:'Pin'},{value:'house',label:'House'}]} onChange={v=>dispatch({type:'setMarker',patch:{kind:v}})}/>
    <NumberField label="Marker size" suffix="mm" value={project.marker.sizeMm} limit={ORNAMENT_LIMITS.markerSizeMm} onChange={n=>dispatch({type:'setMarker',patch:{sizeMm:n}})}/>
    <Segmented<MarkerOutput> label="Marker output" value={project.marker.output} options={[{value:'separate-cut-piece',label:'Separate cut piece'},{value:'engraved',label:'Engraved'}]} onChange={v=>dispatch({type:'setMarker',patch:{output:v}})}/>
+   <p className="ornament-readout">Marker at {coordinate(project.marker.position)}</p>
+   {/* Panning never moves the marker. The plan: "Position the marker at the selected place
+       coordinate, not automatically at the current map center after panning. If the user wants the
+       marker to move with the map center, expose a separate 'center marker' action." These are
+       those actions, and they are the only two things that move it. */}
+   <div className="ornament-actions">
+    <button type="button" onClick={()=>dispatch({type:'centerMarkerOnView'})}>Move marker to map centre</button>
+    <button type="button" disabled={!selectedPlace} onClick={()=>dispatch({type:'markerToSelectedPlace'})}>Return marker to selected place</button>
+   </div>
   </details>
 
-  <details>
-   <summary>Map viewport</summary>
-   <p className="ornament-readout">The map itself arrives in Phase 2. These values are stored now so the project schema and reset behaviour are complete.</p>
-   <NumberField label="Zoom" value={project.viewport.zoom} limit={ORNAMENT_LIMITS.zoom} onChange={n=>dispatch({type:'setViewport',patch:{zoom:n}})}/>
-   <Segmented<RoadDetail> label="Road detail" value={project.roads.detail} options={[{value:'low',label:'Low'},{value:'medium',label:'Medium'},{value:'high',label:'High'}]} onChange={v=>dispatch({type:'setRoads',patch:{detail:v}})}/>
-   <NumberField label="Road width scale" value={project.roads.widthScale} limit={ORNAMENT_LIMITS.roadWidthScale} onChange={n=>dispatch({type:'setRoads',patch:{widthScale:n}})}/>
+  <details open>
+   <summary>Export</summary>
+   {/* Capturing records which viewport the geometry belongs to. Feature extraction itself is
+       Phase 3; what exists now is the guard that stops an export claiming geography the user has
+       since panned away from. */}
+   <button type="button" onClick={onCaptureGeometry}>{snapshot?'Re-capture map geometry':'Capture map geometry'}</button>
+   <p className="ornament-readout">
+    {snapshot
+     ?readiness.dirty?'The map has moved since the last capture.':`Captured at zoom ${snapshot.fingerprint.zoom} · ${snapshot.fingerprint.detail} detail.`
+     :'Nothing captured yet.'}
+   </p>
+   <button type="button" disabled={!readiness.ready} aria-describedby="ornament-export-blocked">
+    Export SVG
+   </button>
+   <ul id="ornament-export-blocked" className="ornament-issues">
+    {readiness.ready
+     ?<li>Ready to export once Phase 4 adds SVG generation.</li>
+     :readiness.reasons.map(reason=><li key={reason.code}>{reason.message}</li>)}
+   </ul>
   </details>
 
   {issues.length?<ul className="ornament-issues">{issues.map((issue,index)=><li key={`${issue.code}-${index}`} className={issue.severity}>{issue.message}</li>)}</ul>:null}

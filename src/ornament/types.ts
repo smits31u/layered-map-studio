@@ -27,7 +27,12 @@ export interface TextLine{value:string;fontId:FontId;sizeMm:number;letterSpacing
 // TextLine.fontId is the existing FontId union rather than the plan's `string`, per ADR 0002.
 export interface OrnamentProject{
  schemaVersion:1;
- viewport:{center:[number,number];zoom:number;bearing:0;pitch:0;selectedPlaceLabel?:string};
+ // selectedPlaceCenter is a departure from the plan's TypeScript block, which declares only
+ // selectedPlaceLabel. Its own prose needs the coordinate: the marker goes at "the selected place
+ // coordinate, not automatically at the current map center after panning", and the preview pane
+ // calls for a "return to selected place" action. A label cannot answer either question, and
+ // re-deriving the coordinate from the viewport centre is exactly the drift being avoided.
+ viewport:{center:[number,number];zoom:number;bearing:0;pitch:0;selectedPlaceLabel?:string;selectedPlaceCenter?:[number,number]};
  ornament:{
   diameterMm:number;
   rimWidthMm:number;

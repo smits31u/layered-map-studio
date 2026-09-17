@@ -1,0 +1,170 @@
+import {useEffect,useRef,useState} from 'react';
+import {mapPxToOrnamentMm,type MapWindowLayout} from '../map/cropMask';
+import {getMapLibre,supportsInteractiveMap,type OrnamentMapInstance} from '../map/maplibreGlobal';
+import {checkProviderCompatibility,OPENFREEMAP,type VectorTileProvider} from '../map/provider';
+import {allRoadLayerIds,buildOrnamentStyle,visibleRoadLayerIds} from '../map/style';
+import type {OrnamentMarkerSymbol} from '../markers/ornamentMarker';
+import type {PointMm} from '../geometry/clipLine';
+import {ORNAMENT_LIMITS,type RoadDetail} from '../types';
+
+type Props={
+ layout:MapWindowLayout;
+ center:[number,number];
+ zoom:number;
+ detail:RoadDetail;
+ marker:OrnamentMarkerSymbol;
+ markerPosition:[number,number];
+ provider?:VectorTileProvider;
+ fitBounds?:{bounds:[number,number,number,number];token:number};
+ onViewportChange:(view:{center:[number,number];zoom:number})=>void;
+ onMarkerOffsetMm:(offset:PointMm|undefined)=>void;
+ onStatus:(message:string)=>void;
+};
+
+// Two float comparisons decide whether a prop change is a real instruction to the map or just the
+// echo of a movement the map itself reported. Without them, every `moveend` would write to the
+// store, the store would write back to the map, and the map would fire `moveend` again.
+const SAME_CENTER=1e-7,SAME_ZOOM=1e-4;
+
+export function OrnamentMap({layout,center,zoom,detail,marker,markerPosition,provider=OPENFREEMAP,fitBounds,onViewportChange,onMarkerOffsetMm,onStatus}:Props){
+ const host=useRef<HTMLDivElement>(null);
+ const mapRef=useRef<OrnamentMapInstance|undefined>(undefined);
+ const [ready,setReady]=useState(false);
+ const [error,setError]=useState('');
+ const [markerPx,setMarkerPx]=useState<{x:number;y:number}|undefined>(undefined);
+ // Read inside map event handlers, which are registered once and would otherwise close over the
+ // first render's props forever.
+ const latest=useRef({center,zoom,layout,markerPosition,onViewportChange,onMarkerOffsetMm});
+ latest.current={center,zoom,layout,markerPosition,onViewportChange,onMarkerOffsetMm};
+
+ useEffect(()=>{
+  const maplibregl=getMapLibre();
+  if(!host.current)return;
+  if(!maplibregl||!supportsInteractiveMap()){
+   setError('This browser cannot display an interactive map (WebGL is unavailable). The ornament frame, text and export settings still work.');
+   return;
+  }
+  let map:OrnamentMapInstance;
+  try{
+   map=new maplibregl.Map({
+    container:host.current,
+    style:buildOrnamentStyle(detail,provider),
+    center,
+    zoom,
+    // The plan requires the first release to enforce bearing 0 and pitch 0. Setting them is not
+    // enough on its own — the interaction handlers below are what stop a user producing a rotated
+    // capture that the millimetre projection has no way to represent.
+    bearing:0,
+    pitch:0,
+    minZoom:ORNAMENT_LIMITS.zoom.min,
+    maxZoom:ORNAMENT_LIMITS.zoom.max,
+    attributionControl:false,
+    // The map is clipped to a circle, so MapLibre's own attribution control would be cropped out of
+    // sight. It is rendered in the preview pane instead, outside the mask.
+    dragRotate:false,
+    pitchWithRotate:false,
+    touchPitch:false,
+   });
+  }catch(reason){
+   setError(`The map could not be created: ${(reason as Error).message}`);
+   return;
+  }
+  mapRef.current=map;
+  map.dragRotate.disable();
+  map.touchZoomRotate.disableRotation();
+
+  const report=()=>{
+   const c=map.getCenter();
+   latest.current.onViewportChange({center:[c.lng,c.lat],zoom:map.getZoom()});
+  };
+  const placeMarker=()=>{
+   const point=map.project(latest.current.markerPosition);
+   setMarkerPx({x:point.x,y:point.y});
+   latest.current.onMarkerOffsetMm(mapPxToOrnamentMm(latest.current.layout,point.x,point.y));
+  };
+  const onMove=()=>{placeMarker()};
+  const onMoveEnd=()=>{report();placeMarker()};
+  const onLoad=()=>{
+   setReady(true);
+   placeMarker();
+   // The plan asks for the provider's schema to be validated on load rather than trusted, so a tile
+   // server that stops carrying roads or water says so here instead of producing a blank export.
+   const source=map.getSource(provider.sourceId);
+   const compatibility=checkProviderCompatibility(provider,source);
+   if(!compatibility.compatible&&compatibility.missing.length)setError(compatibility.message??'');
+  };
+  const onError=(event?:unknown)=>{
+   const message=(event as {error?:{message?:string}})?.error?.message??'unknown error';
+   onStatus(`Map data problem: ${message}`);
+  };
+
+  map.on('load',onLoad);
+  map.on('move',onMove);
+  map.on('moveend',onMoveEnd);
+  map.on('error',onError);
+  return ()=>{
+   mapRef.current=undefined;
+   map.off('load',onLoad);map.off('move',onMove);map.off('moveend',onMoveEnd);map.off('error',onError);
+   map.remove();
+  };
+  // Created once. Every subsequent prop change is applied by the effects below rather than by
+  // rebuilding the map, which would lose the user's framing and re-download tiles.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ },[]);
+
+ // Centre and zoom, applied only when they actually differ from what the map already shows. The
+ // stored zoom is snapped to the control's 0.5 step, so a free scroll-zoom settles onto the nearest
+ // half-step: the map and the zoom control can never show different numbers.
+ useEffect(()=>{
+  const map=mapRef.current;
+  if(!map)return;
+  const current=map.getCenter();
+  const moved=Math.abs(current.lng-center[0])>SAME_CENTER||Math.abs(current.lat-center[1])>SAME_CENTER;
+  const zoomed=Math.abs(map.getZoom()-zoom)>SAME_ZOOM;
+  if(moved||zoomed)map.jumpTo({center,zoom,bearing:0,pitch:0});
+ },[center,zoom]);
+
+ // Road detail is a visibility toggle over layers the style already defines, not a style rebuild:
+ // rebuilding would drop the tile cache and flash the map on every change of a segmented control.
+ useEffect(()=>{
+  const map=mapRef.current;
+  if(!map||!ready)return;
+  const visible=new Set(visibleRoadLayerIds(detail));
+  for(const id of allRoadLayerIds())if(map.getLayer(id))map.setLayoutProperty(id,'visibility',visible.has(id)?'visible':'none');
+ },[detail,ready]);
+
+ useEffect(()=>{
+  const map=mapRef.current;
+  if(!map||!fitBounds)return;
+  const [west,south,east,north]=fitBounds.bounds;
+  map.fitBounds([[west,south],[east,north]],{padding:12,maxZoom:ORNAMENT_LIMITS.zoom.max,duration:0});
+ },[fitBounds]);
+
+ // The map element is sized in pixels by the preview layout, so MapLibre has to be told when that
+ // size changes — it does not observe its container.
+ useEffect(()=>{mapRef.current?.resize()},[layout.sizePx]);
+
+ // Re-project the marker whenever the place, the marker kind or the layout changes, without waiting
+ // for the next map movement.
+ useEffect(()=>{
+  const map=mapRef.current;
+  if(!map||!ready)return;
+  const point=map.project(markerPosition);
+  setMarkerPx({x:point.x,y:point.y});
+  onMarkerOffsetMm(mapPxToOrnamentMm(layout,point.x,point.y));
+ },[markerPosition,layout,ready,marker,onMarkerOffsetMm]);
+
+ const style={left:`${layout.leftPx}px`,top:`${layout.topPx}px`,width:`${layout.sizePx}px`,height:`${layout.sizePx}px`,clipPath:layout.clipPath,WebkitClipPath:layout.clipPath};
+
+ if(error&&!mapRef.current)return <div className="ornament-map ornament-map-unavailable" style={style} role="note">{error}</div>;
+
+ return <div className="ornament-map" style={style}>
+  <div className="ornament-map-canvas" ref={host} aria-label="Map of the selected place" role="application"/>
+  {markerPx?<svg className="ornament-map-marker" width={layout.sizePx} height={layout.sizePx} viewBox={`0 0 ${layout.sizePx} ${layout.sizePx}`} aria-hidden="true">
+   <g transform={`translate(${markerPx.x} ${markerPx.y}) scale(${layout.scalePxPerMm}) translate(${-marker.anchorMm[0]} ${-marker.anchorMm[1]})`}>
+    <path d={marker.path} fill="#b3312a" stroke="#ffffff" strokeWidth={Math.max(.15,marker.sizeMm/40)} strokeLinejoin="round" fillRule="evenodd"/>
+   </g>
+  </svg>:null}
+  {error?<p className="ornament-map-error" role="status">{error}</p>:null}
+ </div>;
+}
