@@ -1,6 +1,9 @@
 import type { CropGeography,LngLat } from '../../types/project';
 export type PointMm={x:number;y:number};
-const mercator=(p:LngLat):PointMm=>({x:(p.lng+180)/360,y:(1-Math.log(Math.tan(p.lat*Math.PI/180)+1/Math.cos(p.lat*Math.PI/180))/Math.PI)/2});
+// Exported for the ornament, which projects captured map features with the same Web Mercator this
+// crop projection is built on. See src/ornament/geometry/mapProjection.ts for why it reuses this
+// function but not the inverse-bilinear CropProjection wrapper around it.
+export const mercator=(p:LngLat):PointMm=>({x:(p.lng+180)/360,y:(1-Math.log(Math.tan(p.lat*Math.PI/180)+1/Math.cos(p.lat*Math.PI/180))/Math.PI)/2});
 const bilinear=(a:PointMm,b:PointMm,c:PointMm,d:PointMm,u:number,v:number)=>({x:(1-u)*(1-v)*a.x+u*(1-v)*b.x+u*v*c.x+(1-u)*v*d.x,y:(1-u)*(1-v)*a.y+u*(1-v)*b.y+u*v*c.y+(1-u)*v*d.y});
 export class CropProjection {
  private corners:PointMm[];

@@ -21,6 +21,11 @@ export function createDefaultOrnamentProject():OrnamentProject{
    mapToTextBoundaryMm:14,
   },
   roads:{detail:'medium',widthScale:1},
+  // 'keep-separate' is the default because it is the only one of the three policies that changes
+  // nothing about the geometry — it reports the loose pieces and leaves them to the user. Bridging
+  // adds material the user did not ask for; omitting removes it. Both are reasonable choices and
+  // neither should be made silently on somebody's behalf.
+  land:{islandPolicy:'keep-separate',minIslandAreaMm2:4,bridgeWidthMm:1.5,structuralRingWidthMm:2},
   marker:{kind:'heart',position:[-88.207,45.3685],sizeMm:8,output:'separate-cut-piece'},
   text:{
    subtitle:{value:'',fontId:'inter',sizeMm:4,letterSpacingMm:.4},

@@ -14,7 +14,9 @@ const EPS=.001,SCALE=1000;
 const rectangle=(width:number,height:number):MultiPolygonMm=>[[[[0,0],[width,0],[width,height],[0,height],[0,0]]]];
 const finite=(p:number[])=>p.length>=2&&Number.isFinite(p[0])&&Number.isFinite(p[1]);
 const same=(a:number[],b:number[])=>Math.abs(a[0]-b[0])<EPS&&Math.abs(a[1]-b[1])<EPS;
-const signedArea=(ring:RingMm)=>ring.slice(0,-1).reduce((sum,p,i)=>{const q=ring[(i+1)%(ring.length-1)];return sum+p[0]*q[1]-q[0]*p[1]},0)/2;
+// Exported for the ornament, whose repair pass normalises ring winding by sign (outer rings
+// positive, holes negative) so the SVG export does not depend on a fill rule.
+export const signedArea=(ring:RingMm)=>ring.slice(0,-1).reduce((sum,p,i)=>{const q=ring[(i+1)%(ring.length-1)];return sum+p[0]*q[1]-q[0]*p[1]},0)/2;
 const ringArea=(ring:RingMm)=>Math.abs(signedArea(ring));
 export const polygonArea=(polygon:PolygonMm)=>Math.max(0,ringArea(polygon[0]??[])-polygon.slice(1).reduce((sum,ring)=>sum+ringArea(ring),0));
 export const multiPolygonArea=(geometry:MultiPolygonMm)=>geometry.reduce((sum,polygon)=>sum+polygonArea(polygon),0);

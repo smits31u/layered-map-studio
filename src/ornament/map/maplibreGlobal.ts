@@ -26,6 +26,17 @@ export interface OrnamentMapInstance{
  easeTo(options:{center?:[number,number];zoom?:number;duration?:number}):void;
  fitBounds(bounds:[[number,number],[number,number]],options?:{padding?:number;maxZoom?:number;duration?:number}):void;
  project(lngLat:[number,number]):PointLike;
+ // Added in Phase 3 for feature capture. `queryRenderedFeatures` is declared with the narrow
+ // signature the ornament uses — no geometry argument, an explicit layer list — because the layer
+ // list is not optional here: querying without it would pull in whatever else a future style draws.
+ queryRenderedFeatures(geometry?:unknown,options?:{layers?:string[]}):{geometry:{type:string;coordinates:unknown};properties?:Record<string,unknown>|null;layer?:{id?:string};sourceLayer?:string}[];
+ getBounds():{getWest():number;getSouth():number;getEast():number;getNorth():number};
+ // The canvas' CSS size, not its drawing buffer: the export scale is millimetres per *CSS* pixel,
+ // and on a HiDPI display the two differ by the device pixel ratio.
+ getCanvas():{clientWidth:number;clientHeight:number};
+ once(event:string,handler:()=>void):void;
+ loaded():boolean;
+ areTilesLoaded():boolean;
  unproject(point:[number,number]):LngLatLike;
  setLayoutProperty(layerId:string,name:string,value:unknown):void;
  getLayer(layerId:string):unknown;

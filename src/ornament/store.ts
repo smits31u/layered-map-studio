@@ -11,6 +11,7 @@ export type OrnamentAction=
  |{type:'setHangingLoop';patch:Partial<OrnamentProject['ornament']['hangingLoop']>}
  |{type:'setViewport';patch:Partial<Omit<OrnamentProject['viewport'],'bearing'|'pitch'>>}
  |{type:'setRoads';patch:Partial<OrnamentProject['roads']>}
+ |{type:'setLand';patch:Partial<OrnamentProject['land']>}
  |{type:'setMarker';patch:Partial<OrnamentProject['marker']>}
  |{type:'setTextLine';key:OrnamentTextKey;patch:Partial<TextLine>}
  |{type:'setTextGap';key:'gap12Mm'|'gap23Mm';value:number}
@@ -43,6 +44,7 @@ export function ornamentReducer(state:OrnamentProject,action:OrnamentAction):Orn
   case 'setHangingLoop':return clampOrnamentProject({...state,ornament:{...state.ornament,hangingLoop:{...state.ornament.hangingLoop,...action.patch}}});
   case 'setViewport':return clampOrnamentProject({...state,viewport:{...state.viewport,...action.patch}});
   case 'setRoads':return clampOrnamentProject({...state,roads:{...state.roads,...action.patch}});
+  case 'setLand':return clampOrnamentProject({...state,land:{...state.land,...action.patch}});
   case 'setMarker':return clampOrnamentProject({...state,marker:{...state.marker,...action.patch}});
   case 'setTextLine':return clampOrnamentProject({...state,text:{...state.text,[action.key]:{...state.text[action.key],...action.patch}}});
   case 'setTextGap':return clampOrnamentProject({...state,text:{...state.text,[action.key]:action.value}});

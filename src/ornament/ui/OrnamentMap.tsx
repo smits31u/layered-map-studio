@@ -1,4 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
+import {captureOrnamentFeatures,type CaptureMap} from '../capture/mapCapture';
 import {mapPxToOrnamentMm,type MapWindowLayout} from '../map/cropMask';
 import {getMapLibre,supportsInteractiveMap,type OrnamentMapInstance} from '../map/maplibreGlobal';
 import {checkProviderCompatibility,OPENFREEMAP,type VectorTileProvider} from '../map/provider';
@@ -6,16 +7,23 @@ import {allRoadLayerIds,buildOrnamentStyle,visibleRoadLayerIds} from '../map/sty
 import type {OrnamentMarkerSymbol} from '../markers/ornamentMarker';
 import type {PointMm} from '../geometry/clipLine';
 import {ORNAMENT_LIMITS,type RoadDetail} from '../types';
+import type {CaptureOutcome} from './OrnamentPage';
 
 type Props={
  layout:MapWindowLayout;
  center:[number,number];
  zoom:number;
  detail:RoadDetail;
+ chordYMm:number;
  marker:OrnamentMarkerSymbol;
  markerPosition:[number,number];
  provider?:VectorTileProvider;
  fitBounds?:{bounds:[number,number,number,number];token:number};
+ // Bumped by the "Capture map geometry" action. A token rather than a callback prop holding the map
+ // instance, so the MapLibre object never leaves this component — the same pattern `fitBounds`
+ // already uses to send an instruction into the map without letting the map out.
+ captureRequest?:{token:number};
+ onCapture:(outcome:CaptureOutcome)=>void;
  onViewportChange:(view:{center:[number,number];zoom:number})=>void;
  onMarkerOffsetMm:(offset:PointMm|undefined)=>void;
  onStatus:(message:string)=>void;
@@ -26,7 +34,7 @@ type Props={
 // store, the store would write back to the map, and the map would fire `moveend` again.
 const SAME_CENTER=1e-7,SAME_ZOOM=1e-4;
 
-export function OrnamentMap({layout,center,zoom,detail,marker,markerPosition,provider=OPENFREEMAP,fitBounds,onViewportChange,onMarkerOffsetMm,onStatus}:Props){
+export function OrnamentMap({layout,center,zoom,detail,chordYMm,marker,markerPosition,provider=OPENFREEMAP,fitBounds,captureRequest,onCapture,onViewportChange,onMarkerOffsetMm,onStatus}:Props){
  const host=useRef<HTMLDivElement>(null);
  const mapRef=useRef<OrnamentMapInstance|undefined>(undefined);
  const [ready,setReady]=useState(false);
@@ -34,8 +42,8 @@ export function OrnamentMap({layout,center,zoom,detail,marker,markerPosition,pro
  const [markerPx,setMarkerPx]=useState<{x:number;y:number}|undefined>(undefined);
  // Read inside map event handlers, which are registered once and would otherwise close over the
  // first render's props forever.
- const latest=useRef({center,zoom,layout,markerPosition,onViewportChange,onMarkerOffsetMm});
- latest.current={center,zoom,layout,markerPosition,onViewportChange,onMarkerOffsetMm};
+ const latest=useRef({center,zoom,layout,markerPosition,detail,chordYMm,provider,onViewportChange,onMarkerOffsetMm,onCapture});
+ latest.current={center,zoom,layout,markerPosition,detail,chordYMm,provider,onViewportChange,onMarkerOffsetMm,onCapture};
 
  useEffect(()=>{
   const maplibregl=getMapLibre();
@@ -143,6 +151,29 @@ export function OrnamentMap({layout,center,zoom,detail,marker,markerPosition,pro
  // The map element is sized in pixels by the preview layout, so MapLibre has to be told when that
  // size changes — it does not observe its container.
  useEffect(()=>{mapRef.current?.resize()},[layout.sizePx]);
+
+ // Feature capture. Everything it needs is read from `latest` rather than from the closure, because
+ // the effect is keyed on the request token alone: a capture must record the map as it is when the
+ // button is pressed, not as it was when this effect was last re-created.
+ useEffect(()=>{
+  if(!captureRequest)return;
+  const map=mapRef.current;
+  const report=latest.current.onCapture;
+  if(!map){
+   report({ok:false,message:error||'The map is not available, so there is no geometry to capture.'});
+   return;
+  }
+  let live=true;
+  captureOrnamentFeatures(map as unknown as CaptureMap,{
+   provider:latest.current.provider,
+   detail:latest.current.detail,
+   innerRadiusMm:latest.current.layout.sizeMm/2,
+   chordYMm:latest.current.chordYMm,
+  }).then(result=>{if(live)report({ok:true,result})})
+   .catch(reason=>{if(live)report({ok:false,message:(reason as Error).message})});
+  return ()=>{live=false};
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ },[captureRequest?.token]);
 
  // Re-project the marker whenever the place, the marker kind or the layout changes, without waiting
  // for the next map movement.

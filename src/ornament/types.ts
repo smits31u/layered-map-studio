@@ -1,3 +1,4 @@
+import type {LandIslandPolicy} from './geometry/landIslands';
 import type {FontId} from '../types/project';
 
 export type OrnamentUnit='mm'|'in';
@@ -43,6 +44,17 @@ export interface OrnamentProject{
   mapToTextBoundaryMm:number;
  };
  roads:{detail:RoadDetail;widthScale:number};
+ // What happens to land that a water cutout leaves unattached.
+ //
+ // This is stored rather than computed because the plan requires the choice to be explicit and the
+ // user's: "Offer three explicit policies: keep as separate pieces, bridge automatically using
+ // user-visible tabs, or omit below a size threshold. Default to warning, never silently discard
+ // meaningful islands." A default buried in the geometry code would be a decision made on the
+ // user's behalf about whether a piece of their ornament exists.
+ //
+ // structuralRingWidthMm is the annulus at the edge of the map disk that stays solid in
+ // water-cutout mode, so a coastline crossing the ornament does not detach the whole seaward half.
+ land:{islandPolicy:LandIslandPolicy;minIslandAreaMm2:number;bridgeWidthMm:number;structuralRingWidthMm:number};
  marker:{kind:MarkerKind;position:[number,number];sizeMm:number;output:MarkerOutput};
  text:{subtitle:TextLine;title:TextLine;date:TextLine;gap12Mm:number;gap23Mm:number};
  buildMode:BuildMode;
@@ -72,6 +84,9 @@ export const ORNAMENT_LIMITS={
  letterSpacingMm:{min:-2,max:8,step:.05},
  lineGapMm:{min:-8,max:18,step:.25},
  zoom:{min:7,max:19,step:.5},
+ minIslandAreaMm2:{min:0,max:200,step:.5},
+ bridgeWidthMm:{min:.5,max:6,step:.1},
+ structuralRingWidthMm:{min:.5,max:20,step:.25},
 } as const satisfies Record<string,NumericLimit>;
 
 export type OrnamentLimitKey=keyof typeof ORNAMENT_LIMITS;

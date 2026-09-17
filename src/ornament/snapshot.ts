@@ -23,8 +23,9 @@ export interface ViewportFingerprint{
 export interface GeometrySnapshot{
  fingerprint:ViewportFingerprint;
  takenAt:number;
- // Filled in by Phase 3. Present here so a snapshot is a real record rather than a boolean with a
- // timestamp, and so the readiness check below already knows to ask.
+ // Filled in by Phase 3: roads plus water polygons surviving deduplication. Optional because a
+ // snapshot is a real record rather than a boolean with a timestamp, and older code paths that
+ // record only a fingerprint stay valid.
  featureCount?:number;
 }
 

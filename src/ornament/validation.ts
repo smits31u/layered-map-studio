@@ -40,6 +40,12 @@ export function clampOrnamentProject(project:OrnamentProject):OrnamentProject{
    mapToTextBoundaryMm:clampTo(project.ornament.mapToTextBoundaryMm,L.mapToTextBoundaryMm),
   },
   roads:{...project.roads,widthScale:clampTo(project.roads.widthScale,L.roadWidthScale)},
+  land:{
+   ...project.land,
+   minIslandAreaMm2:clampTo(project.land.minIslandAreaMm2,L.minIslandAreaMm2),
+   bridgeWidthMm:clampTo(project.land.bridgeWidthMm,L.bridgeWidthMm),
+   structuralRingWidthMm:clampTo(project.land.structuralRingWidthMm,L.structuralRingWidthMm),
+  },
   marker:{...project.marker,sizeMm:clampTo(project.marker.sizeMm,L.markerSizeMm)},
   text:{
    subtitle:clampLine(project.text.subtitle),

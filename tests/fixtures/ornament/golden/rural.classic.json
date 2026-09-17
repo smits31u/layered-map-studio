@@ -1,0 +1,33 @@
+{
+ "roads": {
+  "components": 3,
+  "vertices": 410,
+  "areaMm2": 127.519,
+  "widthsMm": [
+   0.26,
+   0.3,
+   0.42,
+   0.7
+  ],
+  "bounds": [
+   -43.71,
+   -41.892,
+   41.726,
+   14.349
+  ]
+ },
+ "water": {
+  "components": 0,
+  "holes": 0,
+  "filledHoles": 0,
+  "areaMm2": 0,
+  "bounds": null
+ },
+ "land": {
+  "components": 0,
+  "areaMm2": 0,
+  "islandsDetected": 0,
+  "islandsRemaining": 0
+ },
+ "warnings": []
+}

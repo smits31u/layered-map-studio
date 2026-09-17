@@ -43,6 +43,7 @@ function merge(base:OrnamentProject,patch:Partial<OrnamentProject>):OrnamentProj
   viewport:{...base.viewport,...patch.viewport,bearing:0,pitch:0},
   ornament:{...base.ornament,...patch.ornament,hangingLoop:{...base.ornament.hangingLoop,...patch.ornament?.hangingLoop}},
   roads:{...base.roads,...patch.roads},
+  land:{...base.land,...patch.land},
   marker:{...base.marker,...patch.marker},
   text:{
    ...base.text,

@@ -2,6 +2,8 @@ import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {cleanup,fireEvent,render,screen,waitFor,within} from '@testing-library/react';
 import {OrnamentPage} from '../../src/ornament/ui/OrnamentPage';
 import {DEFAULT_ZOOM} from '../../src/ornament/defaults';
+import {cityCapture} from '../fixtures/ornament/captures';
+import {installFakeMapLibre,type InstalledFakeMapLibre} from '../helpers/fakeMapLibre';
 
 // Phase 2's exit criteria, driven through the UI: "a user can search, choose a result, pan/zoom,
 // switch detail, and place the marker while preview and state remain synchronized."
@@ -177,12 +179,40 @@ describe('ornament map and search',()=>{
  });
 });
 
+// Phase 3 changed what "Capture map geometry" does: it used to record a fingerprint, and now it
+// reads features off the map. These tests therefore need a map. The fake in tests/helpers is enough
+// of one — real Web Mercator, a real layer filter, fixture features — that clicking capture
+// exercises the whole path from queryRenderedFeatures to built geometry, which is more than these
+// tests could reach in Phase 2.
 describe('dirty state and export blocking',()=>{
- beforeEach(()=>{localStorage.clear();stubFetch(()=>proxyReply([CRIVITZ,SUAMICO]));render(<OrnamentPage onExit={()=>{}}/>);openEverySection()});
- afterEach(()=>{cleanup();vi.unstubAllGlobals()});
+ let fake:InstalledFakeMapLibre;
+ beforeEach(()=>{
+  localStorage.clear();
+  fake=installFakeMapLibre({features:cityCapture()});
+  stubFetch(()=>proxyReply([CRIVITZ,SUAMICO]));
+  render(<OrnamentPage onExit={()=>{}}/>);
+  openEverySection();
+ });
+ afterEach(()=>{cleanup();fake.uninstall()});
 
  const exportButton=()=>screen.getByRole('button',{name:'Export SVG'}) as HTMLButtonElement;
  const blockedReasons=()=>within(document.getElementById('ornament-export-blocked')!).queryAllByRole('listitem').map(item=>item.textContent??'');
+
+ // Choosing a result with "zoom to fit" left on would move the map to the bounding box centre, which
+ // is correct behaviour and simply not what these tests are about.
+ const chooseWithoutFitting=async()=>{
+  await search();
+  fireEvent.click(screen.getByLabelText(/Zoom to fit/));
+  fireEvent.click(screen.getByRole('button',{name:new RegExp(CRIVITZ.label.slice(0,20))}));
+  openEverySection();
+ };
+
+ // Capture is asynchronous now: it waits for the map to settle, reads it, then builds the geometry.
+ const captureGeometry=async(name:string|RegExp='Capture map geometry')=>{
+  fireEvent.click(screen.getByRole('button',{name}));
+  await waitFor(()=>expect(screen.getByText(/Captured \d+ feature/)).toBeTruthy());
+  openEverySection();
+ };
 
  it('blocks export before anything is chosen or captured',()=>{
   expect(exportButton().disabled).toBe(true);
@@ -191,15 +221,15 @@ describe('dirty state and export blocking',()=>{
  });
 
  it('still blocks export after choosing a place but before capturing',async()=>{
-  await chooseCrivitz();
+  await chooseWithoutFitting();
   expect(exportButton().disabled).toBe(true);
   expect(blockedReasons().join(' ')).toMatch(/Capture the map geometry/);
   expect(blockedReasons().join(' ')).not.toMatch(/Search for a place/);
  });
 
  it('allows export once a place is chosen and the geometry is captured',async()=>{
-  await chooseCrivitz();
-  fireEvent.click(screen.getByRole('button',{name:'Capture map geometry'}));
+  await chooseWithoutFitting();
+  await captureGeometry();
   openEverySection();
   expect(exportButton().disabled).toBe(false);
   expect(screen.queryByText(/Map moved since the geometry was captured/)).toBeNull();
@@ -207,8 +237,8 @@ describe('dirty state and export blocking',()=>{
 
  // The acceptance suite item: "Moving the viewport after a geometry snapshot marks export dirty."
  it('marks the project dirty and disables export when the viewport moves after a capture',async()=>{
-  await chooseCrivitz();
-  fireEvent.click(screen.getByRole('button',{name:'Capture map geometry'}));
+  await chooseWithoutFitting();
+  await captureGeometry();
   openEverySection();
   expect(exportButton().disabled).toBe(false);
 
@@ -220,8 +250,8 @@ describe('dirty state and export blocking',()=>{
  });
 
  it('marks it dirty when the road detail changes, because that changes what is captured',async()=>{
-  await chooseCrivitz();
-  fireEvent.click(screen.getByRole('button',{name:'Capture map geometry'}));
+  await chooseWithoutFitting();
+  await captureGeometry();
   openEverySection();
   fireEvent.click(screen.getByRole('button',{name:'High'}));
   openEverySection();
@@ -229,8 +259,8 @@ describe('dirty state and export blocking',()=>{
  });
 
  it('does not mark it dirty for a change that does not affect what is captured',async()=>{
-  await chooseCrivitz();
-  fireEvent.click(screen.getByRole('button',{name:'Capture map geometry'}));
+  await chooseWithoutFitting();
+  await captureGeometry();
   openEverySection();
   fireEvent.change(field('Title'),{target:{value:'Caldron Falls'}});
   fireEvent.change(field('Road width scale'),{target:{value:'2'}});
@@ -239,19 +269,19 @@ describe('dirty state and export blocking',()=>{
  });
 
  it('re-capturing after a move clears the dirty state',async()=>{
-  await chooseCrivitz();
-  fireEvent.click(screen.getByRole('button',{name:'Capture map geometry'}));
+  await chooseWithoutFitting();
+  await captureGeometry();
   openEverySection();
   fireEvent.change(field('Zoom'),{target:{value:'16'}});
   openEverySection();
-  fireEvent.click(screen.getByRole('button',{name:'Re-capture map geometry'}));
+  await captureGeometry('Re-capture map geometry');
   openEverySection();
   expect(exportButton().disabled).toBe(false);
  });
 
  it('drops the capture when a different place is chosen',async()=>{
-  await chooseCrivitz();
-  fireEvent.click(screen.getByRole('button',{name:'Capture map geometry'}));
+  await chooseWithoutFitting();
+  await captureGeometry();
   openEverySection();
   await search();
   fireEvent.click(screen.getByRole('button',{name:new RegExp(SUAMICO.label.slice(0,14))}));
@@ -263,8 +293,8 @@ describe('dirty state and export blocking',()=>{
  });
 
  it('resets the place, the capture and the zoom together',async()=>{
-  await chooseCrivitz();
-  fireEvent.click(screen.getByRole('button',{name:'Capture map geometry'}));
+  await chooseWithoutFitting();
+  await captureGeometry();
   openEverySection();
   fireEvent.click(screen.getByRole('button',{name:'Reset to defaults'}));
   openEverySection();

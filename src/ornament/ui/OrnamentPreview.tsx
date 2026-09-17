@@ -1,6 +1,7 @@
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useMemo,useRef,useState} from 'react';
 import {geometryPath} from '../../geometry/shoreline/polygonEngine';
 import type {PointMm} from '../geometry/clipLine';
+import type {FeatureGeometryResult} from '../geometry/featureGeometry';
 import type {OrnamentGeometry} from '../geometry/ornamentShape';
 import {mapWindowLayout,ornamentViewBox,previewTransform} from '../map/cropMask';
 import {OPENFREEMAP} from '../map/provider';
@@ -8,14 +9,18 @@ import type {OrnamentMarkerSymbol} from '../markers/ornamentMarker';
 import type {OrnamentTextLayout} from '../text/ornamentText';
 import type {OrnamentProject} from '../types';
 import {OrnamentMap} from './OrnamentMap';
+import type {CaptureOutcome} from './OrnamentPage';
 
 type Props={
  project:OrnamentProject;
  geometry:OrnamentGeometry;
  textLayout:OrnamentTextLayout;
  marker:OrnamentMarkerSymbol;
+ featureGeometry?:FeatureGeometryResult;
  dirty:boolean;
  fitBounds?:{bounds:[number,number,number,number];token:number};
+ captureRequest?:{token:number};
+ onCapture:(outcome:CaptureOutcome)=>void;
  onViewportChange:(view:{center:[number,number];zoom:number})=>void;
  onMarkerOffsetMm:(offset:PointMm|undefined)=>void;
  onStatus:(message:string)=>void;
@@ -24,13 +29,13 @@ type Props={
 // Semantic roles, not decoration: cut lines are strokes with no fill, engraving is filled. Colours
 // are a preset the export layer will swap (plan §SVG fabrication contract: "colour is a preset, not
 // the only semantic signal"), so the preview names the role in the group id too.
-const CUT='#d8503f',BAND='#2f3d4b',ENGRAVE='#12181e';
+const CUT='#d8503f',BAND='#2f3d4b',ENGRAVE='#12181e',WATER='#7c9fb5',TAB='#c08a2e';
 
 // The frame is drawn over the map and must not swallow drags and scrolls meant for it; the map sits
 // in the hole the frame leaves, so every pointer event the frame receives was aimed past it.
 const OVERLAY:React.CSSProperties={position:'absolute',inset:0,pointerEvents:'none'};
 
-export function OrnamentPreview({project,geometry,textLayout,marker,dirty,fitBounds,onViewportChange,onMarkerOffsetMm,onStatus}:Props){
+export function OrnamentPreview({project,geometry,textLayout,marker,featureGeometry,dirty,fitBounds,captureRequest,onCapture,onViewportChange,onMarkerOffsetMm,onStatus}:Props){
  const host=useRef<HTMLDivElement>(null);
  const [size,setSize]=useState({width:0,height:0});
 
@@ -49,15 +54,31 @@ export function OrnamentPreview({project,geometry,textLayout,marker,dirty,fitBou
  },[]);
 
  const blocked=geometry.issues.some(issue=>issue.severity==='error');
+
+ // Memoised because `layout` is a dependency of the map's marker effect. Recomputing it is cheap;
+ // handing the map a new object on every render is not — that alone is enough to make the map
+ // re-project the marker, report a new offset, re-render this component and start again.
+ const viewBox=useMemo(()=>ornamentViewBox(geometry),[geometry]);
+ const transform=useMemo(()=>previewTransform(viewBox,size.width,size.height),[viewBox,size.width,size.height]);
+ const layout=useMemo(()=>mapWindowLayout(geometry,viewBox,transform),[geometry,viewBox,transform]);
+ const showMap=transform.scale>0&&!blocked;
+
+ // With no map mounted there is nothing to answer a capture request, and the page would sit in its
+ // "capturing" state for ever. Reporting the failure from here is what closes that loop — it is the
+ // only place that knows the map was never rendered.
+ useEffect(()=>{
+  if(!captureRequest||showMap)return;
+  onCapture({ok:false,message:'The map is not on screen yet, so there is no geometry to capture. Give the preview a moment to lay out and try again.'});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ },[captureRequest?.token,showMap]);
+
  if(blocked)return <div className="empty">
   <p>Ornament geometry cannot be built yet.</p>
   <ul className="ornament-issues">{geometry.issues.filter(i=>i.severity==='error').map((issue,index)=><li key={`${issue.code}-${index}`} className="error">{issue.message}</li>)}</ul>
  </div>;
 
- const viewBox=ornamentViewBox(geometry);
- const transform=previewTransform(viewBox,size.width,size.height);
- const layout=mapWindowLayout(geometry,viewBox,transform);
- const showMap=transform.scale>0;
+ const cutout=project.buildMode==='water-cutout-3-piece';
+ const hairline=Math.max(.1,geometry.outerRadiusMm/400);
 
  return <div className="ornament-preview" ref={host}>
   {showMap?<OrnamentMap
@@ -65,9 +86,12 @@ export function OrnamentPreview({project,geometry,textLayout,marker,dirty,fitBou
    center={project.viewport.center}
    zoom={project.viewport.zoom}
    detail={project.roads.detail}
+   chordYMm={geometry.chordYMm}
    marker={marker}
    markerPosition={project.marker.position}
    fitBounds={fitBounds}
+   captureRequest={captureRequest}
+   onCapture={onCapture}
    onViewportChange={onViewportChange}
    onMarkerOffsetMm={onMarkerOffsetMm}
    onStatus={onStatus}
@@ -81,16 +105,38 @@ export function OrnamentPreview({project,geometry,textLayout,marker,dirty,fitBou
    role="img"
    aria-label={`Ornament preview, ${project.ornament.diameterMm}mm diameter`}
   >
+   {/* Captured geometry is drawn first, under the frame, in the same millimetre coordinate system
+       the frame uses. That is the point of showing it at all: if the projection, the scale or the
+       clip were wrong, the roads would sit somewhere other than on top of the roads the map is
+       drawing underneath, and it would be obvious rather than discovered at the laser. */}
+   {featureGeometry?<g id="ornament/captured" aria-hidden="true">
+    {featureGeometry.waterEngrave.length?<g id="piece/base/water-light-engrave">
+     <path d={geometryPath(featureGeometry.waterEngrave)} fill={WATER} fillOpacity={.55} fillRule="evenodd"/>
+    </g>:null}
+    {cutout&&featureGeometry.waterCut.length?<g id="piece/base/water-cut">
+     <path d={geometryPath(featureGeometry.waterCut)} fill="none" stroke={CUT} strokeWidth={hairline} fillRule="evenodd"/>
+    </g>:null}
+    {featureGeometry.roadsEngrave.length?<g id="piece/land/roads-engrave">
+     <path d={geometryPath(featureGeometry.roadsEngrave)} fill={ENGRAVE} fillRule="evenodd"/>
+    </g>:null}
+    {/* Loose land pieces and the tabs bridging them are called out rather than blended in: they are
+        the parts of the ornament most likely to go wrong on the machine. */}
+    {featureGeometry.islands.bridges.map((bridge,index)=>
+     <line key={`bridge-${index}`} x1={bridge.from[0]} y1={bridge.from[1]} x2={bridge.to[0]} y2={bridge.to[1]} stroke={TAB} strokeWidth={bridge.widthMm} strokeLinecap="butt" opacity={.9}/>)}
+    {featureGeometry.islands.remaining.map((island,index)=>
+     <circle key={`island-${index}`} cx={island.centroidMm[0]} cy={island.centroidMm[1]} r={Math.max(1,island.extentMm/2)} fill="none" stroke={TAB} strokeWidth={hairline} strokeDasharray="1 1"/>)}
+   </g>:null}
+
    <g id="piece/frame/cut">
     <path d={geometryPath(geometry.frame)} fill="#e8ece9" stroke={CUT} strokeWidth={Math.max(.15,geometry.outerRadiusMm/250)} fillRule="evenodd"/>
    </g>
    <g id="preview/map-window" aria-hidden="true">
     {/* The crop the map is clipped by, drawn from the same MultiPolygon the clip-path is built
         from, so a mismatch between the two would be visible rather than silent. */}
-    <path d={layout.outlinePathMm} fill="none" stroke={CUT} strokeWidth={Math.max(.1,geometry.outerRadiusMm/400)} opacity={.6}/>
+    <path d={layout.outlinePathMm} fill="none" stroke={CUT} strokeWidth={hairline} opacity={.6}/>
    </g>
    <g id="preview/text-band" aria-hidden="true">
-    <path d={geometryPath(geometry.textBand)} fill="none" stroke={BAND} strokeWidth={Math.max(.1,geometry.outerRadiusMm/400)} strokeDasharray="1.5 1.5"/>
+    <path d={geometryPath(geometry.textBand)} fill="none" stroke={BAND} strokeWidth={hairline} strokeDasharray="1.5 1.5"/>
    </g>
    <g id="piece/frame/text-engrave" fill={ENGRAVE} fillRule="nonzero">
     {textLayout.lines.map(line=>line.d?<path key={line.key} d={line.d} data-line={line.key}/>:null)}
@@ -102,6 +148,7 @@ export function OrnamentPreview({project,geometry,textLayout,marker,dirty,fitBou
    <span>Map window {geometry.mapOpeningHeightMm.toFixed(1)}mm · {layout.sizeMm.toFixed(1)}mm across</span>
    <span>Text band {geometry.textBandHeightMm.toFixed(1)}mm · block {textLayout.blockHeightMm.toFixed(1)}mm</span>
    <span>Loop join {geometry.loop.junctionWidthMm.toFixed(2)}mm</span>
+   {featureGeometry?<span>Roads {featureGeometry.metrics.roads.areaMm2.toFixed(1)}mm² · water {featureGeometry.metrics.water.areaMm2.toFixed(1)}mm²</span>:null}
   </div>
 
   {/* Attribution lives out here rather than inside the map, because the map is clipped to a circle

@@ -2,6 +2,9 @@ import {useId} from 'react';
 import {FONT_REGISTRY} from '../../text/fontRegistry';
 import {mmToInches} from '../../utils/units';
 import type {GeocodeCandidate} from '../../server/geocode/types';
+import type {CaptureWarning} from '../capture/mapCapture';
+import type {FeatureGeometryResult} from '../geometry/featureGeometry';
+import {LAND_ISLAND_POLICIES,type LandIslandPolicy} from '../geometry/landIslands';
 import type {OrnamentAction,OrnamentTextKey} from '../store';
 import {ORNAMENT_LIMITS,type BuildMode,type ExportPreset,type MarkerKind,type MarkerOutput,type NumericLimit,type OrnamentProject,type RoadDetail,type TextLine} from '../types';
 import {fromDisplay} from '../validation';
@@ -19,6 +22,10 @@ type Props={
  markerIssues:OrnamentIssue[];
  readiness:ExportReadiness;
  snapshot:GeometrySnapshot|undefined;
+ featureGeometry:FeatureGeometryResult|undefined;
+ captureWarnings:CaptureWarning[];
+ building:boolean;
+ offMainThread:boolean;
  onReset:()=>void;
  onFitText:()=>void;
  onSelectPlace:(candidate:GeocodeCandidate,fitBounds:boolean)=>void;
@@ -73,12 +80,18 @@ function TextLineFields({keyName,line,dispatch}:{keyName:OrnamentTextKey;line:Te
 
 const coordinate=(pair:[number,number])=>`${pair[1].toFixed(5)}, ${pair[0].toFixed(5)}`;
 
-export function OrnamentControls({project,dispatch,geometry,textLayout,markerIssues,readiness,snapshot,onReset,onFitText,onSelectPlace,onCaptureGeometry}:Props){
+const ISLAND_POLICY_LABELS:Record<LandIslandPolicy,string>={
+ 'keep-separate':'Keep as separate pieces',
+ bridge:'Bridge with tabs',
+ 'omit-below-threshold':'Omit below threshold',
+};
+
+export function OrnamentControls({project,dispatch,geometry,textLayout,markerIssues,readiness,snapshot,featureGeometry,captureWarnings,building,offMainThread,onReset,onFitText,onSelectPlace,onCaptureGeometry}:Props){
  const unit=project.displayUnit;
  const diameterLimit:NumericLimit=unit==='in'
   ?{min:Number(mmToInches(ORNAMENT_LIMITS.diameterMm.min).toFixed(3)),max:Number(mmToInches(ORNAMENT_LIMITS.diameterMm.max).toFixed(3)),step:.05}
   :ORNAMENT_LIMITS.diameterMm;
- const issues=[...geometry.issues,...textLayout.issues,...markerIssues];
+ const issues=[...geometry.issues,...textLayout.issues,...markerIssues,...(featureGeometry?.warnings??[])];
  const errors=issues.filter(i=>i.severity==='error');
  const selectedPlace=project.viewport.selectedPlaceCenter;
 
@@ -143,6 +156,30 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,markerIss
    <Segmented<ExportPreset> label="Export preset" value={project.exportPreset} options={[{value:'semantic',label:'Semantic'},{value:'lightburn-colors',label:'LightBurn'}]} onChange={v=>dispatch({type:'setExportPreset',value:v})}/>
   </details>
 
+  <details open={project.buildMode==='water-cutout-3-piece'}>
+   <summary>Loose land pieces</summary>
+   {/* The plan's §Water requires this to be the user's decision, in these three words: "Offer three
+       explicit policies: keep as separate pieces, bridge automatically using user-visible tabs, or
+       omit below a size threshold. Default to warning, never silently discard meaningful islands."
+       Every policy still reports what it found — see the warnings list at the bottom of this pane. */}
+   <Segmented<LandIslandPolicy>
+    label="When a water cutout leaves loose land"
+    value={project.land.islandPolicy}
+    options={LAND_ISLAND_POLICIES.map(policy=>({value:policy,label:ISLAND_POLICY_LABELS[policy]}))}
+    onChange={v=>dispatch({type:'setLand',patch:{islandPolicy:v}})}
+   />
+   <NumberField label="Omit pieces below" suffix="mm²" value={project.land.minIslandAreaMm2} limit={ORNAMENT_LIMITS.minIslandAreaMm2} onChange={n=>dispatch({type:'setLand',patch:{minIslandAreaMm2:n}})}/>
+   <NumberField label="Bridge tab width" suffix="mm" value={project.land.bridgeWidthMm} limit={ORNAMENT_LIMITS.bridgeWidthMm} onChange={n=>dispatch({type:'setLand',patch:{bridgeWidthMm:n}})}/>
+   <NumberField label="Structural outer ring" suffix="mm" value={project.land.structuralRingWidthMm} limit={ORNAMENT_LIMITS.structuralRingWidthMm} onChange={n=>dispatch({type:'setLand',patch:{structuralRingWidthMm:n}})}/>
+   <p className="ornament-readout">
+    {project.buildMode==='water-cutout-3-piece'
+     ?featureGeometry
+      ?`${featureGeometry.islands.detected.length} loose piece(s) detected · ${featureGeometry.islands.remaining.length} still loose after this policy.`
+      :'Capture the map geometry to find out whether this framing leaves loose land.'
+     :'Only applies in water-cutout mode, where water is cut away rather than engraved.'}
+   </p>
+  </details>
+
   <details>
    <summary>Marker</summary>
    <Segmented<MarkerKind> label="Symbol" value={project.marker.kind} options={[{value:'heart',label:'Heart'},{value:'pin',label:'Pin'},{value:'house',label:'House'}]} onChange={v=>dispatch({type:'setMarker',patch:{kind:v}})}/>
@@ -164,12 +201,17 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,markerIss
    {/* Capturing records which viewport the geometry belongs to. Feature extraction itself is
        Phase 3; what exists now is the guard that stops an export claiming geography the user has
        since panned away from. */}
-   <button type="button" onClick={onCaptureGeometry}>{snapshot?'Re-capture map geometry':'Capture map geometry'}</button>
+   <button type="button" disabled={building} onClick={onCaptureGeometry}>{building?'Working…':snapshot?'Re-capture map geometry':'Capture map geometry'}</button>
    <p className="ornament-readout">
     {snapshot
-     ?readiness.dirty?'The map has moved since the last capture.':`Captured at zoom ${snapshot.fingerprint.zoom} · ${snapshot.fingerprint.detail} detail.`
+     ?readiness.dirty?'The map has moved since the last capture.':`Captured ${snapshot.featureCount??0} feature(s) at zoom ${snapshot.fingerprint.zoom} · ${snapshot.fingerprint.detail} detail.`
      :'Nothing captured yet.'}
    </p>
+   {featureGeometry?<p className="ornament-readout">
+    {`${featureGeometry.metrics.roads.clippedPieces} road piece(s) at ${featureGeometry.metrics.roads.widthsMm.map(width=>width.toFixed(2)).join('/')}mm · ${featureGeometry.metrics.water.components} water area(s) with ${featureGeometry.metrics.water.holes} island(s) · ${featureGeometry.metrics.roads.vertices+featureGeometry.metrics.water.vertices} vertices`}
+    {offMainThread?' · built in a background worker.':' · built on the main thread (no Web Worker available).'}
+   </p>:null}
+   {captureWarnings.length?<ul className="ornament-issues">{captureWarnings.map(warning=><li key={warning.code} className="warning">{warning.message}</li>)}</ul>:null}
    <button type="button" disabled={!readiness.ready} aria-describedby="ornament-export-blocked">
     Export SVG
    </button>

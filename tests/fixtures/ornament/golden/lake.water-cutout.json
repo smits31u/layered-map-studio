@@ -1,0 +1,40 @@
+{
+ "roads": {
+  "components": 2,
+  "vertices": 44,
+  "areaMm2": 15.126,
+  "widthsMm": [
+   0.32,
+   0.42
+  ],
+  "bounds": [
+   -40.98,
+   -30.401,
+   -32.893,
+   14.21
+  ]
+ },
+ "water": {
+  "components": 1,
+  "holes": 3,
+  "filledHoles": 1,
+  "areaMm2": 3803.619,
+  "bounds": [
+   -42.434,
+   -31.054,
+   40.641,
+   42.795
+  ]
+ },
+ "land": {
+  "components": 4,
+  "areaMm2": 2605.49,
+  "islandsDetected": 3,
+  "islandsRemaining": 3
+ },
+ "warnings": [
+  "land-islands-detected",
+  "land-islands-remaining",
+  "water-holes-filled"
+ ]
+}

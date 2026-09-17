@@ -21,6 +21,7 @@ const MUTATIONS:OrnamentAction[]=[
  {type:'setOrnament',patch:{diameterMm:180,rimWidthMm:12,mapToTextBoundaryMm:-5}},
  {type:'setHangingLoop',patch:{outerDiameterMm:24,innerDiameterMm:12,overlapMm:7,minNeckWidthMm:5}},
  {type:'setRoads',patch:{detail:'high',widthScale:2.5}},
+ {type:'setLand',patch:{islandPolicy:'bridge',minIslandAreaMm2:12,bridgeWidthMm:3,structuralRingWidthMm:5}},
  {type:'setMarker',patch:{kind:'house',position:[1,2],sizeMm:15,output:'engraved'}},
  {type:'setTextLine',key:'subtitle',patch:{value:'north woods',fontId:'cinzel',sizeMm:6,letterSpacingMm:1}},
  {type:'setTextLine',key:'title',patch:{value:'Caldron Falls',fontId:'inter',sizeMm:18,letterSpacingMm:.9}},
