@@ -9,7 +9,7 @@ Tracks `CLAUDE_MAP_ORNAMENT_BUILD_PLAN.md` against what exists in this repositor
 | 2 — map and search | complete |
 | 3 — feature geometry | complete |
 | 4 — SVG export and preflight | built and tested; **not exit-criteria-complete** until xTool Studio import is verified by hand |
-| 5 — hardening | not started |
+| 5 — hardening | complete |
 
 ## Repository shape — deliberate departure from the plan
 
@@ -441,6 +441,173 @@ hanging point to the body. Reporting the chord would overstate the connection th
 so a regression that replaced the measurement with `geometry.loop.junctionWidthMm` fails it. Its last
 case sweeps every loop the editor will accept and asserts that each one is either refused or really
 does have the material.
+
+## Phase 5 — complete
+
+The plan's four hardening items. Marker-related coverage is absent throughout because the feature is
+gone: what the plan asked for there no longer has a control to be applied to.
+
+### 1. Cancellation and stale-result guards, and timeouts
+
+Three separate races, guarded in three different places, because they fail differently.
+
+**A superseded geometry build** was already guarded in Phase 3 by the revision check in
+`OrnamentPage`, and the runner terminates the worker rather than letting a cancelled job keep a core.
+Unchanged.
+
+**A capture that lands after the project has moved on** was not guarded, and could not be seen from
+the geometry side. `onCapture` stamped the snapshot with the project's *current* fingerprint, so a
+capture whose settings the user had changed while it was in flight was recorded as describing the new
+ones — export unblocked, against features read under the old ones. `snapshotFromCapture()` in
+`snapshot.ts` now builds the fingerprint from the capture's own record (`viewport`, `detail`,
+`innerRadiusMm`), so a capture that no longer matches the project reads as stale on arrival and
+blocks export with the reason already written for it.
+
+Worth stating precisely, because it is easy to over-claim: *panning* during a capture was never this
+bug. `captureOrnamentFeatures` waits for the map to settle and only then reads the viewport, so a pan
+during the wait is part of the view that gets captured, and a pan across the read itself is caught by
+the before/after check that throws `moved`. The value that genuinely goes stale is road detail, which
+is read *before* the wait because it decides which layers to query.
+
+**A capture that never reports at all** — the map unmounted mid-capture, an exception swallowed
+between the two — left nothing to clear the working state, and the capture button read "Working…"
+for the rest of the session. `CAPTURE_TIMEOUT_MS` (20s) in `OrnamentPage` is the outer bound, longer
+than the capture's own 8s idle timeout so it cannot fire underneath it. A report arriving after the
+watchdog has given up is dropped rather than reviving a capture the user was told had failed.
+
+**A wedged worker** now has `DEFAULT_GEOMETRY_TIMEOUT_MS` (30s) in `geometryRunner`. It terminates the
+worker, because a worker inside a synchronous Clipper union cannot be asked to stop, and rejects with
+`GeometryTimeoutError` — distinct from a cancellation, since one is expected and the other is a fault
+the user has to be told about.
+
+The inline runner deliberately takes no timeout. `buildFeatureGeometry` runs synchronously on the only
+thread there is, so a timer set before it cannot fire until after it has finished; a timeout there
+would be decoration. That path is protected by the capacity limits instead.
+
+Export itself is synchronous and likewise cannot be pre-empted by a timer. It is bounded by the
+limits below rather than by a clock, which is the honest arrangement rather than a timeout that
+cannot fire.
+
+### 2. Feature, vertex, memory and simplification limits
+
+`src/ornament/limits.ts`, sized for the ornament this tool is actually for — up to 4in / 101.6mm —
+and explicitly recorded as such in `ORNAMENT_CAPACITY.sizedForDiameterMm`, so a future larger
+ornament is a deliberate revisit rather than a silent inheritance.
+
+| Limit | Value | Effect |
+|---|---|---|
+| `maxCapturedFeatures` | 12,000 | Capture refused |
+| `maxCapturedVertices` | 400,000 | Capture refused |
+| `simplifyAboveVertices` | 25,000 | Capture thinned before building |
+| `simplifyToleranceMm` | 0.04mm | The tolerance thinning works to |
+| `warnOutputVertices` | 200,000 | Built geometry reported as large |
+
+A refusal is thrown as a `CaptureError` with code `too-large`, at the capture boundary — before the
+capture is stored, before it crosses into the worker, and before the UI has claimed anything was
+captured. Both refusal messages name the two levers the user actually has: zoom in, or drop road
+detail.
+
+Simplification is Ramer–Douglas–Peucker (`geometry/simplify.ts`), run on **projected millimetres**
+rather than on longitude and latitude, so the tolerance is a physical distance on the finished piece
+and means the same thing at every zoom and latitude. 0.04mm is roughly a quarter of a typical 0.15mm
+laser kerf, so it is not visible on any size this tool supports. It removes points and never moves
+them, keeps rings closed, and returns a ring unchanged rather than destroying it where thinning would
+collapse it below three points.
+
+An ordinary capture is untouched — the golden fixtures are well under the threshold and their digests
+are unchanged by this work, which is the check that a limit meant for pathological captures has not
+quietly started thinning every export.
+
+### 3. Keyboard, mobile and accessibility coverage
+
+Against the plan's §Accessibility list, applied to the current UI:
+
+- **Real labels on all controls** — already held; now enforced by a test that walks every input in
+  the control pane and fails on any without an accessible name.
+- **Keyboard-operable segmented controls** — they were reachable (they are buttons) but cost one tab
+  stop per option. Now the standard toolbar pattern: one tab stop for the group resting on the live
+  option, arrow keys between options, Home/End to the ends. `aria-pressed` is retained.
+- **Numeric values adjacent to sliders and editable directly** — already held; now covered by a test
+  that pairs every slider with its number input and checks they share one value, one range and one
+  step.
+- **Status/progress through a polite live region** — this was the real gap. Progress existed only as
+  a button label, and a label changing under a screen reader is not announced. `PipelinePhase` in
+  `OrnamentPage` is now one value for what the pipeline is doing, rendered as a
+  `role="status" aria-live="polite"` region carrying `aria-busy`.
+- **Errors explain how to recover** — held; the new failure states (capture too large, capture
+  timeout, build timeout) each name what to change, and are tested for it.
+- **Colour never alone for cut/engrave** — the drawing already encoded role structurally (a cut is an
+  unfilled stroke, an engrave is filled) but never said so. A legend now names each role and its
+  shape treatment before its colour, the swatches are `aria-hidden` because the words carry the
+  meaning, the cut and engrave groups carry `<title>` elements, and every finding in the status badge
+  is prefixed with the word "Error" or "Warning" rather than relying on its border colour.
+
+**Mobile** needed a real fix, not just coverage: `index.html` had no viewport meta at all, so a phone
+would have laid the page out at a 980px virtual viewport and scaled it down — the breakpoints could
+never have applied. It now has one, plus the `lang`, charset and title that were also missing. Below
+720px the two panes stack, fields go full width, and controls take a 38px minimum touch target; below
+420px the preview's floating legend and metrics become static so nothing overlaps at 390px.
+
+### 4. Provider, licence, attribution and self-hosting documentation
+
+[`docs/ornament-operations.md`](ornament-operations.md). It consolidates rather than duplicates: the
+reasoning stays in ADR 0002 (fonts) and ADR 0003 (geocoder proxy, MapLibre CDN), and the new page is
+the procedure — what can be swapped and how, what has to be credited and where the four places are
+that credit appears, and what changes when each external dependency is self-hosted.
+
+### The map element fills the preview pane
+
+Tonight's restructure made the preview show the full map with the exterior dimmed rather than
+hard-clipped, so a user can see the geography they are panning past. The map element itself was still
+only the square circumscribing the ornament's inner opening, though, so "the full map" reached barely
+past the frame — about 527px of a 694x722 pane.
+
+The element is now the smallest rectangle **centred on the ornament centre** that covers the whole
+pane. Centred on the ornament centre, not on the pane, is the part that matters: the export
+projection puts the ornament's (0,0) at the map's centre pixel, so growing the element around that
+point keeps this a presentation change and nothing more. It is a rectangle rather than a square
+because the ornament centre sits below the pane's centre — the hanging loop extends the drawing
+upward — and it is allowed to overhang the pane, which `.ornament-preview`'s `overflow:hidden`
+contains.
+
+Two things had to change with it, and both are improvements in their own right:
+
+**The scale no longer comes from the element's width.** `captureOrnamentFeatures` used to compute
+`mmPerPx` as `innerRadiusMm*2 / canvasWidthPx`, which was correct only while the element *was* the
+ornament's map window. It now takes `mmPerPx` from the preview layout. Had it kept deriving the scale
+from the element, an ornament exported from a maximised window would have come out a different
+physical size from one exported from a small window — the exact class of bug the plan's "do not infer
+export scale from an arbitrary DOM fallback" rule exists to prevent. `assertProjectionAgrees` checks
+the supplied number against the live map at a probe point, so a wrong scale fails loudly at capture
+rather than silently at the laser.
+
+**The capture queries the ornament window, not the element.** `queryRenderedFeatures` is now given an
+explicit bounding box of `innerRadiusMm` either side of the element centre. Querying the whole element
+would read thousands of features that exist only to be clipped away, and would have made the captured
+feature count — and therefore the capacity limits above — depend on how large the user's browser
+window happened to be.
+
+### Fixed: a flaky test, and the gap behind it
+
+`ornamentMapUi.test.tsx`'s "re-capturing after a move clears the dirty state" failed under full-suite
+load and passed in isolation.
+
+Its `captureGeometry` helper waited for "Captured N feature(s)". That text appears when the snapshot
+is set — one render *before* the geometry built from it finishes, at which point the pipeline is still
+busy and the capture button still reads "Working…". The helper therefore returned mid-pipeline, and
+the re-capture case is the one that immediately queries that button by its settled name. Whether that
+synchronous query found "Re-capture map geometry" or "Working…" depended on when an out-of-act React
+state update happened to flush, which under load it sometimes had not.
+
+The wait condition was the bug, so the fix is a wait condition that is actually the completion
+condition: the helper now waits on `aria-busy` on the progress region — the pipeline's own account of
+whether it has finished. That region had to exist anyway for the accessibility requirement above, so
+the test and the screen reader now synchronise on the same signal. No timeout was lengthened and no
+retry was added.
+
+`tests/unit/ornamentHardening.test.tsx` pins the invariant directly: at the moment the snapshot text
+first appears the pipeline still reports itself busy and the button still reads "Working…", so
+`aria-busy` is the only safe thing to wait on.
 
 ## Next concrete phase
 

@@ -90,7 +90,7 @@ function stubMap(options:StubOptions={}):StubMap{
 }
 
 const capture=(map:CaptureMap,over:Partial<Parameters<typeof captureOrnamentFeatures>[1]>={})=>
- captureOrnamentFeatures(map,{provider:OPENFREEMAP,detail:'high',innerRadiusMm:44.8,chordYMm:14,now:()=>0,...over});
+ captureOrnamentFeatures(map,{provider:OPENFREEMAP,detail:'high',innerRadiusMm:44.8,chordYMm:14,mmPerPx:89.6/SIZE,now:()=>0,...over});
 
 describe('layer selection',()=>{
  // "query the entire rendered viewport for only required layers"
@@ -188,10 +188,45 @@ describe('snapshotting',()=>{
  });
 
  it('records the ornament window the capture belongs to',async()=>{
-  const result=await capture(stubMap({features:cityCapture()}),{innerRadiusMm:30,chordYMm:5});
+  const result=await capture(stubMap({features:cityCapture()}),{innerRadiusMm:30,chordYMm:5,mmPerPx:60/SIZE});
   expect(result.capture.innerRadiusMm).toBe(30);
   expect(result.capture.chordYMm).toBe(5);
   expect(result.capture.mmPerPx).toBeCloseTo(60/SIZE,12);
+ });
+
+ // The map element fills the preview pane, so its width says how much screen the map occupies and
+ // nothing about physical size. Deriving the scale from it — as this used to — would make an
+ // ornament exported from a maximised window a different physical size from one exported from a
+ // small one.
+ it('takes its scale from the layout rather than from the size of the map element',async()=>{
+  const result=await capture(stubMap({features:cityCapture()}),{mmPerPx:.224});
+  expect(result.capture.mmPerPx).toBe(.224);
+ });
+
+ it('refuses a scale it cannot use rather than guessing one',async()=>{
+  await expect(capture(stubMap({features:cityCapture()}),{mmPerPx:0})).rejects.toThrow(/scale/i);
+  await expect(capture(stubMap({features:cityCapture()}),{mmPerPx:Number.NaN})).rejects.toThrow(/scale/i);
+ });
+
+ // Everything outside the ornament's opening is dimmed because it is going to be thrown away.
+ // Querying the whole element would read thousands of features that exist only to be clipped off,
+ // and would make the captured feature count depend on the size of the browser window.
+ it('queries only the ornament window, not the whole map element',async()=>{
+  const map=stubMap({features:cityCapture()});
+  const seen:unknown[]=[];
+  const wrapped={...map,queryRenderedFeatures(geometry?:unknown,options?:{layers?:string[]}){
+   seen.push(geometry);
+   return map.queryRenderedFeatures(geometry,options);
+  }} as typeof map;
+  await capture(wrapped,{innerRadiusMm:44.8,mmPerPx:89.6/SIZE});
+  const box=seen[0] as [[number,number],[number,number]];
+  expect(Array.isArray(box)).toBe(true);
+  // A square of innerRadiusMm either side of the element centre.
+  const radiusPx=44.8/(89.6/SIZE);
+  expect(box[0][0]).toBeCloseTo(SIZE/2-radiusPx,6);
+  expect(box[1][0]).toBeCloseTo(SIZE/2+radiusPx,6);
+  expect(box[0][1]).toBeCloseTo(SIZE/2-radiusPx,6);
+  expect(box[1][1]).toBeCloseTo(SIZE/2+radiusPx,6);
  });
 
  it('counts what it captured',async()=>{

@@ -1,10 +1,12 @@
-import {describe,expect,it} from 'vitest';
+import {afterEach,describe,expect,it,vi} from 'vitest';
 import {buildFeatureGeometry,type FeatureGeometryInput} from '../../src/ornament/geometry/featureGeometry';
 import {
  createGeometryRunner,
  createInlineRunner,
  GeometryCancelledError,
+ GeometryTimeoutError,
  isCancelled,
+ isTimeout,
  type WorkerLike,
 } from '../../src/ornament/worker/geometryRunner';
 import type {GeometryWorkerRequest,GeometryWorkerResponse} from '../../src/ornament/worker/protocol';
@@ -249,5 +251,77 @@ describe('the worker module',()=>{
    if(original)Object.defineProperty(globalThis,'onmessage',original);
    if(originalPost)Object.defineProperty(globalThis,'postMessage',originalPost);
   }
+ });
+});
+
+
+// Phase 5: "Add an explicit timeout for capture/export so a hung worker doesn't leave the UI stuck
+// indefinitely." A worker wedged inside a synchronous Clipper union cannot be asked to stop, so the
+// only honest test is that the runner stops waiting on it, kills it, and says which of the two
+// things happened — a timeout is not a cancellation and the UI has to tell them apart.
+describe('worker timeout',()=>{
+ afterEach(()=>{vi.useRealTimers()});
+
+ it('rejects with a timeout, not a cancellation, when the worker never answers',async()=>{
+  vi.useFakeTimers();
+  const {factory}=fakeWorkerFactory();
+  const runner=createGeometryRunner(factory);
+  const handle=runner.run(input(),{timeoutMs:1000});
+  const settled=handle.result.catch(error=>error);
+  await vi.advanceTimersByTimeAsync(1001);
+  const error=await settled;
+  expect(error).toBeInstanceOf(GeometryTimeoutError);
+  expect(isTimeout(error)).toBe(true);
+  expect(isCancelled(error)).toBe(false);
+  expect((error as Error).message).toMatch(/did not finish within 1 second/);
+ });
+
+ it('terminates the wedged worker rather than leaving it pinning a core',async()=>{
+  vi.useFakeTimers();
+  const {factory,created}=fakeWorkerFactory();
+  const handle=createGeometryRunner(factory).run(input(),{timeoutMs:1000});
+  const settled=handle.result.catch(()=>undefined);
+  await vi.advanceTimersByTimeAsync(1001);
+  await settled;
+  expect(created[0].terminated).toBe(true);
+ });
+
+ it('starts a fresh worker for the next job after one timed out',async()=>{
+  vi.useFakeTimers();
+  const {factory,created}=fakeWorkerFactory();
+  const runner=createGeometryRunner(factory);
+  const first=runner.run(input(),{timeoutMs:1000});
+  const firstSettled=first.result.catch(()=>undefined);
+  await vi.advanceTimersByTimeAsync(1001);
+  await firstSettled;
+
+  const second=runner.run(input(2),{timeoutMs:1000});
+  const secondSettled=second.result;
+  created[1].flush();
+  expect((await secondSettled).revision).toBe(2);
+  expect(created).toHaveLength(2);
+ });
+
+ it('does not time out a job that answered in time',async()=>{
+  vi.useFakeTimers();
+  const {factory,created}=fakeWorkerFactory();
+  const handle=createGeometryRunner(factory).run(input(),{timeoutMs:1000});
+  created[0].flush();
+  const result=await handle.result;
+  // Well past the deadline: the timer must already have been cleared, or this would reject a promise
+  // that has already resolved and surface as an unhandled rejection.
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(result.revision).toBe(1);
+  expect(created[0].terminated).toBe(false);
+ });
+
+ it('clears the timer when a run is cancelled, so a cancelled job cannot also time out',async()=>{
+  vi.useFakeTimers();
+  const {factory}=fakeWorkerFactory();
+  const handle=createGeometryRunner(factory).run(input(),{timeoutMs:1000});
+  const settled=handle.result.catch(error=>error);
+  handle.cancel();
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(isCancelled(await settled)).toBe(true);
  });
 });

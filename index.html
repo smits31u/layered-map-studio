@@ -1,1 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Without this a phone lays the page out at a 980px virtual viewport and scales the result down,
+     so the stacked layout below 720px never applies and every control renders below a usable touch
+     size. The plan asks for 390x844 to work; this is what makes the CSS that does it take effect. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Layered Map Studio</title>
+</head>
+<body>
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.6.2/dist/maplibre-gl.css"><div id="root"></div><script src="https://unpkg.com/maplibre-gl@5.6.2/dist/maplibre-gl.js"></script><script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

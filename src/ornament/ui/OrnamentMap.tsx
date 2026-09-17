@@ -138,7 +138,7 @@ export function OrnamentMap({layout,center,zoom,detail,chordYMm,provider=OPENFRE
 
  // The map element is sized in pixels by the preview layout, so MapLibre has to be told when that
  // size changes — it does not observe its container.
- useEffect(()=>{mapRef.current?.resize()},[layout.sizePx]);
+ useEffect(()=>{mapRef.current?.resize()},[layout.elementWidthPx,layout.elementHeightPx]);
 
  // Feature capture. Everything it needs is read from `latest` rather than from the closure, because
  // the effect is keyed on the request token alone: a capture must record the map as it is when the
@@ -157,29 +157,43 @@ export function OrnamentMap({layout,center,zoom,detail,chordYMm,provider=OPENFRE
    detail:latest.current.detail,
    innerRadiusMm:latest.current.layout.sizeMm/2,
    chordYMm:latest.current.chordYMm,
+   // The scale comes from the layout, not from the element's size. They used to be the same number
+   // because the element *was* the ornament's map window; now the element fills the pane, so
+   // deriving the scale from its width would make the export's physical size depend on how big the
+   // browser window happened to be.
+   mmPerPx:latest.current.layout.scalePxPerMm>0?1/latest.current.layout.scalePxPerMm:0,
   }).then(result=>{if(live)report({ok:true,result})})
    .catch(reason=>{if(live)report({ok:false,message:(reason as Error).message})});
   return ()=>{live=false};
   // eslint-disable-next-line react-hooks/exhaustive-deps
  },[captureRequest?.token]);
 
- // The map element itself is no longer hard-clipped to the ornament's circle+chord: the plan wants
- // the full map visible so a user can see the geography they are panning past, not just what is
- // already inside the frame. The mask still exists — `layout.maskPathPx` — but now drives a dimming
- // overlay drawn over the map instead of a CSS clip-path, so the crop that decides what actually
- // exports (`cropMask.ts`'s geometry-derived path, unchanged) stays the single source of truth for
- // both. `maskPathPx` only changes when the ornament's geometry does, never on pan/zoom, so this
- // costs nothing per frame.
- const style={left:`${layout.leftPx}px`,top:`${layout.topPx}px`,width:`${layout.sizePx}px`,height:`${layout.sizePx}px`};
+ // The map element is no longer hard-clipped to the ornament's circle+chord, and no longer stops at
+ // it either: it fills the preview pane, with everything outside the ornament's opening dimmed
+ // rather than cropped, so a user can see the geography they are panning past instead of only what
+ // is already inside the frame.
+ //
+ // What does *not* change with the element is the export. The element stays centred on the ornament
+ // centre and the scale comes from the layout, so the same geography lands in the same millimetres
+ // whatever size the pane is. `cropMask.ts`'s geometry-derived path remains the single source of
+ // truth for both the dimming here and the crop that decides what actually exports, and it only
+ // changes when the ornament's geometry does — never on pan or zoom — so this costs nothing per
+ // frame.
+ const style={
+  left:`${layout.elementLeftPx}px`,
+  top:`${layout.elementTopPx}px`,
+  width:`${layout.elementWidthPx}px`,
+  height:`${layout.elementHeightPx}px`,
+ };
 
  if(error&&!mapRef.current)return <div className="ornament-map ornament-map-unavailable" style={style} role="note">{error}</div>;
 
  return <div className="ornament-map" style={style}>
   <div className="ornament-map-canvas" ref={host} aria-label="Map of the selected place" role="application"/>
-  {layout.maskPathPx?<svg className="ornament-map-mask" width={layout.sizePx} height={layout.sizePx} aria-hidden="true">
-   {/* Evenodd punches the mask shape out of the full square, so only the area that will actually be
+  {layout.maskPathPx?<svg className="ornament-map-mask" width={layout.elementWidthPx} height={layout.elementHeightPx} aria-hidden="true">
+   {/* Evenodd punches the mask shape out of the full element, so only the area that will actually be
        cut away is dimmed; the ornament's own map opening is left at full clarity. */}
-   <path d={`M0 0H${layout.sizePx}V${layout.sizePx}H0Z ${layout.maskPathPx}`} fillRule="evenodd" className="ornament-map-mask-dim"/>
+   <path d={`M0 0H${layout.elementWidthPx}V${layout.elementHeightPx}H0Z ${layout.maskPathPx}`} fillRule="evenodd" className="ornament-map-mask-dim"/>
    <path d={layout.maskPathPx} className="ornament-map-mask-outline"/>
   </svg>:null}
   {error?<p className="ornament-map-error" role="status">{error}</p>:null}

@@ -82,6 +82,47 @@ describe('map window layout',()=>{
 
 // The point of this group: the crop is the Phase 1 geometry, not a lookalike. If somebody ever
 // replaces mapOpening with a freshly-drawn circle, these fail.
+// The map element fills the preview pane rather than stopping at the ornament's opening, so a user
+// can see the geography they are panning past. What must not move is where the ornament sits in it:
+// the export projection puts the ornament's (0,0) at the map's centre pixel, so the element has to
+// grow around that point rather than around the pane's own centre.
+describe('the map element fills the pane, centred on the ornament',()=>{
+ const transform=previewTransform(viewBox,900,700);
+ const layout=mapWindowLayout(geometry,viewBox,transform);
+
+ it('covers the whole container',()=>{
+  expect(layout.elementLeftPx).toBeLessThanOrEqual(0.01);
+  expect(layout.elementTopPx).toBeLessThanOrEqual(0.01);
+  expect(layout.elementLeftPx+layout.elementWidthPx).toBeGreaterThanOrEqual(900-0.01);
+  expect(layout.elementTopPx+layout.elementHeightPx).toBeGreaterThanOrEqual(700-0.01);
+ });
+
+ it('is bigger than the ornament window it used to be',()=>{
+  expect(layout.elementWidthPx).toBeGreaterThan(layout.sizePx);
+  expect(layout.elementHeightPx).toBeGreaterThan(layout.sizePx);
+ });
+
+ it('keeps the ornament centre at the element centre, which the export projection depends on',()=>{
+  const [centreX,centreY]=mmToContainerPx(viewBox,transform,0,0);
+  expect(layout.elementLeftPx+layout.elementWidthPx/2).toBeCloseTo(centreX,9);
+  expect(layout.elementTopPx+layout.elementHeightPx/2).toBeCloseTo(centreY,9);
+ });
+
+ it('does not change the physical scale, however large the pane is',()=>{
+  const wide=mapWindowLayout(geometry,viewBox,previewTransform(viewBox,1600,700));
+  const narrow=mapWindowLayout(geometry,viewBox,previewTransform(viewBox,900,700));
+  // Both panes are height-constrained, so the drawing scale — and therefore the export's
+  // millimetres-per-pixel — is identical while the element widths differ.
+  expect(wide.scalePxPerMm).toBeCloseTo(narrow.scalePxPerMm,12);
+  expect(wide.elementWidthPx).toBeGreaterThan(narrow.elementWidthPx);
+  expect(wide.sizeMm).toBeCloseTo(narrow.sizeMm,12);
+ });
+
+ it('still reports the ornament window itself as the inner opening',()=>{
+  expect(layout.sizeMm).toBeCloseTo(geometry.innerRadiusMm*2,12);
+ });
+});
+
 describe('the crop is the ornament geometry',()=>{
  const transform=previewTransform(viewBox,900,700);
  const layout=mapWindowLayout(geometry,viewBox,transform);
@@ -96,13 +137,16 @@ describe('the crop is the ornament geometry',()=>{
   expect(numbersIn(layout.clipPath)).toHaveLength(vertices*2);
  });
 
+ // The mask is drawn in the map element's coordinates, and the element is now the pane rather than
+ // the ornament's opening, so the bound is the element — and the opening sits strictly inside it
+ // with room to spare, which is the point of the change.
  it('places every clip vertex inside the map element box',()=>{
   const numbers=numbersIn(layout.clipPath);
   for(let i=0;i<numbers.length;i+=2){
    expect(numbers[i]).toBeGreaterThanOrEqual(-0.01);
-   expect(numbers[i]).toBeLessThanOrEqual(layout.sizePx+0.01);
+   expect(numbers[i]).toBeLessThanOrEqual(layout.elementWidthPx+0.01);
    expect(numbers[i+1]).toBeGreaterThanOrEqual(-0.01);
-   expect(numbers[i+1]).toBeLessThanOrEqual(layout.sizePx+0.01);
+   expect(numbers[i+1]).toBeLessThanOrEqual(layout.elementHeightPx+0.01);
   }
  });
 

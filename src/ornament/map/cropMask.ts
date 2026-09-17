@@ -19,7 +19,17 @@ export interface ViewBoxMm{minX:number;minY:number;width:number;height:number}
 // Maps the ornament's millimetre space onto pixels inside a container, preserving aspect ratio and
 // centring — the same fit an SVG with preserveAspectRatio="xMidYMid meet" performs, computed
 // explicitly so the map element can be positioned with the identical transform.
-export interface PreviewTransform{scale:number;offsetXPx:number;offsetYPx:number;widthPx:number;heightPx:number}
+export interface PreviewTransform{
+ scale:number;
+ offsetXPx:number;
+ offsetYPx:number;
+ widthPx:number;
+ heightPx:number;
+ // The container the drawing was fitted into. Carried so the map element can be sized to the pane
+ // rather than to the drawing — see `mapWindowLayout`.
+ containerWidthPx:number;
+ containerHeightPx:number;
+}
 
 export function ornamentViewBox(geometry:OrnamentGeometry,marginMm?:number):ViewBoxMm{
  const loopTop=geometry.loop.centerY-geometry.loop.outerRadiusMm;
@@ -34,10 +44,19 @@ export function ornamentViewBox(geometry:OrnamentGeometry,marginMm?:number):View
 
 export function previewTransform(viewBox:ViewBoxMm,containerWidthPx:number,containerHeightPx:number):PreviewTransform{
  const usableWidth=Math.max(0,containerWidthPx),usableHeight=Math.max(0,containerHeightPx);
- if(!(viewBox.width>0)||!(viewBox.height>0)||!(usableWidth>0)||!(usableHeight>0))return {scale:0,offsetXPx:0,offsetYPx:0,widthPx:0,heightPx:0};
+ if(!(viewBox.width>0)||!(viewBox.height>0)||!(usableWidth>0)||!(usableHeight>0))
+  return {scale:0,offsetXPx:0,offsetYPx:0,widthPx:0,heightPx:0,containerWidthPx:usableWidth,containerHeightPx:usableHeight};
  const scale=Math.min(usableWidth/viewBox.width,usableHeight/viewBox.height);
  const widthPx=viewBox.width*scale,heightPx=viewBox.height*scale;
- return {scale,offsetXPx:(usableWidth-widthPx)/2,offsetYPx:(usableHeight-heightPx)/2,widthPx,heightPx};
+ return {
+  scale,
+  offsetXPx:(usableWidth-widthPx)/2,
+  offsetYPx:(usableHeight-heightPx)/2,
+  widthPx,
+  heightPx,
+  containerWidthPx:usableWidth,
+  containerHeightPx:usableHeight,
+ };
 }
 
 export const mmToContainerPx=(viewBox:ViewBoxMm,transform:PreviewTransform,x:number,y:number):[number,number]=>[
@@ -54,10 +73,28 @@ export const mmToContainerPx=(viewBox:ViewBoxMm,transform:PreviewTransform,x:num
 // and it means panning the map moves the geography under a fixed ornament, which is what a user
 // framing an ornament expects.
 export interface MapWindowLayout{
+ // The ornament's map *window* — the square circumscribing the inner opening. This is the physical
+ // thing: `sizeMm` is what the capture calls its diameter, and `sizeMm/2` is the innerRadiusMm a
+ // capture records. It is no longer the size of the map element, which is larger (see below).
  leftPx:number;
  topPx:number;
  sizePx:number;
  sizeMm:number;
+ // The map *element* — the interactive MapLibre canvas. It fills the preview pane rather than
+ // stopping at the ornament's opening, so a user framing a piece can see the geography they are
+ // panning past instead of only the part already inside the frame. The area outside the opening is
+ // dimmed, not cropped.
+ //
+ // It stays centred on the ornament centre, which is not decoration: the whole export projection
+ // depends on the ornament's (0,0) being the map's centre pixel, so growing the element around that
+ // point is what makes it a presentation change rather than a change to where geometry lands. It is
+ // therefore a rectangle rather than a square — the ornament centre sits below the pane's centre,
+ // because the hanging loop extends the drawing upward — and it is allowed to overhang the pane,
+ // which `.ornament-preview`'s `overflow:hidden` takes care of.
+ elementLeftPx:number;
+ elementTopPx:number;
+ elementWidthPx:number;
+ elementHeightPx:number;
  // Pixels per millimetre inside the map element. Its reciprocal is the mm-per-pixel figure Phase 3
  // projects captured features with.
  scalePxPerMm:number;
@@ -90,23 +127,44 @@ export function mapWindowLayout(geometry:OrnamentGeometry,viewBox:ViewBoxMm,tran
  const sizeMm=radius*2;
  const [leftPx,topPx]=mmToContainerPx(viewBox,transform,-radius,-radius);
  const sizePx=sizeMm*transform.scale;
- // Translating by +radius moves the ornament's centre to the map element's top-left origin, which
- // is the coordinate system a CSS clip-path (and the dim-overlay's own SVG) is resolved in.
+
+ // The element is the smallest rectangle centred on the ornament centre that still covers the whole
+ // container. Taking the larger half-extent on each axis is what guarantees coverage: the centre is
+ // off-centre in the pane, so mirroring the longer side is the only way to reach both edges without
+ // moving the centre.
+ const [centreXPx,centreYPx]=mmToContainerPx(viewBox,transform,0,0);
+ const halfWidthPx=transform.scale>0?Math.max(centreXPx,transform.containerWidthPx-centreXPx):sizePx/2;
+ const halfHeightPx=transform.scale>0?Math.max(centreYPx,transform.containerHeightPx-centreYPx):sizePx/2;
+ const elementWidthPx=halfWidthPx*2,elementHeightPx=halfHeightPx*2;
+
+ // The mask is drawn in the element's own pixel coordinates, whose origin is its top-left corner.
+ // Dividing the pixel offset by the scale expresses it as the millimetre translation
+ // `geometryToPath` applies before scaling, which keeps one serializer rather than two.
  const maskPathPx=geometry.mapOpening.length&&transform.scale>0
-  ?geometryToPath(geometry.mapOpening,radius,radius,transform.scale)
+  ?geometryToPath(geometry.mapOpening,halfWidthPx/transform.scale,halfHeightPx/transform.scale,transform.scale)
   :'';
  const clipPath=maskPathPx?`path('${maskPathPx}')`:'none';
- return {leftPx,topPx,sizePx,sizeMm,scalePxPerMm:transform.scale,clipPath,maskPathPx,outlinePathMm:geometryToPath(geometry.mapOpening)};
+ return {
+  leftPx,topPx,sizePx,sizeMm,
+  elementLeftPx:centreXPx-halfWidthPx,
+  elementTopPx:centreYPx-halfHeightPx,
+  elementWidthPx,
+  elementHeightPx,
+  scalePxPerMm:transform.scale,
+  clipPath,
+  maskPathPx,
+  outlinePathMm:geometryToPath(geometry.mapOpening),
+ };
 }
 
 // Converts a position inside the map element back to ornament millimetres. Used to ask whether a
 // point projected from a geographic coordinate actually lands inside the ornament's map window.
 export const mapPxToOrnamentMm=(layout:MapWindowLayout,xPx:number,yPx:number):[number,number]=>
  layout.scalePxPerMm>0
-  ?[(xPx-layout.sizePx/2)/layout.scalePxPerMm,(yPx-layout.sizePx/2)/layout.scalePxPerMm]
+  ?[(xPx-layout.elementWidthPx/2)/layout.scalePxPerMm,(yPx-layout.elementHeightPx/2)/layout.scalePxPerMm]
   :[Number.NaN,Number.NaN];
 
 export const ornamentMmToMapPx=(layout:MapWindowLayout,xMm:number,yMm:number):[number,number]=>[
- layout.sizePx/2+xMm*layout.scalePxPerMm,
- layout.sizePx/2+yMm*layout.scalePxPerMm,
+ layout.elementWidthPx/2+xMm*layout.scalePxPerMm,
+ layout.elementHeightPx/2+yMm*layout.scalePxPerMm,
 ];

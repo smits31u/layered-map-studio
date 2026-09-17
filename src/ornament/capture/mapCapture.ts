@@ -1,7 +1,8 @@
-import {createMapProjection,exportScaleMmPerPx,MAPLIBRE_TILE_SIZE,type LngLatTuple,type ViewportSnapshot} from '../geometry/mapProjection';
+import {createMapProjection,MAPLIBRE_TILE_SIZE,ZeroSizedViewportError,type LngLatTuple,type ViewportSnapshot} from '../geometry/mapProjection';
 import type {VectorTileProvider} from '../map/provider';
 import {visibleRoadLayerIds,WATER_LAYER_ID} from '../map/style';
 import type {RoadDetail} from '../types';
+import {assessCaptureCapacity} from '../limits';
 import {dedupeBy,lineKey,polygonKey} from './dedupe';
 import type {CapturedFeatures,CapturedRoad,CapturedWater,FeatureCapture} from './featureTypes';
 
@@ -49,7 +50,7 @@ export interface CaptureMap{
  queryRenderedFeatures(geometry?:unknown,options?:{layers?:string[]}):CaptureMapFeature[];
 }
 
-export type CaptureErrorCode='not-ready'|'rotated'|'unmeasured'|'moved'|'projection-mismatch';
+export type CaptureErrorCode='not-ready'|'rotated'|'unmeasured'|'moved'|'projection-mismatch'|'too-large';
 
 export class CaptureError extends Error{
  constructor(message:string,readonly code:CaptureErrorCode){super(message);this.name='CaptureError'}
@@ -65,6 +66,14 @@ export interface CaptureOptions{
  // The ornament's map window, in millimetres, at the moment capture was requested.
  innerRadiusMm:number;
  chordYMm:number;
+ // Millimetres per rendered CSS pixel, supplied by the preview layout.
+ //
+ // It used to be derived here, as `innerRadiusMm*2 / canvasWidthPx`, which was correct only while
+ // the map element was exactly the ornament's map window. The element now fills the preview pane, so
+ // its width says how much of the screen the map occupies and nothing about physical scale. Getting
+ // this from the layout keeps the export the same physical size whatever size the window is — and
+ // `assertProjectionAgrees` below checks the number against the live map rather than trusting it.
+ mmPerPx:number;
  idleTimeoutMs?:number;
  now?:()=>number;
 }
@@ -211,16 +220,40 @@ export async function captureOrnamentFeatures(map:CaptureMap,options:CaptureOpti
  if(!map.isStyleLoaded())throw new CaptureError('The map style has not finished loading, so there is nothing to capture yet.','not-ready');
 
  const before=readViewport(map);
- const mapDiameterMm=options.innerRadiusMm*2;
- // Throws ZeroSizedViewportError rather than substituting a fallback, per the plan.
- const mmPerPx=exportScaleMmPerPx(mapDiameterMm,before.widthPx);
- if(before.heightPx>0&&Math.abs(before.widthPx-before.heightPx)>1)
-  warnings.push({code:'not-square',message:'The map element is '+before.widthPx+'×'+before.heightPx+'px rather than square, so the captured geometry may not be centred on the ornament.'});
+ // Throws ZeroSizedViewportError rather than substituting a fallback, per the plan: an unmeasured
+ // element or a missing scale means the capture has no physical size, and guessing one produces an
+ // ornament whose roads are the wrong width, which nothing downstream can detect.
+ if(!Number.isFinite(before.widthPx)||before.widthPx<=0||!Number.isFinite(before.heightPx)||before.heightPx<=0)
+  throw new ZeroSizedViewportError('The map has not been measured yet (its rendered size is zero), so captured geometry has no physical scale. Wait for the preview to lay out and capture again.');
+ const mmPerPx=options.mmPerPx;
+ if(!Number.isFinite(mmPerPx)||mmPerPx<=0)
+  throw new ZeroSizedViewportError('The preview has not worked out its scale yet, so captured geometry has no physical size. Wait for the preview to lay out and capture again.');
 
  assertProjectionAgrees(map,before,mmPerPx);
 
- const raw=map.queryRenderedFeatures(undefined,{layers:captureLayerIds(options.detail)});
+ // Only the ornament's own map window is queried, not the whole element.
+ //
+ // The element is as big as the preview pane, and everything outside the opening is dimmed because
+ // it will be thrown away. Querying it anyway would read thousands of features that exist only to be
+ // clipped off, and would make the feature count — and therefore the capacity limits below — depend
+ // on how large the user's browser window is. The ornament centre is the element centre, so the
+ // window is a square of `innerRadiusMm` either side of it.
+ const radiusPx=options.innerRadiusMm/mmPerPx;
+ const centreXPx=before.widthPx/2,centreYPx=before.heightPx/2;
+ const windowBox:[[number,number],[number,number]]=[
+  [centreXPx-radiusPx,centreYPx-radiusPx],
+  [centreXPx+radiusPx,centreYPx+radiusPx],
+ ];
+ const raw=map.queryRenderedFeatures(windowBox,{layers:captureLayerIds(options.detail)});
  const features=extractCapturedFeatures(raw,options.provider);
+
+ // Capacity is checked here, at the boundary, rather than in the geometry pipeline. A capture too
+ // large to build is refused before it is stored, before it crosses into the worker, and before the
+ // UI has told the user anything was captured -- so the failure is one message with an instruction
+ // in it, rather than a build that never finishes. `assessCaptureCapacity` owns the numbers and the
+ // wording; this only decides that a refusal is fatal.
+ const capacity=assessCaptureCapacity(features);
+ if(capacity.refusal)throw new CaptureError(capacity.refusal,'too-large');
 
  // Step 5. The query is synchronous, but awaiting idle above is not, and a user can pan during it.
  // Comparing the viewport either side of the query is what turns "probably fine" into "checked".

@@ -1,4 +1,4 @@
-import {useEffect,useId,useState} from 'react';
+import {useEffect,useId,useRef,useState} from 'react';
 import {FONT_REGISTRY} from '../../text/fontRegistry';
 import {mmToInches} from '../../utils/units';
 import type {GeocodeCandidate} from '../../server/geocode/types';
@@ -11,6 +11,7 @@ import {fromDisplay} from '../validation';
 import type {OrnamentTextLayout} from '../text/ornamentText';
 import type {OrnamentGeometry} from '../geometry/ornamentShape';
 import type {ExportReadiness,GeometrySnapshot} from '../snapshot';
+import type {PipelinePhase} from './OrnamentPage';
 import {preflightSummary,type PreflightReport} from '../export/preflight';
 import {StackDiagram} from './StackDiagram';
 import {PlaceSearch} from './PlaceSearch';
@@ -25,6 +26,8 @@ type Props={
  featureGeometry:FeatureGeometryResult|undefined;
  captureWarnings:CaptureWarning[];
  building:boolean;
+ // What the pipeline is doing, for the progress live region and `aria-busy`.
+ phase:PipelinePhase;
  offMainThread:boolean;
  exporting:boolean;
  // The last preflight run, or undefined before the first export attempt.
@@ -55,10 +58,42 @@ function NumberField({label,value,limit,onChange,suffix}:{label:string;value:num
  </div>;
 }
 
+// A segmented control is a group of buttons, and the plan requires it to be keyboard-operable
+// (§Accessibility: "Keyboard-operable segmented controls"). Buttons are reachable with Tab on their
+// own, but a three-option control then costs three tab stops and gives no hint that the options
+// belong together. This uses the standard toolbar pattern instead: one tab stop for the whole group,
+// left/right and up/down to move between options, Home/End for the ends. `aria-pressed` stays -- the
+// options are toggle buttons reporting which one is on, not a radio group inside a form.
 function Segmented<T extends string>({label,value,options,onChange}:{label:string;value:T;options:readonly {value:T;label:string}[];onChange:(v:T)=>void}){
- return <fieldset className="ornament-segmented">
+ const group=useRef<HTMLFieldSetElement>(null);
+ const focusOption=(index:number)=>{
+  const buttons=group.current?.querySelectorAll('button');
+  if(!buttons?.length)return;
+  const wrapped=(index+buttons.length)%buttons.length;
+  (buttons[wrapped] as HTMLButtonElement).focus();
+ };
+ const onKeyDown=(event:React.KeyboardEvent<HTMLButtonElement>,index:number)=>{
+  const step=event.key==='ArrowRight'||event.key==='ArrowDown'?1
+   :event.key==='ArrowLeft'||event.key==='ArrowUp'?-1
+   :0;
+  if(step){event.preventDefault();focusOption(index+step);return}
+  if(event.key==='Home'){event.preventDefault();focusOption(0)}
+  else if(event.key==='End'){event.preventDefault();focusOption(options.length-1)}
+ };
+ // The group's tab stop is whichever option is currently on, so tabbing in lands on the live value
+ // rather than always on the first option.
+ const activeIndex=Math.max(0,options.findIndex(option=>option.value===value));
+ return <fieldset className="ornament-segmented" ref={group}>
   <legend>{label}</legend>
-  {options.map(option=><button key={option.value} type="button" aria-pressed={value===option.value} className={value===option.value?'active':''} onClick={()=>onChange(option.value)}>{option.label}</button>)}
+  {options.map((option,index)=><button
+   key={option.value}
+   type="button"
+   aria-pressed={value===option.value}
+   tabIndex={index===activeIndex?0:-1}
+   className={value===option.value?'active':''}
+   onKeyDown={event=>onKeyDown(event,index)}
+   onClick={()=>onChange(option.value)}
+  >{option.label}</button>)}
  </fieldset>;
 }
 
@@ -112,7 +147,25 @@ function combineIssues(sources:DisplayIssue[][]):DisplayIssue[]{
  return combined.sort((a,b)=>(a.severity===b.severity?0:a.severity==='error'?-1:1));
 }
 
-export function OrnamentControls({project,dispatch,geometry,textLayout,readiness,snapshot,featureGeometry,captureWarnings,building,offMainThread,exporting,preflight,onReset,onFitText,onSelectPlace,onCaptureGeometry,onExport}:Props){
+const PHASE_MESSAGES:Record<PipelinePhase,string>={
+ idle:'Idle.',
+ capturing:'Capturing map geometry\u2026',
+ building:'Building geometry from the capture\u2026',
+ exporting:'Running preflight and building the export\u2026',
+};
+
+// Counts in words, so the badge reads the same to a screen reader as it looks on screen and does not
+// depend on the red/amber styling to say which kind of finding it is.
+const summariseIssues=(total:number,errors:number):string=>{
+ if(!total)return 'No issues';
+ const warnings=total-errors;
+ const parts:string[]=[];
+ if(errors)parts.push(`${errors} error${errors===1?'':'s'}`);
+ if(warnings)parts.push(`${warnings} warning${warnings===1?'':'s'}`);
+ return parts.join(', ');
+};
+
+export function OrnamentControls({project,dispatch,geometry,textLayout,readiness,snapshot,featureGeometry,captureWarnings,building,phase,offMainThread,exporting,preflight,onReset,onFitText,onSelectPlace,onCaptureGeometry,onExport}:Props){
  const unit=project.displayUnit;
  const diameterLimit:NumericLimit=unit==='in'
   ?{min:Number(mmToInches(ORNAMENT_LIMITS.diameterMm.min).toFixed(3)),max:Number(mmToInches(ORNAMENT_LIMITS.diameterMm.max).toFixed(3)),step:.05}
@@ -141,10 +194,26 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,readiness
  return <aside>
   <h1>Ornament Studio</h1>
 
+  {/* Progress, as a polite live region (plan §Accessibility: "Status/progress announced through a
+      polite live region"). It is a region of its own rather than text inside the capture button,
+      because a button's label changing under a screen reader is not announced, and because
+      `aria-busy` belongs on the thing that is busy -- the controls -- not on the control that
+      started it. */}
+  <p className="ornament-progress" role="status" aria-live="polite" aria-busy={phase!=='idle'}>
+   {PHASE_MESSAGES[phase]}
+  </p>
+
+  {/* The summary is a disclosure button and is left as one: giving it role="status" replaced that
+      role outright, so a screen-reader user was told the count but never that the thing announcing
+      it could be opened. The count is announced by the progress region above instead. Severity is
+      named in words as well as coloured, per the plan's "do not rely on colour alone". */}
   <details className="ornament-status">
-   <summary role="status" aria-live="polite" className={errorCount?'error':''}>{allIssues.length?`${allIssues.length} issue${allIssues.length>1?'s':''}`:'✓ valid'}</summary>
+   <summary className={errorCount?'error':''}>{summariseIssues(allIssues.length,errorCount)}</summary>
    {allIssues.length?<ul className="ornament-issues">
-    {allIssues.map((issue,index)=><li key={index} className={issue.severity}>{issue.message}</li>)}
+    {allIssues.map((issue,index)=><li key={index} className={issue.severity}>
+     <span className="ornament-issue-kind">{issue.severity==='error'?'Error':'Warning'}</span>
+     {' '}{issue.message}
+    </li>)}
    </ul>:null}
   </details>
 

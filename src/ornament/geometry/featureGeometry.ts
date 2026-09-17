@@ -3,7 +3,9 @@ import type {FeatureCapture} from '../capture/featureTypes';
 import type {BuildMode,RoadDetail} from '../types';
 import type {MapWindow} from './clipLine';
 import {applyIslandPolicy,totalIslandAreaMm2,type IslandPolicyResult,type LandIslandPolicy} from './landIslands';
+import {assessCaptureCapacity,type CaptureCapacity} from '../limits';
 import {createMapProjection,projectLine,projectRings} from './mapProjection';
+import {simplifyLine,simplifyRing} from './simplify';
 import type {OrnamentIssue} from './ornamentShape';
 import {countVertices,geometryAreaMm2} from './polygonRepair';
 import {buildRoadEngraving,type ProjectedRoad,type RoadGeometryMetrics} from './roadGeometry';
@@ -44,11 +46,23 @@ export interface FeatureGeometryInput{
  settings:FeatureGeometrySettings;
 }
 
+// What simplification did, when it ran. Absent rather than zeroed when the capture was under the
+// threshold, so "we did not need to thin this" and "we thinned it and removed nothing" stay
+// distinguishable.
+export interface SimplificationMetrics{
+ toleranceMm:number;
+ verticesBefore:number;
+ verticesAfter:number;
+}
+
 export interface FeatureGeometryMetrics{
  roads:RoadGeometryMetrics;
  water:WaterGeometryMetrics;
  landAreaMm2:number;
  landVertices:number;
+ capturedFeatures:number;
+ capturedVertices:number;
+ simplification?:SimplificationMetrics;
  durationMs?:number;
 }
 
@@ -84,8 +98,25 @@ export function buildFeatureGeometry(input:FeatureGeometryInput):FeatureGeometry
  // Projection is a separate pass rather than being folded into the clip so that the two can be
  // reasoned about — and measured — independently. It is also where a capture stops being geographic:
  // nothing after this line knows what a longitude is.
- const roads:ProjectedRoad[]=capture.features.roads.map(road=>({roadClass:road.roadClass,line:projectLine(road.line,project)}));
- const water:ProjectedWater[]=capture.features.water.map(polygon=>({rings:projectRings(polygon.rings,project)}));
+ // Capacity is assessed on the capture rather than on the built geometry, because the point is to
+ // decide *before* spending the buffer-and-union pass on it. A capture large enough to refuse never
+ // reaches here -- `captureOrnamentFeatures` rejects it -- so what is left to decide is only whether
+ // to thin it.
+ const capacity:CaptureCapacity=assessCaptureCapacity(capture.features);
+ const tolerance=capacity.simplifyToleranceMm??0;
+
+ let roads:ProjectedRoad[]=capture.features.roads.map(road=>({roadClass:road.roadClass,line:projectLine(road.line,project)}));
+ let water:ProjectedWater[]=capture.features.water.map(polygon=>({rings:projectRings(polygon.rings,project)}));
+
+ // Simplification happens after projection and before buffering: the tolerance is a distance on the
+ // finished piece, and thinning before the offset pass is what actually saves the work.
+ let simplification:SimplificationMetrics|undefined;
+ if(tolerance>0){
+  const verticesBefore=projectedVertexCount(roads,water);
+  roads=roads.map(road=>({roadClass:road.roadClass,line:simplifyLine(road.line,tolerance)}));
+  water=water.map(polygon=>({rings:polygon.rings.map(ring=>simplifyRing(ring,tolerance))}));
+  simplification={toleranceMm:tolerance,verticesBefore,verticesAfter:projectedVertexCount(roads,water)};
+ }
 
  const roadResult=buildRoadEngraving(roads,{
   detail:settings.detail,
@@ -115,6 +146,12 @@ export function buildFeatureGeometry(input:FeatureGeometryInput):FeatureGeometry
    roadResult.metrics.droppedIslands+' road fragment(s) were below the minimum engravable size and were removed.'));
  if(!roadResult.geometry.length&&capture.features.roads.length>0)
   warnings.push(issue('roads-empty','warning','No roads fell inside the ornament’s map window at this framing.'));
+
+ if(simplification)
+  warnings.push(issue('capture-simplified',
+   'warning',
+   'This view was dense, so its '+simplification.verticesBefore.toLocaleString()+' captured points were thinned to '
+   +simplification.verticesAfter.toLocaleString()+' at a '+simplification.toleranceMm+'mm tolerance -- below the laser kerf, so the finished piece is unchanged.'));
 
  const cutout=settings.buildMode==='water-cutout-3-piece';
  let landCut:MultiPolygonMm=[],waterCut:MultiPolygonMm=[],ring:MultiPolygonMm=[];
@@ -151,9 +188,19 @@ export function buildFeatureGeometry(input:FeatureGeometryInput):FeatureGeometry
    water:waterResult.metrics,
    landAreaMm2:geometryAreaMm2(landCut),
    landVertices:countVertices(landCut),
+   capturedFeatures:capacity.featureCount,
+   capturedVertices:capacity.vertexCount,
+   ...(simplification?{simplification}:{}),
   },
  };
 }
+
+const projectedVertexCount=(roads:ProjectedRoad[],water:ProjectedWater[]):number=>{
+ let total=0;
+ for(const road of roads)total+=road.line.length;
+ for(const polygon of water)for(const ring of polygon.rings)total+=ring.length;
+ return total;
+};
 
 // One warning per outcome, each naming a count and an area, because "there are loose pieces" without
 // a size is not actionable. The severity is `warning` rather than `error` throughout: a loose island
@@ -200,6 +247,8 @@ export const emptyFeatureGeometry=(revision:number,buildMode:BuildMode):FeatureG
   water:{inputPolygons:0,rejectedRings:0,components:0,holes:0,filledHoles:0,droppedComponents:0,areaMm2:0,vertices:0},
   landAreaMm2:0,
   landVertices:0,
+  capturedFeatures:0,
+  capturedVertices:0,
  },
 });
 

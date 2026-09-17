@@ -32,11 +32,18 @@ export interface FakeMapLibreOptions{
  canvasSizePx?:number;
  // Set to make every capture report the map as still loading tiles, to drive the "not idle" warning.
  neverIdle?:boolean;
+ // Set to hold the map in a "still settling" state until `releaseIdle()` is called. That is the only
+ // way to keep a capture genuinely in flight for the length of a test: without it the fake reports
+ // itself idle immediately and `captureOrnamentFeatures` returns before a test can do anything
+ // underneath it.
+ deferIdle?:boolean;
 }
 
 export interface InstalledFakeMapLibre{
  state:FakeMapState;
  setFeatures(features:CaptureMapFeature[]):void;
+ // Lets a capture held by `deferIdle` finish. No-op when the fake was not installed with it.
+ releaseIdle():void;
  uninstall():void;
 }
 
@@ -48,6 +55,9 @@ const mercatorY=(lat:number)=>{
 export function installFakeMapLibre(options:FakeMapLibreOptions={}):InstalledFakeMapLibre{
  const size=options.canvasSizePx??FIXTURE_CANVAS_PX;
  let features=options.features??[];
+ let idleHeld=Boolean(options.deferIdle);
+ // The `once('idle')` handlers registered while idle was held, fired together on release.
+ const heldIdleWaiters=new Set<()=>void>();
  const state:FakeMapState={center:{lng:0,lat:0},zoom:0,layerVisibility:{},queries:[],resizes:0};
 
  // The preview measures its container to build the millimetre-to-pixel transform, and jsdom reports
@@ -84,7 +94,9 @@ export function installFakeMapLibre(options:FakeMapLibreOptions={}):InstalledFak
   once(event:string,handler:()=>void){
    const wrapped=()=>{this.off(event,wrapped);handler()};
    this.on(event,wrapped);
-   if(event==='idle'&&!options.neverIdle)setTimeout(()=>this.fire('idle'),0);
+   if(event!=='idle'||options.neverIdle)return;
+   if(idleHeld)heldIdleWaiters.add(()=>this.fire('idle'));
+   else setTimeout(()=>this.fire('idle'),0);
   }
   remove(){this.handlers.clear()}
   resize(){state.resizes++}
@@ -92,8 +104,8 @@ export function installFakeMapLibre(options:FakeMapLibreOptions={}):InstalledFak
   getZoom(){return state.zoom}
   getBearing(){return 0}
   getPitch(){return 0}
-  loaded(){return !options.neverIdle}
-  areTilesLoaded(){return !options.neverIdle}
+  loaded(){return !options.neverIdle&&!idleHeld}
+  areTilesLoaded(){return !options.neverIdle&&!idleHeld}
   isStyleLoaded(){return true}
   jumpTo(to:{center?:[number,number];zoom?:number}){
    if(to.center)state.center={lng:to.center[0],lat:to.center[1]};
@@ -136,6 +148,12 @@ export function installFakeMapLibre(options:FakeMapLibreOptions={}):InstalledFak
  return {
   state,
   setFeatures(next){features=next},
+  releaseIdle(){
+   idleHeld=false;
+   const waiters=[...heldIdleWaiters];
+   heldIdleWaiters.clear();
+   for(const fire of waiters)fire();
+  },
   uninstall(){
    vi.unstubAllGlobals();
    globalThis.HTMLCanvasElement.prototype.getContext=originalGetContext;

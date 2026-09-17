@@ -38,6 +38,10 @@ development the Vite dev server mounts it; in production `dist-server/index.js` 
 `dist/` alongside it. Opening `dist/index.html` straight from the filesystem will load the app but
 not geocode.
 
+Swapping the tile or geocoding provider, the OpenStreetMap attribution obligations, the bundled
+font licences and the self-hosting options are documented together in
+[`docs/ornament-operations.md`](docs/ornament-operations.md).
+
 Set `GEOCODER_CONTACT` to an address whoever runs the instance can be reached at. Nominatim's usage
 policy requires a contactable identifier in the User-Agent; when it is unset the server warns at
 startup and the outgoing header says so rather than pretending otherwise.

@@ -27,6 +27,19 @@ type Props={
 // the only semantic signal"), so the preview names the role in the group id too.
 const CUT='#d8503f',BAND='#2f3d4b',ENGRAVE='#12181e',WATER='#7c9fb5',TAB='#c08a2e';
 
+// The plan's last accessibility rule is "Do not rely on colour alone for cut/engrave roles", and the
+// drawing above already obeys it structurally: a cut is a stroke with no fill and an engrave is
+// filled. That distinction is invisible unless it is written down, so it is -- here, as text, next
+// to the drawing. Each entry names the role, the shape treatment that encodes it, and only then the
+// colour, so the legend still works in greyscale, at low contrast, and read aloud.
+const ROLE_LEGEND:readonly {role:string;encoding:string}[]=[
+ {role:'Cut',encoding:'outline only, no fill'},
+ {role:'Engrave',encoding:'solid fill'},
+ {role:'Water',encoding:'tinted fill'},
+ {role:'Tabs and loose pieces',encoding:'dashed outline'},
+ {role:'Text band guide',encoding:'dashed guide, not cut'},
+];
+
 // The frame is drawn over the map and must not swallow drags and scrolls meant for it; the map sits
 // in the hole the frame leaves, so every pointer event the frame receives was aimed past it.
 const OVERLAY:React.CSSProperties={position:'absolute',inset:0,pointerEvents:'none'};
@@ -121,6 +134,7 @@ export function OrnamentPreview({project,geometry,textLayout,featureGeometry,dir
    </g>:null}
 
    <g id="piece/frame/cut">
+    <title>Ornament outline, cut</title>
     <path d={geometryPath(geometry.frame)} fill="#e8ece9" stroke={CUT} strokeWidth={Math.max(.15,geometry.outerRadiusMm/250)} fillRule="evenodd"/>
    </g>
    <g id="preview/map-window" aria-hidden="true">
@@ -132,9 +146,17 @@ export function OrnamentPreview({project,geometry,textLayout,featureGeometry,dir
     <path d={geometryPath(geometry.textBand)} fill="none" stroke={BAND} strokeWidth={hairline} strokeDasharray="1.5 1.5"/>
    </g>
    <g id="piece/frame/text-engrave" fill={ENGRAVE} fillRule="nonzero">
+    <title>Personalisation text, engraved</title>
     {textLayout.lines.map(line=>line.d?<path key={line.key} d={line.d} data-line={line.key}/>:null)}
    </g>
   </svg>
+
+  <ul className="ornament-legend">
+   {ROLE_LEGEND.map(entry=><li key={entry.role}>
+    <span className={`ornament-legend-swatch role-${entry.role.split(' ')[0].toLowerCase()}`} aria-hidden="true"/>
+    <span><strong>{entry.role}</strong> — {entry.encoding}</span>
+   </li>)}
+  </ul>
 
   <div className="ornament-metrics">
    <span>Finished diameter {project.ornament.diameterMm.toFixed(1)}mm</span>

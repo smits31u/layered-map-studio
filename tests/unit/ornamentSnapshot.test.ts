@@ -1,6 +1,8 @@
 import {describe,expect,it} from 'vitest';
 import {createDefaultOrnamentProject} from '../../src/ornament/defaults';
-import {exportReadiness,fingerprintsMatch,isSnapshotStale,viewportFingerprint,type GeometrySnapshot,type ViewportFingerprint} from '../../src/ornament/snapshot';
+import {exportReadiness,fingerprintsMatch,isSnapshotStale,snapshotFromCapture,viewportFingerprint,type GeometrySnapshot,type ViewportFingerprint} from '../../src/ornament/snapshot';
+import {cityCapture} from '../fixtures/ornament/captures';
+import {fixtureCapture} from '../helpers/ornamentCapture';
 import {ornamentReducer} from '../../src/ornament/store';
 import type {OrnamentProject} from '../../src/ornament/types';
 
@@ -118,5 +120,43 @@ describe('export readiness',()=>{
   for(const reason of ready({snapshot:undefined,hasSelectedPlace:false,blockingIssueCount:1,blockingTextIssueCount:1}).reasons){
    expect(reason.message.length).toBeGreaterThan(20);
   }
+ });
+});
+
+
+// The stale-result guard for the capture half of the pipeline. A capture is asynchronous, so the
+// project can move underneath one that is still in flight; the snapshot has to describe what was
+// actually read, not what the project happened to say when the result landed.
+describe('snapshot from a capture',()=>{
+ const capture=fixtureCapture(cityCapture(),{detail:'medium',zoom:15,innerRadiusMm:44.8});
+
+ it('records the viewport the capture was taken at, not the one in hand now',()=>{
+  const snapshot=snapshotFromCapture(capture);
+  expect(snapshot.fingerprint.center).toEqual(capture.viewport.center);
+  expect(snapshot.fingerprint.zoom).toBe(15);
+  expect(snapshot.fingerprint.detail).toBe('medium');
+  expect(snapshot.fingerprint.innerRadiusMm).toBe(44.8);
+ });
+
+ it('counts the features it actually holds',()=>{
+  const snapshot=snapshotFromCapture(capture);
+  expect(snapshot.featureCount).toBe(capture.features.roads.length+capture.features.water.length);
+ });
+
+ it('copies the centre rather than aliasing the capture viewport',()=>{
+  const snapshot=snapshotFromCapture(capture);
+  expect(snapshot.fingerprint.center).not.toBe(capture.viewport.center);
+ });
+
+ it('reads as stale against a viewport that moved while it was in flight',()=>{
+  const snapshot=snapshotFromCapture(capture);
+  const moved:ViewportFingerprint={...snapshot.fingerprint,detail:'high'};
+  expect(isSnapshotStale(snapshot,moved)).toBe(true);
+  expect(exportReadiness({snapshot,current:moved,hasSelectedPlace:true,blockingIssueCount:0,blockingTextIssueCount:0}).ready).toBe(false);
+ });
+
+ it('reads as current against the viewport it was taken at',()=>{
+  const snapshot=snapshotFromCapture(capture);
+  expect(isSnapshotStale(snapshot,snapshot.fingerprint)).toBe(false);
  });
 });

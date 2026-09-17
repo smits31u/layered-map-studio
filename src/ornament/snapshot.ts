@@ -1,3 +1,5 @@
+import type {FeatureCapture} from './capture/featureTypes';
+import {totalCapturedFeatures} from './capture/featureTypes';
 import type {OrnamentProject,RoadDetail} from './types';
 
 // Dirty-state tracking for the map viewport.
@@ -35,6 +37,34 @@ export interface GeometrySnapshot{
 // sets the physical area the map window covers — widening the rim crops the map.
 export function viewportFingerprint(project:OrnamentProject,innerRadiusMm:number):ViewportFingerprint{
  return {center:[project.viewport.center[0],project.viewport.center[1]],zoom:project.viewport.zoom,detail:project.roads.detail,innerRadiusMm};
+}
+
+// The snapshot for a capture, built from what the capture itself recorded rather than from whatever
+// the project happens to say when the result arrives.
+//
+// This is the stale-result guard for the capture half of the pipeline. Capture is asynchronous -- it
+// waits for the map to settle before reading it -- and the user can move the map while it is in
+// flight. Stamping the *current* fingerprint onto features read from the *previous* view would
+// produce the one state this whole module exists to prevent: an export that is enabled, looks
+// current, and is built from geography the user has already left. Recording what was actually
+// captured means a viewport that moved underneath the capture reads as stale, which is exactly what
+// it is.
+//
+// Every field comes off the capture: `viewport` is the map as it was read, `detail` is the tier the
+// query filtered by, and `innerRadiusMm` is the ornament's map window at that moment -- the same
+// `geometry.innerRadiusMm` that `viewportFingerprint` reads, since `mapWindowLayout` defines the map
+// square as exactly twice that radius.
+export function snapshotFromCapture(capture:FeatureCapture):GeometrySnapshot{
+ return {
+  fingerprint:{
+   center:[capture.viewport.center[0],capture.viewport.center[1]],
+   zoom:capture.viewport.zoom,
+   detail:capture.detail,
+   innerRadiusMm:capture.innerRadiusMm,
+  },
+  takenAt:capture.capturedAt,
+  featureCount:totalCapturedFeatures(capture.features),
+ };
 }
 
 // Compared with a tolerance rather than by equality: a map's centre is a float that a pan can

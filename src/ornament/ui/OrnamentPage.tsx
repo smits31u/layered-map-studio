@@ -1,7 +1,7 @@
 import {useCallback,useEffect,useMemo,useReducer,useRef,useState} from 'react';
 import {preloadAllFonts} from '../../text/fontRegistry';
 import type {CaptureResult,CaptureWarning} from '../capture/mapCapture';
-import {totalCapturedFeatures,type FeatureCapture} from '../capture/featureTypes';
+import type {FeatureCapture} from '../capture/featureTypes';
 import {createDefaultOrnamentProject} from '../defaults';
 import {downloadFiles,PROJECT_MIME,SVG_MIME} from '../export/download';
 import {exportOrnament} from '../export/exportOrnament';
@@ -10,14 +10,27 @@ import {preflightSummary} from '../export/preflight';
 import type {FeatureGeometryResult,FeatureGeometrySettings} from '../geometry/featureGeometry';
 import {buildOrnamentGeometry} from '../geometry/ornamentShape';
 import {clearOrnamentProject,loadOrnamentProject,saveOrnamentProject} from '../persistence';
-import {exportReadiness,viewportFingerprint,type GeometrySnapshot} from '../snapshot';
+import {exportReadiness,snapshotFromCapture,viewportFingerprint,type GeometrySnapshot} from '../snapshot';
 import {ornamentReducer} from '../store';
 import {fitTextScale,layoutOrnamentText} from '../text/ornamentText';
-import {createGeometryRunner,isCancelled,type GeometryRunner} from '../worker/geometryRunner';
+import {createGeometryRunner,isCancelled,isTimeout,type GeometryRunner} from '../worker/geometryRunner';
 import {OrnamentControls} from './OrnamentControls';
 import {OrnamentPreview} from './OrnamentPreview';
 
 export type CaptureOutcome={ok:true;result:CaptureResult}|{ok:false;message:string};
+
+// What the pipeline is doing, as one value rather than three booleans that can disagree. It is what
+// the controls announce through their live region, and what `aria-busy` is derived from, so a
+// screen reader hears the same state the button label shows.
+export type PipelinePhase='idle'|'capturing'|'building'|'exporting';
+
+// The capture watchdog. Capture is driven by an effect in the map component and reports back through
+// a callback; if that report never arrives -- the map unmounted mid-capture, a provider wedged, an
+// exception swallowed somewhere between the two -- nothing else would ever clear the working state,
+// and the button would read "Working..." for the rest of the session. This is the outer bound on
+// that. It is deliberately longer than the capture's own 8s idle timeout: exceeding that one is a
+// warning and the capture continues, and this must not fire underneath it.
+export const CAPTURE_TIMEOUT_MS=20_000;
 
 // Fonts resolve asynchronously but text vectorization is synchronous, so the page re-renders once
 // they land rather than reading a half-loaded registry (same contract buildScene relies on).
@@ -35,7 +48,7 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
  const [capture,setCapture]=useState<FeatureCapture|undefined>(undefined);
  const [captureWarnings,setCaptureWarnings]=useState<CaptureWarning[]>([]);
  const [featureGeometry,setFeatureGeometry]=useState<FeatureGeometryResult|undefined>(undefined);
- const [building,setBuilding]=useState(false);
+ const [phase,setPhase]=useState<PipelinePhase>('idle');
  // Bumped rather than cleared, so choosing the same result twice still re-fits the map.
  const [fitBounds,setFitBounds]=useState<{bounds:[number,number,number,number];token:number}|undefined>(undefined);
  const [captureRequest,setCaptureRequest]=useState<{token:number}|undefined>(undefined);
@@ -43,6 +56,21 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
  // capture is, so a stale "preflight passed" can never sit next to geometry it did not check.
  const [preflight,setPreflight]=useState<PreflightReport|undefined>(undefined);
  const [exporting,setExporting]=useState(false);
+
+ // Derived rather than stored, so "the capture button says Working" and "the pipeline is busy" can
+ // never drift apart.
+ const building=phase==='capturing'||phase==='building';
+
+ // Cleared when a capture reports, fired when one never does. Held in a ref with its token so a
+ // report arriving after the watchdog has given up is recognised and ignored rather than reviving a
+ // capture the user was already told had failed.
+ const captureDeadline=useRef<{token:number;timer:ReturnType<typeof setTimeout>}|undefined>(undefined);
+ const clearCaptureWatchdog=useCallback(()=>{
+  if(!captureDeadline.current)return;
+  clearTimeout(captureDeadline.current.timer);
+  captureDeadline.current=undefined;
+ },[]);
+ useEffect(()=>()=>{if(captureDeadline.current)clearTimeout(captureDeadline.current.timer)},[]);
 
  // The plan's "reject stale export results if the project revision changed". Every build carries the
  // revision it started under; a result whose revision is not the current one is dropped on arrival
@@ -93,9 +121,10 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
   setCapture(undefined);
   setCaptureWarnings([]);
   setFeatureGeometry(undefined);
-  setBuilding(false);
+  setPhase('idle');
+  clearCaptureWatchdog();
   setPreflight(undefined);
- },[]);
+ },[clearCaptureWatchdog]);
 
  // Export is one synchronous pass: build the pieces, preflight them, and only then serialise. A
  // blocked preflight downloads nothing at all — the report is the entire result, and the controls
@@ -103,6 +132,7 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
  const onExport=useCallback(()=>{
   if(!readiness.ready)return;
   setExporting(true);
+  setPhase('exporting');
   try{
    const result=exportOrnament({project,geometry,textLayout,featureGeometry,capture});
    setPreflight(result.preflight);
@@ -122,23 +152,33 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
    setStatus(`The export could not be built: ${(error as Error).message}`);
   }finally{
    setExporting(false);
+   setPhase('idle');
   }
  },[readiness.ready,project,geometry,textLayout,featureGeometry,capture]);
 
  const onCapture=useCallback((outcome:CaptureOutcome)=>{
+  // The watchdog has already reported this capture as failed and the user has been told so. A late
+  // arrival is dropped rather than quietly re-enabling export behind that message.
+  if(!captureDeadline.current)return;
+  clearCaptureWatchdog();
   if(!outcome.ok){
-   setBuilding(false);
+   setPhase('idle');
    setStatus(outcome.message);
    return;
   }
   const {capture:taken,warnings}=outcome.result;
   setCaptureWarnings(warnings);
   setCapture(taken);
-  setSnapshot({fingerprint,takenAt:taken.capturedAt,featureCount:totalCapturedFeatures(taken.features)});
+  // Built from the capture rather than from the current fingerprint: see `snapshotFromCapture`. If
+  // the map moved while this capture was in flight, the snapshot it produces is stale on arrival,
+  // which blocks export and says why -- instead of stamping a moved viewport onto features that were
+  // read before it moved.
+  setSnapshot(snapshotFromCapture(taken));
+  setPhase('building');
   // The build itself is left to the effect below, so that a fresh capture and a changed road width
   // take exactly the same path into the worker. Kicking it off here as well would run every capture
   // through the pipeline twice.
- },[fingerprint]);
+ },[clearCaptureWatchdog]);
 
  // The one place geometry is built. Re-derives from the capture already in hand whenever a purely
  // physical setting changes, which is the point of keeping the capture: dragging the road-width
@@ -151,7 +191,7 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
   lastBuilt.current={capture,settings};
   revision.current+=1;
   const token=revision.current;
-  setBuilding(true);
+  setPhase('building');
   // A preflight report describes one specific set of geometry. The moment a rebuild starts, the
   // report on screen is about geometry that is being replaced, so it stops being shown.
   setPreflight(undefined);
@@ -161,13 +201,17 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
    // and is dropped rather than repainting the preview with geometry for a view they left.
    if(result.revision!==revision.current)return;
    setFeatureGeometry(result);
-   setBuilding(false);
+   setPhase('idle');
    const roads=result.metrics.roads.clippedPieces,water=result.metrics.water.components;
    setStatus(`Built ${roads} road piece${roads===1?'':'s'} and ${water} water area${water===1?'':'s'} in ${result.metrics.durationMs??0}ms.`);
   }).catch(error=>{
    if(isCancelled(error)||revision.current!==token)return;
-   setBuilding(false);
-   setStatus(`The captured geometry could not be built: ${(error as Error).message}`);
+   setPhase('idle');
+   // A timeout is not a bug report, it is an instruction: the view was too heavy for the machine
+   // running it, and the two things that reliably make it lighter are less detail and less ground.
+   setStatus(isTimeout(error)
+    ? `${(error as Error).message} Set road detail to Medium or Low, or zoom in, then capture again.`
+    : `The captured geometry could not be built: ${(error as Error).message}`);
   });
   // Cancelling on cleanup is what makes the worker cancellable in practice: a second setting change
   // while the first build is still running terminates it instead of queueing behind it.
@@ -191,6 +235,7 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
    featureGeometry={featureGeometry}
    captureWarnings={captureWarnings}
    building={building}
+   phase={phase}
    offMainThread={runner.current?.offMainThread??false}
    exporting={exporting}
    preflight={preflight}
@@ -206,9 +251,17 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
     setStatus('');
    }}
    onCaptureGeometry={()=>{
-    setBuilding(true);
+    const token=Date.now();
+    clearCaptureWatchdog();
+    setPhase('capturing');
     setStatus('Capturing map geometry…');
-    setCaptureRequest({token:Date.now()});
+    captureDeadline.current={token,timer:setTimeout(()=>{
+     captureDeadline.current=undefined;
+     setPhase('idle');
+     setCaptureRequest(undefined);
+     setStatus(`The map did not finish capturing within ${Math.round(CAPTURE_TIMEOUT_MS/1000)} seconds. Check that map tiles are loading, then capture again.`);
+    },CAPTURE_TIMEOUT_MS)};
+    setCaptureRequest({token});
    }}
   />
   <section className="workspace">

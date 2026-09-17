@@ -183,10 +183,26 @@ describe('dirty state and export blocking',()=>{
   openEverySection();
  };
 
- // Capture is asynchronous now: it waits for the map to settle, reads it, then builds the geometry.
+ // Capture is asynchronous now: it waits for the map to settle, reads it, then builds the geometry
+ // from what it read. Those are two steps, and this has to wait for both.
+ //
+ // Waiting only for "Captured N feature(s)" waits for the first. That text appears the moment the
+ // snapshot is set, which is one render *before* the build finishes — at that point the pipeline is
+ // still busy and the capture button still reads "Working…". A test that carried on from there was
+ // racing the build's state update: it usually won, and under full-suite load it did not. That is
+ // what made "re-capturing after a move clears the dirty state" flaky, because that case is the one
+ // that immediately queries the capture button again by its settled name.
+ //
+ // `aria-busy` on the progress region is the pipeline's own account of whether it has finished, so
+ // that is what this waits on.
+ const pipelineIsIdle=()=>document.querySelector('.ornament-progress')?.getAttribute('aria-busy')==='false';
+
  const captureGeometry=async(name:string|RegExp='Capture map geometry')=>{
   fireEvent.click(screen.getByRole('button',{name}));
-  await waitFor(()=>expect(screen.getByText(/Captured \d+ feature/)).toBeTruthy());
+  await waitFor(()=>{
+   expect(screen.getByText(/Captured \d+ feature/)).toBeTruthy();
+   expect(pipelineIsIdle()).toBe(true);
+  });
   openEverySection();
  };
 

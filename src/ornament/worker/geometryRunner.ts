@@ -29,15 +29,35 @@ export class GeometryCancelledError extends Error{
  constructor(){super('Geometry build cancelled.');this.name='GeometryCancelledError'}
 }
 
+// A worker that stopped answering. Distinct from a cancellation because the user did not ask for it
+// and has to be told: a cancelled run is expected, a timed-out one is a fault.
+export class GeometryTimeoutError extends Error{
+ constructor(readonly timeoutMs:number){
+  super('The geometry worker did not finish within '+Math.round(timeoutMs/1000)+' seconds and was stopped.');
+  this.name='GeometryTimeoutError';
+ }
+}
+
 export const isCancelled=(error:unknown)=>error instanceof GeometryCancelledError||(error as Error)?.name==='GeometryCancelledError';
+export const isTimeout=(error:unknown)=>error instanceof GeometryTimeoutError||(error as Error)?.name==='GeometryTimeoutError';
+
+// Long enough that a dense capture on a slow machine finishes, short enough that a wedged worker
+// does not leave the capture button reading "Working..." for the rest of the session. A build that
+// legitimately needs longer than this on an ornament of 4in or less is a build that has gone wrong.
+export const DEFAULT_GEOMETRY_TIMEOUT_MS=30_000;
 
 export interface GeometryRunHandle{
  result:Promise<FeatureGeometryResult>;
  cancel():void;
 }
 
+export interface GeometryRunOptions{
+ // Overridable so a test does not have to wait out the real one.
+ timeoutMs?:number;
+}
+
 export interface GeometryRunner{
- run(input:FeatureGeometryInput):GeometryRunHandle;
+ run(input:FeatureGeometryInput,options?:GeometryRunOptions):GeometryRunHandle;
  // True when work is actually happening off the main thread. Surfaced so the UI can say so, and so
  // a test can assert which path it exercised rather than inferring it.
  readonly offMainThread:boolean;
@@ -117,18 +137,35 @@ export function createGeometryRunner(factory:WorkerFactory|undefined=defaultWork
 
  return {
   offMainThread:true,
-  run(input){
+  run(input,options){
    // Starting a run supersedes whatever was running: there is one preview, so there is one answer
    // worth having, and the older job's result would only be discarded on arrival anyway.
    if(settle)cancelActive();
    const jobId=nextJobId++;
    activeJobId=jobId;
+   const timeoutMs=options?.timeoutMs??DEFAULT_GEOMETRY_TIMEOUT_MS;
+   let timer:ReturnType<typeof setTimeout>|undefined;
    const result=new Promise<FeatureGeometryResult>((resolve,reject)=>{
     settle={resolve,reject};
+    // The timeout terminates the worker for the same reason cancellation does: a worker stuck inside
+    // a synchronous Clipper union cannot be asked to stop, so the only way to get the core back is
+    // to kill it. The next run starts a fresh one.
+    if(timeoutMs>0&&Number.isFinite(timeoutMs))timer=setTimeout(()=>{
+     if(activeJobId!==jobId)return;
+     const pending=settle;
+     settle=undefined;
+     activeJobId=0;
+     discard();
+     pending?.reject(new GeometryTimeoutError(timeoutMs));
+    },timeoutMs);
     try{ensureWorker().postMessage({jobId,input})}
     catch(error){settle=undefined;activeJobId=0;discard();reject(error)}
    });
-   return {result,cancel(){if(activeJobId===jobId)cancelActive()}};
+   const clear=()=>{if(timer!==undefined){clearTimeout(timer);timer=undefined}};
+   // Settled one way or the other, the timer has nothing left to do. Attached with a no-op rejection
+   // handler so clearing it never turns into an unhandled rejection of its own.
+   result.then(clear,clear);
+   return {result,cancel(){clear();if(activeJobId===jobId)cancelActive()}};
   },
   dispose(){
    settle=undefined;
@@ -141,6 +178,10 @@ export function createGeometryRunner(factory:WorkerFactory|undefined=defaultWork
 // The no-Worker path. The work still happens synchronously — there is nowhere else to put it — but
 // the promise contract, the cancellation semantics and the result shape are identical, so nothing
 // upstream branches on which runner it got.
+// The inline runner takes no timeout, and that is not an oversight. `buildFeatureGeometry` runs
+// synchronously on the only thread there is, so a timer set before it cannot fire until after it has
+// already finished -- a timeout here would be decoration. What protects this path instead is the
+// capacity check in `limits.ts`, which refuses a capture too large to build before the build starts.
 export function createInlineRunner():GeometryRunner{
  let disposed=false;
  return {
