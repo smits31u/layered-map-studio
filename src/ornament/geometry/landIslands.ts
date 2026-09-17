@@ -178,23 +178,40 @@ export function applyIslandPolicy(land:MultiPolygonMm,options:IslandPolicyOption
   return {...empty,geometry:kept,omitted,remaining:analyseLandIslands(kept).islands};
  }
 
+ // 'bridge' resolves the piece rather than half-resolving it.
+ //
+ // Choosing "bridge" is choosing to end up with one connected ornament. Leaving a fragment loose
+ // because it happened to be out of tab reach would be the policy failing silently — and Phase 4's
+ // preflight agrees: loose land under any policy other than keep-separate is an *error* there, on
+ // the grounds that the policy was supposed to have dealt with it. So anything that cannot be
+ // bridged and is already below the size the user called meaningful is dropped, and anything that
+ // cannot be bridged and *is* meaningful is kept, reported, and left for preflight to block on.
+ // Deleting a 30mm sandbar to make the export succeed is exactly the silent discard the plan
+ // forbids; deleting a 2mm speck the user already said was noise is not.
  if(options.policy==='bridge'){
   const maxLength=options.maxBridgeLengthMm??DEFAULT_MAX_BRIDGE_LENGTH_MM;
+  const threshold=Math.max(0,options.minIslandAreaMm2);
   const mainRing=land[analysis.mainIndex][0];
-  const bridges:LandBridge[]=[],unbridged:LandIsland[]=[],tabs:MultiPolygonMm[]=[];
+  const bridges:LandBridge[]=[],unbridged:LandIsland[]=[],omitted:LandIsland[]=[],tabs:MultiPolygonMm[]=[];
+  const kept:MultiPolygonMm=[];
   land.forEach((polygon,index)=>{
-   if(index===analysis.mainIndex)return;
+   if(index===analysis.mainIndex){kept.push(polygon);return}
    const island=describe(polygon);
    const pair=nearestPair(polygon[0],mainRing);
-   if(!pair||pair.lengthMm>maxLength){unbridged.push(island);return}
-   const tab=bridgeTab(pair.from,pair.to,options.bridgeWidthMm);
-   if(!tab.length){unbridged.push(island);return}
-   tabs.push(tab);
-   bridges.push({from:pair.from,to:pair.to,lengthMm:pair.lengthMm,widthMm:options.bridgeWidthMm});
+   const tab=pair&&pair.lengthMm<=maxLength?bridgeTab(pair.from,pair.to,options.bridgeWidthMm):[];
+   if(tab.length&&pair){
+    kept.push(polygon);
+    tabs.push(tab);
+    bridges.push({from:pair.from,to:pair.to,lengthMm:pair.lengthMm,widthMm:options.bridgeWidthMm});
+    return;
+   }
+   if(island.areaMm2<threshold){omitted.push(island);return}
+   kept.push(polygon);
+   unbridged.push(island);
   });
-  const bridged=tabs.length?normalizeTopology(unionAll([land,...tabs],'Land bridges'),'Land bridges'):land;
+  const bridged=tabs.length?normalizeTopology(unionAll([kept,...tabs],'Land bridges'),'Land bridges'):kept;
   assertFinite(bridged,'Land piece');
-  return {detected,omitted:[],bridges,unbridged,geometry:bridged,remaining:analyseLandIslands(bridged).islands};
+  return {detected,omitted,bridges,unbridged,geometry:bridged,remaining:analyseLandIslands(bridged).islands};
  }
 
  // 'keep-separate': the geometry is already correct — every island is its own closed cut path and

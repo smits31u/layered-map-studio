@@ -1,11 +1,9 @@
 import {useEffect,useRef,useState} from 'react';
 import {captureOrnamentFeatures,type CaptureMap} from '../capture/mapCapture';
-import {mapPxToOrnamentMm,type MapWindowLayout} from '../map/cropMask';
+import type {MapWindowLayout} from '../map/cropMask';
 import {getMapLibre,supportsInteractiveMap,type OrnamentMapInstance} from '../map/maplibreGlobal';
 import {checkProviderCompatibility,OPENFREEMAP,type VectorTileProvider} from '../map/provider';
 import {allRoadLayerIds,buildOrnamentStyle,visibleRoadLayerIds} from '../map/style';
-import type {OrnamentMarkerSymbol} from '../markers/ornamentMarker';
-import type {PointMm} from '../geometry/clipLine';
 import {ORNAMENT_LIMITS,type RoadDetail} from '../types';
 import type {CaptureOutcome} from './OrnamentPage';
 
@@ -15,8 +13,6 @@ type Props={
  zoom:number;
  detail:RoadDetail;
  chordYMm:number;
- marker:OrnamentMarkerSymbol;
- markerPosition:[number,number];
  provider?:VectorTileProvider;
  fitBounds?:{bounds:[number,number,number,number];token:number};
  // Bumped by the "Capture map geometry" action. A token rather than a callback prop holding the map
@@ -25,7 +21,6 @@ type Props={
  captureRequest?:{token:number};
  onCapture:(outcome:CaptureOutcome)=>void;
  onViewportChange:(view:{center:[number,number];zoom:number})=>void;
- onMarkerOffsetMm:(offset:PointMm|undefined)=>void;
  onStatus:(message:string)=>void;
 };
 
@@ -34,16 +29,17 @@ type Props={
 // store, the store would write back to the map, and the map would fire `moveend` again.
 const SAME_CENTER=1e-7,SAME_ZOOM=1e-4;
 
-export function OrnamentMap({layout,center,zoom,detail,chordYMm,marker,markerPosition,provider=OPENFREEMAP,fitBounds,captureRequest,onCapture,onViewportChange,onMarkerOffsetMm,onStatus}:Props){
+// The map shows geography and nothing else. It used to also project and draw a marker; the
+// generator no longer produces one, so there is nothing here to position, drag or re-project.
+export function OrnamentMap({layout,center,zoom,detail,chordYMm,provider=OPENFREEMAP,fitBounds,captureRequest,onCapture,onViewportChange,onStatus}:Props){
  const host=useRef<HTMLDivElement>(null);
  const mapRef=useRef<OrnamentMapInstance|undefined>(undefined);
  const [ready,setReady]=useState(false);
  const [error,setError]=useState('');
- const [markerPx,setMarkerPx]=useState<{x:number;y:number}|undefined>(undefined);
  // Read inside map event handlers, which are registered once and would otherwise close over the
  // first render's props forever.
- const latest=useRef({center,zoom,layout,markerPosition,detail,chordYMm,provider,onViewportChange,onMarkerOffsetMm,onCapture});
- latest.current={center,zoom,layout,markerPosition,detail,chordYMm,provider,onViewportChange,onMarkerOffsetMm,onCapture};
+ const latest=useRef({center,zoom,layout,detail,chordYMm,provider,onViewportChange,onCapture});
+ latest.current={center,zoom,layout,detail,chordYMm,provider,onViewportChange,onCapture};
 
  useEffect(()=>{
   const maplibregl=getMapLibre();
@@ -85,16 +81,9 @@ export function OrnamentMap({layout,center,zoom,detail,chordYMm,marker,markerPos
    const c=map.getCenter();
    latest.current.onViewportChange({center:[c.lng,c.lat],zoom:map.getZoom()});
   };
-  const placeMarker=()=>{
-   const point=map.project(latest.current.markerPosition);
-   setMarkerPx({x:point.x,y:point.y});
-   latest.current.onMarkerOffsetMm(mapPxToOrnamentMm(latest.current.layout,point.x,point.y));
-  };
-  const onMove=()=>{placeMarker()};
-  const onMoveEnd=()=>{report();placeMarker()};
+  const onMoveEnd=()=>{report()};
   const onLoad=()=>{
    setReady(true);
-   placeMarker();
    // The plan asks for the provider's schema to be validated on load rather than trusted, so a tile
    // server that stops carrying roads or water says so here instead of producing a blank export.
    const source=map.getSource(provider.sourceId);
@@ -107,12 +96,11 @@ export function OrnamentMap({layout,center,zoom,detail,chordYMm,marker,markerPos
   };
 
   map.on('load',onLoad);
-  map.on('move',onMove);
   map.on('moveend',onMoveEnd);
   map.on('error',onError);
   return ()=>{
    mapRef.current=undefined;
-   map.off('load',onLoad);map.off('move',onMove);map.off('moveend',onMoveEnd);map.off('error',onError);
+   map.off('load',onLoad);map.off('moveend',onMoveEnd);map.off('error',onError);
    map.remove();
   };
   // Created once. Every subsequent prop change is applied by the effects below rather than by
@@ -175,27 +163,12 @@ export function OrnamentMap({layout,center,zoom,detail,chordYMm,marker,markerPos
   // eslint-disable-next-line react-hooks/exhaustive-deps
  },[captureRequest?.token]);
 
- // Re-project the marker whenever the place, the marker kind or the layout changes, without waiting
- // for the next map movement.
- useEffect(()=>{
-  const map=mapRef.current;
-  if(!map||!ready)return;
-  const point=map.project(markerPosition);
-  setMarkerPx({x:point.x,y:point.y});
-  onMarkerOffsetMm(mapPxToOrnamentMm(layout,point.x,point.y));
- },[markerPosition,layout,ready,marker,onMarkerOffsetMm]);
-
  const style={left:`${layout.leftPx}px`,top:`${layout.topPx}px`,width:`${layout.sizePx}px`,height:`${layout.sizePx}px`,clipPath:layout.clipPath,WebkitClipPath:layout.clipPath};
 
  if(error&&!mapRef.current)return <div className="ornament-map ornament-map-unavailable" style={style} role="note">{error}</div>;
 
  return <div className="ornament-map" style={style}>
   <div className="ornament-map-canvas" ref={host} aria-label="Map of the selected place" role="application"/>
-  {markerPx?<svg className="ornament-map-marker" width={layout.sizePx} height={layout.sizePx} viewBox={`0 0 ${layout.sizePx} ${layout.sizePx}`} aria-hidden="true">
-   <g transform={`translate(${markerPx.x} ${markerPx.y}) scale(${layout.scalePxPerMm}) translate(${-marker.anchorMm[0]} ${-marker.anchorMm[1]})`}>
-    <path d={marker.path} fill="#b3312a" stroke="#ffffff" strokeWidth={Math.max(.15,marker.sizeMm/40)} strokeLinejoin="round" fillRule="evenodd"/>
-   </g>
-  </svg>:null}
   {error?<p className="ornament-map-error" role="status">{error}</p>:null}
  </div>;
 }

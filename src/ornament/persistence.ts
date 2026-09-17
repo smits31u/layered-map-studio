@@ -13,6 +13,12 @@ const defaultStorage=():Storage|undefined=>{
 // Anything persisted is user input from a previous session and is treated as untrusted: it is
 // structurally merged over a fresh default and then clamped, so a hand-edited or
 // partially-written record can never put the editor into a state the UI cannot represent.
+//
+// `schemaVersion` stays at 1 through the removal of the marker. A project saved when the generator
+// still had one carries a `marker` key that nothing reads any more; it rides through the spread as
+// an inert extra property and is re-saved untouched, which costs a few bytes and breaks nothing.
+// Bumping the version would have rejected every one of those projects outright — a real loss to
+// avoid a cosmetic one. `ornamentStore.test.ts` loads an old-format record to keep this true.
 export function loadOrnamentProject(storage=defaultStorage()):OrnamentProject|undefined{
  if(!storage)return undefined;
  let raw:string|null=null;
@@ -44,7 +50,6 @@ function merge(base:OrnamentProject,patch:Partial<OrnamentProject>):OrnamentProj
   ornament:{...base.ornament,...patch.ornament,hangingLoop:{...base.ornament.hangingLoop,...patch.ornament?.hangingLoop}},
   roads:{...base.roads,...patch.roads},
   land:{...base.land,...patch.land},
-  marker:{...base.marker,...patch.marker},
   text:{
    ...base.text,
    ...patch.text,

@@ -6,11 +6,12 @@ import type {CaptureWarning} from '../capture/mapCapture';
 import type {FeatureGeometryResult} from '../geometry/featureGeometry';
 import {LAND_ISLAND_POLICIES,type LandIslandPolicy} from '../geometry/landIslands';
 import type {OrnamentAction,OrnamentTextKey} from '../store';
-import {ORNAMENT_LIMITS,type BuildMode,type ExportPreset,type MarkerKind,type MarkerOutput,type NumericLimit,type OrnamentProject,type RoadDetail,type TextLine} from '../types';
+import {ORNAMENT_LIMITS,type BuildMode,type ExportPreset,type NumericLimit,type OrnamentProject,type RoadDetail,type TextLine} from '../types';
 import {fromDisplay} from '../validation';
 import type {OrnamentTextLayout} from '../text/ornamentText';
 import type {OrnamentGeometry,OrnamentIssue} from '../geometry/ornamentShape';
 import type {ExportReadiness,GeometrySnapshot} from '../snapshot';
+import {preflightSummary,type PreflightReport} from '../export/preflight';
 import {StackDiagram} from './StackDiagram';
 import {PlaceSearch} from './PlaceSearch';
 
@@ -19,17 +20,20 @@ type Props={
  dispatch:(action:OrnamentAction)=>void;
  geometry:OrnamentGeometry;
  textLayout:OrnamentTextLayout;
- markerIssues:OrnamentIssue[];
  readiness:ExportReadiness;
  snapshot:GeometrySnapshot|undefined;
  featureGeometry:FeatureGeometryResult|undefined;
  captureWarnings:CaptureWarning[];
  building:boolean;
  offMainThread:boolean;
+ exporting:boolean;
+ // The last preflight run, or undefined before the first export attempt.
+ preflight:PreflightReport|undefined;
  onReset:()=>void;
  onFitText:()=>void;
  onSelectPlace:(candidate:GeocodeCandidate,fitBounds:boolean)=>void;
  onCaptureGeometry:()=>void;
+ onExport:()=>void;
 };
 
 const displayNumber=(mm:number,unit:OrnamentProject['displayUnit'])=>Number((unit==='in'?mmToInches(mm):mm).toFixed(3));
@@ -86,12 +90,12 @@ const ISLAND_POLICY_LABELS:Record<LandIslandPolicy,string>={
  'omit-below-threshold':'Omit below threshold',
 };
 
-export function OrnamentControls({project,dispatch,geometry,textLayout,markerIssues,readiness,snapshot,featureGeometry,captureWarnings,building,offMainThread,onReset,onFitText,onSelectPlace,onCaptureGeometry}:Props){
+export function OrnamentControls({project,dispatch,geometry,textLayout,readiness,snapshot,featureGeometry,captureWarnings,building,offMainThread,exporting,preflight,onReset,onFitText,onSelectPlace,onCaptureGeometry,onExport}:Props){
  const unit=project.displayUnit;
  const diameterLimit:NumericLimit=unit==='in'
   ?{min:Number(mmToInches(ORNAMENT_LIMITS.diameterMm.min).toFixed(3)),max:Number(mmToInches(ORNAMENT_LIMITS.diameterMm.max).toFixed(3)),step:.05}
   :ORNAMENT_LIMITS.diameterMm;
- const issues=[...geometry.issues,...textLayout.issues,...markerIssues,...(featureGeometry?.warnings??[])];
+ const issues=[...geometry.issues,...textLayout.issues,...(featureGeometry?.warnings??[])];
  const errors=issues.filter(i=>i.severity==='error');
  const selectedPlace=project.viewport.selectedPlaceCenter;
 
@@ -180,22 +184,6 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,markerIss
    </p>
   </details>
 
-  <details>
-   <summary>Marker</summary>
-   <Segmented<MarkerKind> label="Symbol" value={project.marker.kind} options={[{value:'heart',label:'Heart'},{value:'pin',label:'Pin'},{value:'house',label:'House'}]} onChange={v=>dispatch({type:'setMarker',patch:{kind:v}})}/>
-   <NumberField label="Marker size" suffix="mm" value={project.marker.sizeMm} limit={ORNAMENT_LIMITS.markerSizeMm} onChange={n=>dispatch({type:'setMarker',patch:{sizeMm:n}})}/>
-   <Segmented<MarkerOutput> label="Marker output" value={project.marker.output} options={[{value:'separate-cut-piece',label:'Separate cut piece'},{value:'engraved',label:'Engraved'}]} onChange={v=>dispatch({type:'setMarker',patch:{output:v}})}/>
-   <p className="ornament-readout">Marker at {coordinate(project.marker.position)}</p>
-   {/* Panning never moves the marker. The plan: "Position the marker at the selected place
-       coordinate, not automatically at the current map center after panning. If the user wants the
-       marker to move with the map center, expose a separate 'center marker' action." These are
-       those actions, and they are the only two things that move it. */}
-   <div className="ornament-actions">
-    <button type="button" onClick={()=>dispatch({type:'centerMarkerOnView'})}>Move marker to map centre</button>
-    <button type="button" disabled={!selectedPlace} onClick={()=>dispatch({type:'markerToSelectedPlace'})}>Return marker to selected place</button>
-   </div>
-  </details>
-
   <details open>
    <summary>Export</summary>
    {/* Capturing records which viewport the geometry belongs to. Feature extraction itself is
@@ -212,13 +200,21 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,markerIss
     {offMainThread?' · built in a background worker.':' · built on the main thread (no Web Worker available).'}
    </p>:null}
    {captureWarnings.length?<ul className="ornament-issues">{captureWarnings.map(warning=><li key={warning.code} className="warning">{warning.message}</li>)}</ul>:null}
-   <button type="button" disabled={!readiness.ready} aria-describedby="ornament-export-blocked">
-    Export SVG
+   <button type="button" disabled={!readiness.ready||exporting} onClick={onExport} aria-describedby="ornament-export-blocked">
+    {exporting?'Running preflight…':'Export SVG'}
    </button>
+   {/* Preflight findings live here rather than in the general warning list at the bottom, because
+       they are the answer to "why did nothing download". A blocked export produces no file at all
+       (see exportOrnament.ts), so this list is the only account of what happened. */}
    <ul id="ornament-export-blocked" className="ornament-issues">
-    {readiness.ready
-     ?<li>Ready to export once Phase 4 adds SVG generation.</li>
-     :readiness.reasons.map(reason=><li key={reason.code}>{reason.message}</li>)}
+    {!readiness.ready
+     ?readiness.reasons.map(reason=><li key={reason.code}>{reason.message}</li>)
+     :preflight
+      ?[
+        <li key="preflight-summary" className={preflight.blocked?'error':''}>{preflightSummary(preflight)}</li>,
+        ...preflight.findings.map((item,index)=><li key={`${item.code}-${index}`} className={item.severity}>{item.message}</li>),
+       ]
+      :<li>Ready to export.</li>}
    </ul>
   </details>
 

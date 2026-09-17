@@ -129,6 +129,6 @@ export function clipPolylineToMapWindow(line:PolylineMm,window:MapWindow,minLeng
 export const clipPolylinesToMapWindow=(lines:PolylineMm[],window:MapWindow,minLengthMm=MIN_PIECE_LENGTH_MM):PolylineMm[]=>
  lines.flatMap(line=>clipPolylineToMapWindow(line,window,minLengthMm));
 
-// True when the point is inside the map window, boundary included. Used by the marker fit check.
+// True when the point is inside the map window, boundary included.
 export const isInsideMapWindow=(point:PointMm,window:MapWindow):boolean=>
  finite(point)&&point[1]<=window.chordYMm&&Math.hypot(point[0],point[1])<=window.innerRadiusMm;

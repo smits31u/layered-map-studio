@@ -58,7 +58,37 @@ Layered Map Studio is a React + MapLibre GL tool that generates manufacturing-pr
 ## Status as of this write (2026-09-16)
 
 - Last commit: `f039aaf`, "Add ornament Phase 3: feature geometry (capture/dedup, road/water geometry, land-island detection, Web Worker pipeline)".
-- Ornament generator (see `docs/ornament-implementation-status.md` and `CLAUDE_MAP_ORNAMENT_BUILD_PLAN.md`): Phases 0-3 committed and tested — domain model/SVG shell, the original ornament editor, MapLibre map/search/crop, and now feature geometry (capture, dedupe, road/water buffering, land-island detection, off-main-thread Web Worker pipeline with golden-fixture regression coverage). 707 tests passing repo-wide. Phase 4 (SVG export and preflight against the disk shape) and Phase 5 (hardening) are not started.
+- Ornament generator (see `docs/ornament-implementation-status.md`): Phases 0-4 built — domain model/SVG shell, the original ornament editor, MapLibre map/search/crop, feature geometry (capture, dedupe, road/water buffering, land-island detection, off-main-thread Web Worker pipeline with golden-fixture regression coverage), and SVG export with preflight. 796 tests passing repo-wide. Phase 5 (hardening) is not started.
+- **`CLAUDE_MAP_ORNAMENT_BUILD_PLAN.md` does not exist in this repository.** Earlier revisions of
+  this file and of the status document cite it as though it were checked in; it is not on disk, not
+  in any commit reachable from any ref, and not in the `.claude` or `.codex` session caches. Treat
+  every reference to it as a citation of a document held outside the repository. `docs/ornament-implementation-status.md` is the nearest thing to a written spec that is actually here.
+- **The ornament generator has no marker.** Removed entirely at Ben's direction — markers are added
+  by hand in xTool Studio per order. There is no marker piece, no `piece/marker/*` export group, no
+  marker controls and no keep-out. Do not reintroduce one without asking. `src/geometry/scene/keepOut.ts`
+  is still the compass's and is untouched; `src/geometry/scene/markerRegistry.ts` is the *lake* tool's
+  marker artwork and is unrelated to the ornament.
+- **Removing the marker did not bump `schemaVersion`.** It stays at 1, so projects saved by earlier
+  builds still load; their dead `marker` key rides through inertly. See `persistence.ts`.
+- **`land.islandPolicy` defaults to `bridge`** with `minIslandAreaMm2` at **2mm² (an area, Ben's
+  explicit choice when asked — note this is looser than the 4mm² it replaced)**. Bridging drops only
+  fragments below that threshold. Loose land warns and never blocks, under any policy.
+- Ornament export lives in `src/ornament/export/` and deliberately does not go through the lake tool's `ManufacturingScene`/`exportSvg.ts` path, which assumes a rectangular product. See the status document for the reasoning.
+- **The target laser software is xTool Studio, not LightBurn.** The build plan assumed LightBurn and
+  Phase 4's colour preset was reasoned about in its terms. `src/ornament/export/lightburn.ts`, the
+  `LIGHTBURN_PRESET` constant and the persisted `ExportPreset` value `'lightburn-colors'` are
+  holdovers of that assumption, kept because renaming the stored value is a project-schema migration
+  rather than a rename. The colour convention (red cut, black engrave, blue light-water-engrave,
+  green registration, cyan labels) has **not** been verified against xTool Studio's import behaviour
+  and must not be assumed compatible. Group ids remain the authoritative contract either way.
+- Phase 4 is built and tested but **not exit-criteria-complete**: opening the output in xTool Studio
+  and in Inkscape is an outstanding manual step for Ben. Neither is installed on the VM. Chrome was
+  verified directly against the built container. Details and a checklist are in
+  `docs/ornament-implementation-status.md`.
+- The lake tool's own docs (`README.md` "Manual LightBurn acceptance", `docs/v1-milestones.md`,
+  `docs/v1-architecture.md`) still say LightBurn. Those were left alone — they describe the lake
+  panel product line's acceptance, not the ornament's, and nobody has said which program that
+  product is cut on. Worth confirming before trusting them.
 
 ## Environment
 

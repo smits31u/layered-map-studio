@@ -6,11 +6,11 @@ import {cityCapture} from '../fixtures/ornament/captures';
 import {installFakeMapLibre,type InstalledFakeMapLibre} from '../helpers/fakeMapLibre';
 
 // Phase 2's exit criteria, driven through the UI: "a user can search, choose a result, pan/zoom,
-// switch detail, and place the marker while preview and state remain synchronized."
+// and switch detail while preview and state remain synchronized."
 //
 // The interactive map itself needs WebGL, which jsdom does not provide, so OrnamentMap renders its
 // documented fallback here and the map's own pan/zoom gestures are out of reach. Everything the map
-// reports back — viewport changes, the chosen place, the marker position, the dirty flag — goes
+// reports back — viewport changes, the chosen place, the dirty flag — goes
 // through the store, and that is what this drives. The controls are the same path the map uses.
 
 const CRIVITZ={
@@ -59,7 +59,6 @@ const chooseCrivitz=async()=>{
  openEverySection();
 };
 
-const markerReadout=()=>screen.getByText(/^Marker at /).textContent??'';
 const centreReadout=()=>screen.getByText(/^Centre /).textContent??'';
 
 describe('ornament map and search',()=>{
@@ -108,50 +107,27 @@ describe('ornament map and search',()=>{
   await waitFor(()=>expect(screen.getByText(/did not respond/)).toBeTruthy());
  });
 
- it('moves the map to a chosen result and puts the marker on it',async()=>{
+ it('moves the map to a chosen result',async()=>{
   await chooseCrivitz();
   expect(centreReadout()).toContain('45.23230, -88.00430');
-  expect(markerReadout()).toContain('45.23230, -88.00430');
   // The chosen place is named in the workspace header, not only in the result list it came from.
   expect(document.querySelector('.mode-note')?.textContent).toContain('Crivitz, Marinette County');
  });
 
- // The bug the plan names directly: "Position the marker at the selected place coordinate, not
- // automatically at the current map center after panning."
- it('leaves the marker where the place is when the map pans',async()=>{
+ // The marker used to be positioned at the chosen place, and later became a keep-out region with a
+ // size control. The generator produces no marker at all now — markers are added by hand in the
+ // laser software per order — so what is left to check is that no trace of one is offered.
+ it('offers no marker controls at all',async()=>{
   await chooseCrivitz();
-  const before=markerReadout();
-  fireEvent.change(field('Zoom'),{target:{value:'17'}});
   openEverySection();
-  expect(field('Zoom').value).toBe('17');
-  expect(markerReadout()).toBe(before);
- });
-
- it('moves the marker to the map centre only when explicitly asked',async()=>{
-  await chooseCrivitz();
-  fireEvent.click(screen.getByRole('button',{name:'Move marker to map centre'}));
-  openEverySection();
-  expect(markerReadout()).toContain('45.23230, -88.00430');
-  // Choosing a second place moves both; then centring keeps them together.
-  await search();
-  fireEvent.click(screen.getByRole('button',{name:new RegExp(SUAMICO.label.slice(0,14))}));
-  openEverySection();
-  expect(markerReadout()).toContain('44.63270, -88.03980');
- });
-
- it('returns the marker to the selected place after it has been moved',async()=>{
-  await chooseCrivitz();
-  const back=screen.getByRole('button',{name:'Return marker to selected place'}) as HTMLButtonElement;
-  expect(back.disabled).toBe(false);
-  fireEvent.click(screen.getByRole('button',{name:'Move marker to map centre'}));
-  openEverySection();
-  fireEvent.click(screen.getByRole('button',{name:'Return marker to selected place'}));
-  openEverySection();
-  expect(markerReadout()).toContain('45.23230, -88.00430');
- });
-
- it('cannot return the marker to a place before one has been chosen',()=>{
-  expect((screen.getByRole('button',{name:'Return marker to selected place'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByText(/^Marker at /)).toBeNull();
+  expect(screen.queryByText(/Cut as its own loose piece/)).toBeNull();
+  expect(screen.queryByRole('button',{name:'Move marker to map centre'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'Return marker to selected place'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'Heart'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'Pin'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'House'})).toBeNull();
+  expect(document.body.textContent).not.toMatch(/Marker size/);
  });
 
  it('keeps zoom inside 7 to 19 in half steps',()=>{
@@ -300,7 +276,6 @@ describe('dirty state and export blocking',()=>{
   openEverySection();
   expect(field('Zoom').value).toBe(String(DEFAULT_ZOOM));
   expect(exportButton().disabled).toBe(true);
-  expect((screen.getByRole('button',{name:'Return marker to selected place'}) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByRole('button',{name:'Capture map geometry'})).toBeTruthy();
  });
 });

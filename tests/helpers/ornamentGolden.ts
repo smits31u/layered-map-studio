@@ -50,6 +50,13 @@ export const GOLDEN_SETTINGS:FeatureGeometrySettings={
  detail:'high',
  widthScale:1,
  buildMode:'classic-2-piece',
+ // Pinned to 'keep-separate' rather than tracking the app default, which is now 'bridge'. A golden
+ // fixture exists to show what the pipeline does to a given input; if it followed the default, a
+ // change of default would silently rewrite every recorded digest and the file would stop being
+ // evidence of anything. The default is exercised on its own in ornamentLandIslands.test.ts.
+ // Pinned at 4mm-squared rather than tracking the app default, which is now 2mm-squared, for the
+ // same reason the policy is pinned: a golden file records what the pipeline does to a given input,
+ // and one that followed the defaults would rewrite itself every time a default moved.
  land:{islandPolicy:'keep-separate',minIslandAreaMm2:4,bridgeWidthMm:1.5,structuralRingWidthMm:2},
 };
 

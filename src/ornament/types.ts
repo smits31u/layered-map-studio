@@ -3,8 +3,6 @@ import type {FontId} from '../types/project';
 
 export type OrnamentUnit='mm'|'in';
 export type RoadDetail='low'|'medium'|'high';
-export type MarkerKind='heart'|'pin'|'house';
-export type MarkerOutput='separate-cut-piece'|'engraved';
 export type BuildMode='classic-2-piece'|'water-cutout-3-piece';
 export type ExportPreset='semantic'|'lightburn-colors';
 
@@ -29,10 +27,11 @@ export interface TextLine{value:string;fontId:FontId;sizeMm:number;letterSpacing
 export interface OrnamentProject{
  schemaVersion:1;
  // selectedPlaceCenter is a departure from the plan's TypeScript block, which declares only
- // selectedPlaceLabel. Its own prose needs the coordinate: the marker goes at "the selected place
- // coordinate, not automatically at the current map center after panning", and the preview pane
- // calls for a "return to selected place" action. A label cannot answer either question, and
- // re-deriving the coordinate from the viewport centre is exactly the drift being avoided.
+ // selectedPlaceLabel. It was originally added for the marker, which had to sit at "the selected
+ // place coordinate, not automatically at the current map center after panning". The marker is gone
+ // and the field is not: it is what `exportReadiness` tests to know a place was actually chosen
+ // rather than panned to, and a label cannot answer that. Re-deriving it from the viewport centre
+ // would reintroduce exactly the drift it exists to prevent.
  viewport:{center:[number,number];zoom:number;bearing:0;pitch:0;selectedPlaceLabel?:string;selectedPlaceCenter?:[number,number]};
  ornament:{
   diameterMm:number;
@@ -55,7 +54,6 @@ export interface OrnamentProject{
  // structuralRingWidthMm is the annulus at the edge of the map disk that stays solid in
  // water-cutout mode, so a coastline crossing the ornament does not detach the whole seaward half.
  land:{islandPolicy:LandIslandPolicy;minIslandAreaMm2:number;bridgeWidthMm:number;structuralRingWidthMm:number};
- marker:{kind:MarkerKind;position:[number,number];sizeMm:number;output:MarkerOutput};
  text:{subtitle:TextLine;title:TextLine;date:TextLine;gap12Mm:number;gap23Mm:number};
  buildMode:BuildMode;
  exportPreset:ExportPreset;
@@ -79,7 +77,6 @@ export const ORNAMENT_LIMITS={
  loopMinNeckWidthMm:{min:1,max:20,step:.25},
  mapToTextBoundaryMm:{min:-150,max:150,step:.5},
  roadWidthScale:{min:.25,max:4,step:.05},
- markerSizeMm:{min:2,max:60,step:.5},
  textSizeMm:{min:1,max:60,step:.1},
  letterSpacingMm:{min:-2,max:8,step:.05},
  lineGapMm:{min:-8,max:18,step:.25},

@@ -46,7 +46,6 @@ export function clampOrnamentProject(project:OrnamentProject):OrnamentProject{
    bridgeWidthMm:clampTo(project.land.bridgeWidthMm,L.bridgeWidthMm),
    structuralRingWidthMm:clampTo(project.land.structuralRingWidthMm,L.structuralRingWidthMm),
   },
-  marker:{...project.marker,sizeMm:clampTo(project.marker.sizeMm,L.markerSizeMm)},
   text:{
    subtitle:clampLine(project.text.subtitle),
    title:clampLine(project.text.title),

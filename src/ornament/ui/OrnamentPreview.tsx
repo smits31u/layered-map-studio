@@ -1,11 +1,9 @@
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {geometryPath} from '../../geometry/shoreline/polygonEngine';
-import type {PointMm} from '../geometry/clipLine';
 import type {FeatureGeometryResult} from '../geometry/featureGeometry';
 import type {OrnamentGeometry} from '../geometry/ornamentShape';
 import {mapWindowLayout,ornamentViewBox,previewTransform} from '../map/cropMask';
 import {OPENFREEMAP} from '../map/provider';
-import type {OrnamentMarkerSymbol} from '../markers/ornamentMarker';
 import type {OrnamentTextLayout} from '../text/ornamentText';
 import type {OrnamentProject} from '../types';
 import {OrnamentMap} from './OrnamentMap';
@@ -15,14 +13,12 @@ type Props={
  project:OrnamentProject;
  geometry:OrnamentGeometry;
  textLayout:OrnamentTextLayout;
- marker:OrnamentMarkerSymbol;
  featureGeometry?:FeatureGeometryResult;
  dirty:boolean;
  fitBounds?:{bounds:[number,number,number,number];token:number};
  captureRequest?:{token:number};
  onCapture:(outcome:CaptureOutcome)=>void;
  onViewportChange:(view:{center:[number,number];zoom:number})=>void;
- onMarkerOffsetMm:(offset:PointMm|undefined)=>void;
  onStatus:(message:string)=>void;
 };
 
@@ -35,7 +31,7 @@ const CUT='#d8503f',BAND='#2f3d4b',ENGRAVE='#12181e',WATER='#7c9fb5',TAB='#c08a2
 // in the hole the frame leaves, so every pointer event the frame receives was aimed past it.
 const OVERLAY:React.CSSProperties={position:'absolute',inset:0,pointerEvents:'none'};
 
-export function OrnamentPreview({project,geometry,textLayout,marker,featureGeometry,dirty,fitBounds,captureRequest,onCapture,onViewportChange,onMarkerOffsetMm,onStatus}:Props){
+export function OrnamentPreview({project,geometry,textLayout,featureGeometry,dirty,fitBounds,captureRequest,onCapture,onViewportChange,onStatus}:Props){
  const host=useRef<HTMLDivElement>(null);
  const [size,setSize]=useState({width:0,height:0});
 
@@ -55,9 +51,9 @@ export function OrnamentPreview({project,geometry,textLayout,marker,featureGeome
 
  const blocked=geometry.issues.some(issue=>issue.severity==='error');
 
- // Memoised because `layout` is a dependency of the map's marker effect. Recomputing it is cheap;
+ // Memoised because `layout` is a dependency of the map's own effects. Recomputing it is cheap;
  // handing the map a new object on every render is not — that alone is enough to make the map
- // re-project the marker, report a new offset, re-render this component and start again.
+ // re-render this component and start again.
  const viewBox=useMemo(()=>ornamentViewBox(geometry),[geometry]);
  const transform=useMemo(()=>previewTransform(viewBox,size.width,size.height),[viewBox,size.width,size.height]);
  const layout=useMemo(()=>mapWindowLayout(geometry,viewBox,transform),[geometry,viewBox,transform]);
@@ -87,13 +83,10 @@ export function OrnamentPreview({project,geometry,textLayout,marker,featureGeome
    zoom={project.viewport.zoom}
    detail={project.roads.detail}
    chordYMm={geometry.chordYMm}
-   marker={marker}
-   markerPosition={project.marker.position}
    fitBounds={fitBounds}
    captureRequest={captureRequest}
    onCapture={onCapture}
    onViewportChange={onViewportChange}
-   onMarkerOffsetMm={onMarkerOffsetMm}
    onStatus={onStatus}
   />:null}
 

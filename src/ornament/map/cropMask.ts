@@ -93,7 +93,7 @@ export function mapWindowLayout(geometry:OrnamentGeometry,viewBox:ViewBoxMm,tran
 }
 
 // Converts a position inside the map element back to ornament millimetres. Used to ask whether a
-// marker placed at a geographic coordinate actually lands inside the ornament's map window.
+// point projected from a geographic coordinate actually lands inside the ornament's map window.
 export const mapPxToOrnamentMm=(layout:MapWindowLayout,xPx:number,yPx:number):[number,number]=>
  layout.scalePxPerMm>0
   ?[(xPx-layout.sizePx/2)/layout.scalePxPerMm,(yPx-layout.sizePx/2)/layout.scalePxPerMm]

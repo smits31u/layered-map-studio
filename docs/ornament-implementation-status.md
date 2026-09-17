@@ -8,7 +8,7 @@ Tracks `CLAUDE_MAP_ORNAMENT_BUILD_PLAN.md` against what exists in this repositor
 | 1 — original ornament editor shell | complete |
 | 2 — map and search | complete |
 | 3 — feature geometry | complete |
-| 4 — SVG export and preflight | not started |
+| 4 — SVG export and preflight | built and tested; **not exit-criteria-complete** until xTool Studio import is verified by hand |
 | 5 — hardening | not started |
 
 ## Repository shape — deliberate departure from the plan
@@ -45,7 +45,7 @@ is the whole of what is being given up, and it is not yet worth rewriting every 
 | SVG path serialisation | `geometryPath()` from `polygonEngine.ts` | Verbatim |
 | Unit conversion | `src/utils/units.ts` | `inchesToMm`/`mmToInches` |
 | Geocoding | `src/map/geocoding/GeocoderService.ts` | Rewritten in Phase 2 as a client for `/api/geocode`; provider code moved to `src/server/geocode/adapters/`. See ADR 0003 |
-| ZIP packaging | `src/export/svg/exportSvg.ts` | Untouched — Phase 4 |
+| ZIP packaging | `src/export/svg/exportSvg.ts` | Still untouched. See Phase 4's note on why the ornament does not go through `ManufacturingScene` |
 
 ## Phase 0 — complete
 
@@ -206,22 +206,265 @@ two explicit actions: "Move marker to map centre" and "Return marker to selected
       captured features, off the main thread, with golden-fixture regression coverage — 707 tests
       passing repo-wide.
 
+## Phase 4 — complete
+
+- [x] `src/ornament/export/pieces.ts` assembles both layouts into the plan's nine semantic groups and
+      places the pieces on a sheet in absolute millimetre coordinates.
+- [x] `src/ornament/export/svg.ts` serialises them: real `mm` units, a 1:1 viewBox, three-decimal
+      rounding through one function, and no transforms, live fonts or stylesheets.
+- [x] `src/ornament/export/neck.ts` measures the hanging loop's neck on the emitted polygon
+      (`tests/unit/ornamentNeckWidth.test.ts`).
+- [x] `src/ornament/export/morphology.ts` — the erosion/dilation the width checks are built on
+      (`tests/unit/ornamentMorphology.test.ts`).
+- [x] `src/ornament/export/preflight.ts` — all eight checks, blocking on error
+      (`tests/unit/ornamentPreflight.test.ts`).
+- [x] `src/ornament/export/lightburn.ts` — the colour preset, with group ids remaining authoritative.
+      The filename, the `LIGHTBURN_PRESET` constant and the stored `exportPreset: 'lightburn-colors'`
+      value are **holdovers from a wrong assumption about the target software** and have not been
+      renamed; see "The target laser software is xTool Studio" below.
+- [x] `src/ornament/export/metadata.ts` — app version, schema, viewport, providers, build mode,
+      dimensions, timestamp, settings, plus the project JSON embedded as CDATA.
+- [x] `src/ornament/export/pathTransform.ts` — translating glyph and marker path data rather than
+      emitting a group transform (`tests/unit/ornamentPathTransform.test.ts`).
+- [x] `src/ornament/export/download.ts` — SVG plus project JSON, with the DOM isolated from the pure
+      export path.
+- [x] Exit criteria, automated and browser-verified parts: both modes export from real captured
+      geometry, the finished diameter is within 0.1mm, every cut path is closed, and loose pieces are
+      reported rather than hidden — 796 tests passing repo-wide, and both modes opened and rendered
+      correctly in Chrome against the built container.
+- [ ] Exit criteria, manual part: **the file has not been opened in xTool Studio or Inkscape.** Ben
+      has to do this before Phase 4 counts as complete. See below.
+
+### The lake tool's `ManufacturingScene` is still not the export path
+
+The gap recorded below was real: `validatePanel()` rejects coordinates outside `width x height`, so
+that path cannot describe a disk centred on the origin. The choice was between generalising it and
+writing a serializer for the ornament. The ornament got its own, because the two products disagree
+about more than their outline: `ManufacturingScene` is a stack of same-sized panels laid out in a
+row, and the ornament is two or three differently-shaped pieces that must stay in register with one
+another. Generalising the validator would have removed the one assertion that makes the lake tool's
+own output safe, in exchange for a shape it still could not lay out. `geometryPath`, the font
+registry and the text vectorizer are still shared.
+
+### Product direction change: the marker was removed from the generator
+
+Ben decided against generating a marker at all — he adds one by hand in xTool Studio per order. This
+supersedes the keep-out work recorded in earlier revisions of this document, which is gone.
+
+**Removed.** The whole marker domain: `marker.kind`, `marker.sizeMm` and the `MarkerKind` type; the
+`markerSizeMm` limit; the `setMarker` action and its clamp; `src/ornament/markers/ornamentMarker.ts`
+and the directory with it; `src/ornament/geometry/markerKeepOut.ts`; the `piece/marker/cut-or-engrave`
+export group and the `marker` piece id; the heart/pin/house selector, the size control and the whole
+Marker section of the controls; the `marker` field in `FeatureGeometrySettings` and the `keepOut`
+field in `FeatureGeometryResult`; `roadGeometry`'s `keepOutCircles` option and
+`keepOutClippedPieces` metric; the `marker-over-water` warning and the submerged-circle rule that
+raised it; the `preview/marker-keepout` overlay; and `tests/unit/ornamentMarkerKeepOut.test.ts`.
+
+**Kept.** `src/geometry/scene/keepOut.ts` is untouched apart from `KeepOutTarget` losing the two
+`ornament-*` members that existed only for the marker. `keepOutFootprint`,
+`clipPolylineAgainstCircles`, `pointInsideAnyCircle` and `regionAffects` are exactly as the compass
+left them, and the compass still uses them. `src/geometry/scene/markerRegistry.ts` is the *lake*
+tool's marker artwork, consumed by `Controls.tsx`, `MarkerCard.tsx` and `buildScene.ts`; it was never
+part of this and is not touched.
+
+`pathBoundsMm` moved to `src/ornament/export/pathTransform.ts`. It is a property of path data rather
+than of markers, the path translation is checked against it, and leaving a one-function module behind
+to hold it would have been worse than moving it.
+
+**Evidence the removal is complete.** After regenerating, all eight golden fixtures are byte-identical
+to the digests recorded before the keep-out was ever added — the geometry pipeline is exactly where it
+was. The emitted SVG for both modes contains no occurrence of "marker", "keepout", "keep-out" or
+"heart", asserted in `ornamentSvgExport.test.ts`.
+
+#### The persisted schema was not versioned up
+
+`schemaVersion` stays at 1. A project saved by the previous build carries a `marker` key that nothing
+reads; it rides through `persistence.ts`'s merge as an inert extra property and is re-saved untouched.
+Bumping the version would have rejected every one of those projects outright to avoid carrying a few
+unread bytes. `ornamentIslandThreshold.test.ts` loads an old-format record and asserts it still opens,
+keeps its other settings, and that nothing in the shipped type refers to the dead key. Verified
+against the live container too: the browser's stored project predated the removal and loaded cleanly.
+
+### Product direction change: one connected land piece by default
+
+`land.islandPolicy` now defaults to `bridge` rather than `keep-separate`, and the bridge policy was
+made to finish the job: it joins what it can reach with visible tabs and drops only fragments already
+below the size the user called meaningful. Anything it cannot reach *and* is meaningful is kept,
+reported, and left to the user.
+
+Loose land is now a **warning under every policy**, where it had been an error under bridge and omit.
+The old rule assumed a policy leaving something loose had failed. It had not: what reaches that point
+now is a real island, too far from shore to tab and too large to be one of the specks already called
+noise. On the Geneva Lake fixture the islands sit 18–30mm from the mainland and one is 567mm²; there
+is no bridge length that reaches them and no threshold that drops them without destroying the map.
+Blocking would have left the maker to discover that the only way to get a file out is whichever
+setting silences the message — which is the outcome `landIslands.ts` argues against at length.
+
+Measured on the fixtures: the coast fixture goes from two land pieces to one, joined by a 7.97mm tab.
+On live Geneva Lake data in water-cutout mode the land now comes out as a single connected piece with
+three holes and no loose fragments at all.
+
+The golden fixtures deliberately still pin `keep-separate` and their own 4mm² threshold. A golden
+file exists to show what the pipeline does to a given input; if it tracked the defaults, changing one
+would silently rewrite every recorded digest and the file would stop being evidence.
+
+#### The omit threshold is 2mm², and that is looser than what it replaced
+
+`minIslandAreaMm2` defaults to 2 rather than 4. Ben was asked explicitly whether "islands under 2mm"
+meant an area or a largest linear dimension, because the setting has always been an area in mm² while
+"2mm" is a length, and the two give materially different answers. He chose **area: 2mm²**.
+
+Worth stating plainly because it runs opposite to how the instruction reads: 2mm² omits *fewer*
+islands than the 4mm² it replaced. A 3mm² island that used to be dropped is now kept. That was the
+stated decision, not an oversight, and `ornamentIslandThreshold.test.ts` pins the before/after so it
+cannot drift back by accident.
+
+### Departures and judgment calls
+
+- **The frame is not rebuilt from the plan's boolean sequence; Phase 1's result is reused.**
+  `buildOrnamentGeometry` already performs it: body union loop, subtract the loop hole, subtract the
+  map opening. The plan's fourth step, "union the remaining ring, text band and loop bridge", is
+  implicit there — subtracting only the opening *above* the chord leaves the text band attached, so
+  the three are already one polygon and there is nothing to union. Re-deriving the frame in the
+  export would also break `ornamentCropMask.test.ts`, which pins the preview's crop to being
+  byte-identical to the frame's own opening. What Phase 4 adds is the fifth step, repair and
+  simplify, in the form of the preflight checks: self-intersection, closure and winding are asserted
+  on the emitted polygon rather than assumed from the engine that produced it.
+- **`piece/land/roads-engrave` carries roads in classic mode too**, where they engrave onto the base
+  piece. The group list has exactly one group for roads and the list is the contract; `data-piece`
+  on the group records which physical piece it belongs to.
+- **Every group that applies to the build mode is emitted even when empty.** An absent group then
+  means "not applicable to this mode" rather than "applicable but empty", which an operator cannot
+  otherwise tell apart.
+- **Text overflow blocks the export**, although the editor treats it as a warning. In the editor the
+  user is still typing; at export, a line wider than the chord it sits on engraves across the map
+  window or past the rim.
+- **Registration marks are four 0.8mm engraved dots** at the structural ring's midline, on the base
+  and land pieces only — never on the frame, whose front face is the one the customer sees. The plan
+  names the group and calls it optional but does not specify the mark; this is a choice.
+- **Green and cyan are this implementation's choice.** The plan specifies red for cut, black for
+  engrave and blue for the light water pass. Registration and labels still need a layer of their
+  own, so they were given green and cyan — picked, at the time, from LightBurn's palette, because
+  LightBurn was believed to be the target. It is not; see below. Those two colours in particular were
+  chosen to satisfy a constraint that turns out not to apply, so they are the weakest part of the
+  preset and the first thing to change if xTool Studio wants something else.
+- **`piece/marker/cut-or-engrave` was removed from the group list.** The list is the export contract
+  and this is a real change to it: a sheet is now two or three stacked pieces and nothing else. The
+  remaining eight ids are unchanged.
+
+### The target laser software is xTool Studio
+
+The build plan assumed LightBurn and this phase was written against that assumption. **The actual
+hardware and software in use is xTool Studio.** Nothing in the exported geometry depends on which of
+the two opens it — the file is plain SVG in real millimetres with no transforms, no live fonts and no
+stylesheet — but three things were reasoned about in LightBurn's terms and have to be re-checked
+rather than carried over:
+
+1. **The colour-to-operation convention** (red cut, black engrave, blue light-water-engrave, plus
+   green registration and cyan labels). This was chosen because LightBurn assigns one layer per
+   colour and snaps unknown colours to its own palette. Whether xTool Studio does anything of the
+   kind is unverified. It may key off colour differently, ignore colour entirely, or import
+   everything onto one layer.
+2. **Hairline stroke width.** `CUT_STROKE_MM` is 0.1mm on the reasoning that LightBurn ignores stroke
+   width and cuts the path, while a viewer needs something non-zero to draw. If xTool Studio instead
+   interprets a stroked path as a shape to be filled or offset, that number matters.
+3. **Whether group ids survive the import at all.** The group ids are the authoritative contract and
+   are correct regardless, but the practical value of naming them depends on the importer preserving
+   or at least displaying them.
+
+**Naming not changed, deliberately.** `src/ornament/export/lightburn.ts`, the exported
+`LIGHTBURN_PRESET` constant, and the persisted `ExportPreset` union value `'lightburn-colors'` still
+say LightBurn. Renaming the union value is a stored-project schema change, and a slightly awkward
+one: `exportPreset` is not clamped by `clampOrnamentProject` at all today — `persistence.ts` merges
+it straight out of `localStorage` — so a rename would need migration code written rather than
+adjusted, or every project saved before the rename would come back holding a value the union no
+longer contains and the preset control would show neither option selected. The value is also
+asserted in `tests/unit/ornamentStore.test.ts` and `tests/unit/ornamentSvgExport.test.ts`. That is
+more than a documentation correction should carry, so it is left for whoever does the rename
+properly. Treat the name as a label for "the colour-coded preset", not as a claim of compatibility
+with any particular program.
+
+(Worth noting on its own, and not only because of the rename: `clampOrnamentProject` forces every
+stored *numeric* into range, but every *union-typed* field is spread through unchecked —
+`exportPreset`, `buildMode`, `displayUnit`, `roads.detail`, `land.islandPolicy`, `marker.kind`,
+`marker.output` and each `text.*.fontId`. `loadOrnamentProject` treats persisted data as untrusted
+and clamps it for exactly this reason, so the gap undercuts a guarantee the code already intends to
+make: a hand-edited or stale `localStorage` entry can put any of those into a value the UI cannot
+represent and the reducer will never correct. Phase 5 material.)
+
+#### What Ben needs to do
+
+Export both modes, then in **xTool Studio**:
+
+- Confirm the ornament measures its configured diameter — 101.6mm at the defaults — and that the
+  sheet matches the `width`/`height` on the `<svg>` element and the `lms:dimensions` entry in the
+  metadata. The sheet size varies with the design (it is sized around the pieces), so measure the
+  ornament, not the sheet, as the fixed reference. If everything arrives roughly 3.78× too large,
+  the importer is reading user units as pixels and ignoring the `mm` suffix.
+- Confirm cut and engrave end up separable — by colour, by group, or by whatever xTool Studio keys
+  off — and record which, because that is what the preset should be built around.
+- Confirm `registration/optional` and `labels/non-production` can be switched off or deleted, and
+  that they are not silently treated as cuts. A cut through a registration dot ruins the piece.
+- Confirm the text and marker render as filled outlines, not as missing glyphs or hairline outlines.
+- Confirm nothing is dropped. The SVG is plain text: `grep -o '<g id="[^"]*"' file.svg` lists every
+  group the file contains, and each `<path` inside one is a shape. Compare that against what xTool
+  Studio shows. A silently dropped group is the failure mode worth looking for, because the piece
+  still looks plausible without it.
+
+Inkscape is the second half of the same manual pass and is equally unverified. Chrome was checked
+directly against the built container and renders both modes correctly.
+
+### The neck width check
+
+The plan requires the loop to be "connected by at least the configured minimum neck width", and
+requires it of the exported geometry rather than of the editor preview. Those are different claims
+about different objects, and the editor's existing check only makes the first.
+
+`evaluateHangingLoop` solves the two circles' radical line and reports the chord where they cross.
+That is arithmetic about the diameters and the overlap. It never looks at the frame, so it cannot see
+a mistake in the boolean chain, a repair pass that trimmed the bridge, or a loop hole dipping below
+the junction and splitting one wide neck into two thin struts.
+
+So the export measures the polygon. It erodes the frame by w/2 and asks whether any single connected
+component still holds both loop material and body material — the definition of "joined by at least w
+of material" — and binary-searches w for the largest value that still passes. The probes are regions
+rather than points: the loop's annulus on the far side of its hole, and the frame inside the body and
+outside the loop. Taking the *far* half of the annulus is deliberate; the whole annulus reaches down
+to where the loop meets the body, so a component touching only that last sliver would count as
+connected without ever crossing the bridge.
+
+On the default ornament this measures 3.98mm against a 4.00mm prediction — the loop's own annulus,
+not the 11.90mm junction chord, because the annulus is the narrowest point on the path from the
+hanging point to the body. Reporting the chord would overstate the connection threefold.
+
+`tests/unit/ornamentNeckWidth.test.ts` damages the frame polygon while leaving every parameter valid,
+so a regression that replaced the measurement with `geometry.loop.junctionWidthMm` fails it. Its last
+case sweeps every loop the editor will accept and asserts that each one is either refused or really
+does have the material.
+
 ## Next concrete phase
 
-Phase 4 — SVG export and preflight. Point the manufacturing scene / SVG export path at the disk
-ornament shape and the Phase 3 `GeometrySnapshot` output (roads, water, land islands) rather than
-the lake tool's rectangular `ManufacturingScene`, and add the preflight checks (min feature size,
-open paths, self-intersections) called out in the plan before export is enabled end to end.
+Phase 5 — hardening.
 
 ## Known gaps carried into later phases
 
 - **Arc/curved text is not implemented.** `textVector.ts` sets straight baselines only. If the
   design later wants the subtitle or date following the rim curve, that is new per-glyph rotation
   work, not a parameter.
-- **`ManufacturingScene` assumes a rectangular product.** `validatePanel()` rejects coordinates
-  outside `width × height`, so the lake tool's SVG/ZIP export path cannot be pointed at a disk
-  as-is. Phase 4 needs either a bounding-box convention for round products or a generalised
-  validator.
+- **`ManufacturingScene` assumes a rectangular product.** Resolved in Phase 4 by not using it — see
+  above. The lake tool's validator is unchanged and still rejects coordinates outside
+  `width × height`, which is correct for the product it describes.
+- **No ZIP packaging for the ornament.** The lake tool ships individual panels as an archive; the
+  ornament writes one sheet plus the project JSON. Splitting the pieces into separate files has not
+  been asked for and would lose the registration between them that the shared origin line provides.
+- **Inkscape and xTool Studio have not been opened against the output.** The exit criteria name
+  three programs; Chrome was verified directly against the built container, and neither of the other
+  two is installed in this environment. This is the one outstanding item on Phase 4 and it is a
+  manual step for Ben — see "The target laser software is xTool Studio" above for what to check.
+- **The colour preset is unverified against the real importer.** Red/black/blue plus green/cyan were
+  chosen for LightBurn's layer model, which is not what is being used. The group ids are the
+  contract and are unaffected; the colours are a convenience whose usefulness is currently assumed
+  rather than known.
 - **Playwright is still not set up.** Phase 1 expected browser-level E2E to arrive with Phase 2.
   It did not: the acceptance items are covered by jsdom component tests
   (`tests/unit/ornamentResetUi.test.tsx`, `tests/unit/ornamentMapUi.test.tsx`) that assert on

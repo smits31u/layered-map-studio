@@ -3,10 +3,12 @@ import {preloadAllFonts} from '../../text/fontRegistry';
 import type {CaptureResult,CaptureWarning} from '../capture/mapCapture';
 import {totalCapturedFeatures,type FeatureCapture} from '../capture/featureTypes';
 import {createDefaultOrnamentProject} from '../defaults';
+import {downloadFiles,PROJECT_MIME,SVG_MIME} from '../export/download';
+import {exportOrnament} from '../export/exportOrnament';
+import type {PreflightReport} from '../export/preflight';
+import {preflightSummary} from '../export/preflight';
 import type {FeatureGeometryResult,FeatureGeometrySettings} from '../geometry/featureGeometry';
-import {mapWindowOf,type PointMm} from '../geometry/clipLine';
 import {buildOrnamentGeometry} from '../geometry/ornamentShape';
-import {buildOrnamentMarker,markerFitIssues} from '../markers/ornamentMarker';
 import {clearOrnamentProject,loadOrnamentProject,saveOrnamentProject} from '../persistence';
 import {exportReadiness,viewportFingerprint,type GeometrySnapshot} from '../snapshot';
 import {ornamentReducer} from '../store';
@@ -16,12 +18,6 @@ import {OrnamentControls} from './OrnamentControls';
 import {OrnamentPreview} from './OrnamentPreview';
 
 export type CaptureOutcome={ok:true;result:CaptureResult}|{ok:false;message:string};
-
-// A tenth of a micrometre: far below anything the ornament can fabricate, and far above the float
-// noise two projections of the same coordinate differ by.
-const SAME_POINT_MM=1e-7;
-const samePoint=(a:PointMm|undefined,b:PointMm|undefined)=>
- a===b||Boolean(a&&b&&Math.abs(a[0]-b[0])<SAME_POINT_MM&&Math.abs(a[1]-b[1])<SAME_POINT_MM);
 
 // Fonts resolve asynchronously but text vectorization is synchronous, so the page re-renders once
 // they land rather than reading a half-loaded registry (same contract buildScene relies on).
@@ -40,10 +36,13 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
  const [captureWarnings,setCaptureWarnings]=useState<CaptureWarning[]>([]);
  const [featureGeometry,setFeatureGeometry]=useState<FeatureGeometryResult|undefined>(undefined);
  const [building,setBuilding]=useState(false);
- const [markerOffsetMm,setMarkerOffsetMm]=useState<PointMm|undefined>(undefined);
  // Bumped rather than cleared, so choosing the same result twice still re-fits the map.
  const [fitBounds,setFitBounds]=useState<{bounds:[number,number,number,number];token:number}|undefined>(undefined);
  const [captureRequest,setCaptureRequest]=useState<{token:number}|undefined>(undefined);
+ // The last preflight run. Transient like the capture it was run against, and cleared whenever the
+ // capture is, so a stale "preflight passed" can never sit next to geometry it did not check.
+ const [preflight,setPreflight]=useState<PreflightReport|undefined>(undefined);
+ const [exporting,setExporting]=useState(false);
 
  // The plan's "reject stale export results if the project revision changed". Every build carries the
  // revision it started under; a result whose revision is not the current one is dropped on arrival
@@ -61,10 +60,6 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
  // fontsReady participates in the key so the layout recomputes when a font finishes loading; the
  // layout function itself reads the registry synchronously.
  const textLayout=useMemo(()=>layoutOrnamentText(project,geometry),[project,geometry,fontsReady]);
- const marker=useMemo(()=>buildOrnamentMarker(project.marker.kind,project.marker.sizeMm),[project.marker.kind,project.marker.sizeMm]);
-
- const mapWindow=useMemo(()=>mapWindowOf(geometry),[geometry]);
- const markerIssues=useMemo(()=>markerOffsetMm?markerFitIssues(marker,markerOffsetMm,mapWindow):[],[marker,markerOffsetMm,mapWindow]);
 
  const fingerprint=useMemo(()=>viewportFingerprint(project,geometry.innerRadiusMm),[project,geometry.innerRadiusMm]);
  const readiness=useMemo(()=>exportReadiness({
@@ -99,7 +94,36 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
   setCaptureWarnings([]);
   setFeatureGeometry(undefined);
   setBuilding(false);
+  setPreflight(undefined);
  },[]);
+
+ // Export is one synchronous pass: build the pieces, preflight them, and only then serialise. A
+ // blocked preflight downloads nothing at all — the report is the entire result, and the controls
+ // render it where the "why is this disabled" list already lives.
+ const onExport=useCallback(()=>{
+  if(!readiness.ready)return;
+  setExporting(true);
+  try{
+   const result=exportOrnament({project,geometry,textLayout,featureGeometry,capture});
+   setPreflight(result.preflight);
+   if(!result.ok||!result.svg){
+    setStatus(preflightSummary(result.preflight));
+    return;
+   }
+   const wrote=downloadFiles([
+    {name:result.fileNames.svg,content:result.svg,type:SVG_MIME},
+    {name:result.fileNames.project,content:result.projectJson,type:PROJECT_MIME},
+   ]);
+   setStatus(wrote
+    ?`Exported ${result.fileNames.svg} and ${result.fileNames.project} · ${preflightSummary(result.preflight)}`
+    :'This browser would not accept the download. The geometry passed preflight — try a different browser.');
+  }catch(error){
+   setPreflight(undefined);
+   setStatus(`The export could not be built: ${(error as Error).message}`);
+  }finally{
+   setExporting(false);
+  }
+ },[readiness.ready,project,geometry,textLayout,featureGeometry,capture]);
 
  const onCapture=useCallback((outcome:CaptureOutcome)=>{
   if(!outcome.ok){
@@ -128,6 +152,9 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
   revision.current+=1;
   const token=revision.current;
   setBuilding(true);
+  // A preflight report describes one specific set of geometry. The moment a rebuild starts, the
+  // report on screen is about geometry that is being replaced, so it stops being shown.
+  setPreflight(undefined);
   const handle=active.run({revision:token,capture,settings});
   handle.result.then(result=>{
    // Stale-result guard. A run the user has already superseded resolves here with an old revision
@@ -151,12 +178,6 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
  const onViewportChange=useCallback((view:{center:[number,number];zoom:number})=>{
   dispatch({type:'setViewport',patch:{center:view.center,zoom:view.zoom}});
  },[]);
- // Keeps the identity of the stored offset stable when the marker has not actually moved. The map
- // re-projects on every movement and hands back a fresh array each time; storing it unconditionally
- // would re-render the whole page for a value that has not changed.
- const onMarkerOffsetMm=useCallback((offset:PointMm|undefined)=>{
-  setMarkerOffsetMm(previous=>samePoint(previous,offset)?previous:offset);
- },[]);
  const onStatus=useCallback((message:string)=>setStatus(message),[]);
 
  return <main>
@@ -165,14 +186,16 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
    dispatch={dispatch}
    geometry={geometry}
    textLayout={textLayout}
-   markerIssues={markerIssues}
    readiness={readiness}
    snapshot={snapshot}
    featureGeometry={featureGeometry}
    captureWarnings={captureWarnings}
    building={building}
    offMainThread={runner.current?.offMainThread??false}
-   onReset={()=>{clearOrnamentProject();forgetCapture();setMarkerOffsetMm(undefined);setFitBounds(undefined);setCaptureRequest(undefined);setStatus('');dispatch({type:'reset'})}}
+   exporting={exporting}
+   preflight={preflight}
+   onExport={onExport}
+   onReset={()=>{clearOrnamentProject();forgetCapture();setFitBounds(undefined);setCaptureRequest(undefined);setStatus('');dispatch({type:'reset'})}}
    onFitText={()=>dispatch({type:'scaleText',factor:fitTextScale(textLayout)})}
    onSelectPlace={(candidate,fit)=>{
     dispatch({type:'selectPlace',label:candidate.label,center:candidate.coordinates});
@@ -197,14 +220,12 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
     project={project}
     geometry={geometry}
     textLayout={textLayout}
-    marker={marker}
     featureGeometry={featureGeometry}
     dirty={readiness.dirty}
     fitBounds={fitBounds}
     captureRequest={captureRequest}
     onCapture={onCapture}
     onViewportChange={onViewportChange}
-    onMarkerOffsetMm={onMarkerOffsetMm}
     onStatus={onStatus}
    />
   </section>

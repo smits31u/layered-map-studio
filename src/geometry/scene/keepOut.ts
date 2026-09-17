@@ -9,6 +9,9 @@
 export type PointMm={x:number;y:number};
 export type Circle={cx:number;cy:number;r:number};
 
+// The lake tool's four layer names. Two ornament targets were added here briefly, for a marker
+// keep-out the ornament generator no longer has; they went with it. The mechanism below is
+// unchanged and is still the compass's.
 export type KeepOutTarget='roads-major'|'roads-minor'|'road-labels'|'place-labels';
 
 export interface KeepOutRegion{

@@ -17,7 +17,7 @@ import {buildLandPiece,buildWaterRegion,type ProjectedWater,type WaterGeometryMe
 // output, which is the plan's exit criterion ("fixed city, coast, island, and rural fixtures
 // generate deterministic, valid geometry") and what makes a golden fixture possible at all.
 //
-// What this does *not* do is lay pieces out, emit SVG, or convert text and markers to paths. That is
+// What this does *not* do is lay pieces out, emit SVG, or convert text to paths. That is
 // Phase 4. The boundary is deliberate: everything here is in ornament millimetres with the centre at
 // (0,0), and Phase 4 translates whole pieces into a sheet.
 

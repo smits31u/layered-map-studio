@@ -21,8 +21,9 @@ const MUTATIONS:OrnamentAction[]=[
  {type:'setOrnament',patch:{diameterMm:180,rimWidthMm:12,mapToTextBoundaryMm:-5}},
  {type:'setHangingLoop',patch:{outerDiameterMm:24,innerDiameterMm:12,overlapMm:7,minNeckWidthMm:5}},
  {type:'setRoads',patch:{detail:'high',widthScale:2.5}},
- {type:'setLand',patch:{islandPolicy:'bridge',minIslandAreaMm2:12,bridgeWidthMm:3,structuralRingWidthMm:5}},
- {type:'setMarker',patch:{kind:'house',position:[1,2],sizeMm:15,output:'engraved'}},
+ // 'omit-below-threshold' rather than 'bridge': 'bridge' is the default now, so mutating to it
+ // would leave the field on its default and this test would stop covering it.
+ {type:'setLand',patch:{islandPolicy:'omit-below-threshold',minIslandAreaMm2:12,bridgeWidthMm:3,structuralRingWidthMm:5}},
  {type:'setTextLine',key:'subtitle',patch:{value:'north woods',fontId:'cinzel',sizeMm:6,letterSpacingMm:1}},
  {type:'setTextLine',key:'title',patch:{value:'Caldron Falls',fontId:'inter',sizeMm:18,letterSpacingMm:.9}},
  {type:'setTextLine',key:'date',patch:{value:'1967',fontId:'cinzel',sizeMm:5,letterSpacingMm:.8}},
@@ -73,7 +74,6 @@ describe('clamping',()=>{
    {type:'setOrnament',patch:{diameterMm:9999,rimWidthMm:-40,mapToTextBoundaryMm:1e6}},
    {type:'setHangingLoop',patch:{outerDiameterMm:1e4,innerDiameterMm:-3,overlapMm:1e4,minNeckWidthMm:-1}},
    {type:'setRoads',patch:{widthScale:99}},
-   {type:'setMarker',patch:{sizeMm:-5}},
    {type:'setTextLine',key:'title',patch:{sizeMm:1e5,letterSpacingMm:-99}},
    {type:'setTextGap',key:'gap12Mm',value:1e5},
    {type:'setViewport',patch:{zoom:99}},
@@ -86,7 +86,6 @@ describe('clamping',()=>{
   expect(wild.ornament.hangingLoop.innerDiameterMm).toBe(L.loopInnerDiameterMm.min);
   expect(wild.ornament.hangingLoop.minNeckWidthMm).toBe(L.loopMinNeckWidthMm.min);
   expect(wild.roads.widthScale).toBe(L.roadWidthScale.max);
-  expect(wild.marker.sizeMm).toBe(L.markerSizeMm.min);
   expect(wild.text.title.sizeMm).toBe(L.textSizeMm.max);
   expect(wild.text.title.letterSpacingMm).toBe(L.letterSpacingMm.min);
   expect(wild.text.gap12Mm).toBe(L.lineGapMm.max);

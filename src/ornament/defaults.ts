@@ -21,12 +21,21 @@ export function createDefaultOrnamentProject():OrnamentProject{
    mapToTextBoundaryMm:14,
   },
   roads:{detail:'medium',widthScale:1},
-  // 'keep-separate' is the default because it is the only one of the three policies that changes
-  // nothing about the geometry — it reports the loose pieces and leaves them to the user. Bridging
-  // adds material the user did not ask for; omitting removes it. Both are reasonable choices and
-  // neither should be made silently on somebody's behalf.
-  land:{islandPolicy:'keep-separate',minIslandAreaMm2:4,bridgeWidthMm:1.5,structuralRingWidthMm:2},
-  marker:{kind:'heart',position:[-88.207,45.3685],sizeMm:8,output:'separate-cut-piece'},
+  // 'bridge' is the default because these ornaments are made at four inches and under, one or two at
+  // a time, and a water cutout that returns five loose slivers to glue back by hand is a worse
+  // product than one that is a single connected piece. Bridging joins what it can with visible tabs
+  // and drops only fragments already below the size the user called meaningful; anything larger that
+  // cannot be reached still comes back, still reported, and still blocks export. 'keep-separate' is
+  // one click away for anyone who wants the islands as real separate pieces.
+  //
+  // What has not changed is that every policy reports everything it found. The default decides what
+  // happens to a loose fragment, never whether the user is told about it.
+  //
+  // minIslandAreaMm2 is 2mm-squared, set by Ben as an *area* after being asked explicitly whether
+  // "islands under 2mm" meant area or a linear dimension. It is worth recording that this is looser
+  // than the 4mm-squared it replaced, not tighter: a 3mm-squared island that used to be dropped is
+  // now kept. That was the stated intent, not an oversight.
+  land:{islandPolicy:'bridge',minIslandAreaMm2:2,bridgeWidthMm:1.5,structuralRingWidthMm:2},
   text:{
    subtitle:{value:'',fontId:'inter',sizeMm:4,letterSpacingMm:.4},
    title:{value:'',fontId:'great-vibes',sizeMm:11,letterSpacingMm:0},
