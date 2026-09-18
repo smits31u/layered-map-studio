@@ -11,7 +11,7 @@ const kindOf=(objectId:string):ObjectKind=>objectId==='title'?'title':objectId==
 const parseTransform=(transform:string|null)=>{const t=/translate\(([-\d.]+)[ ,]+([-\d.]+)\)/.exec(transform??''),r=/rotate\(([-\d.]+)/.exec(transform??'');return{x:t?+t[1]:0,y:t?+t[2]:0,rotation:r?+r[1]:0}};
 const MOVE_THRESHOLD_MM=.05;
 
-export function GeneratedPreview({scene,featuresLoaded=false,project,onCommitOverride}:{scene?:ManufacturingScene;featuresLoaded?:boolean;project?:MapProject;onCommitOverride?:(updater:(p:MapProject)=>MapProject)=>void}){
+export function GeneratedPreview({scene,featuresLoaded=false,project,error,onCommitOverride}:{scene?:ManufacturingScene;featuresLoaded?:boolean;project?:MapProject;error?:string;onCommitOverride?:(updater:(p:MapProject)=>MapProject)=>void}){
  const[view,setView]=useState<PreviewMode>('individual'),[layer,setLayer]=useState(0);
  const[selectedId,setSelectedId]=useState<string>();
  const[selectedPose,setSelectedPose]=useState<{x:number;y:number;rotation:number}>();
@@ -127,7 +127,7 @@ export function GeneratedPreview({scene,featuresLoaded=false,project,onCommitOve
   // eslint-disable-next-line react-hooks/exhaustive-deps
  },[editable,scene,view,layer]);
 
- if(!scene)return <div className="empty"><b>GENERATED MAP MODE</b><p>{featuresLoaded?'Vector features loaded. Click Generate scene to build the manufacturing preview.':'Load vector features, then generate the manufacturing scene.'}</p></div>;
+ if(!scene)return <div className="empty"><b>GENERATED MAP MODE</b>{error?<p className="error" role="alert"><b>Generate failed:</b> {error}</p>:<p>{featuresLoaded?'Vector features loaded. Click Generate scene to build the manufacturing preview.':'Load vector features, then generate the manufacturing scene.'}</p>}</div>;
  const selected=Math.min(layer,scene.layers.length-1),svg=scenePreviewSvg(scene,view,selected),m=scene.geometryMetrics;
  const occupancy=m?waterAreaOccupancy(m.originalWaterAreaMm2,scene.widthMm,scene.heightMm)*100:undefined;
  const landSelected=scene.layers[selected]?.id==='layer-land';
