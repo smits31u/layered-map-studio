@@ -56,7 +56,7 @@ export interface MapProject {
  map:{latitude:number;longitude:number;zoom:number;bearing:number;crop?:CropGeography};
  dimensions:{widthMm:number;heightMm:number;displayUnit:DisplayUnit;lockAspect:boolean};
  shoreline:{enabledLayers:boolean[];offsetsMm:number[];artisticOffsetsNormalized?:number[];preset:'xfine'|'fine'|'narrow'|'normal'|'wide'|'custom';waterMode?:'all'|'primary';minWaterAreaMm2?:number;minArtisticComponentAreaNormalized?:number};
- bathymetry:{mode:'true-bathymetry'|'decorative-offsets';provider?:BathymetrySourceMetadata['provider'];datasetId?:string;status?:'unchecked'|'available'|'unavailable'|'error';statusMessage?:string;selection:'automatic'|'manual';thresholdsMeters:number[];dataset?:BathymetryDataset};
+ bathymetry:{mode:'true-bathymetry'|'decorative-offsets';provider?:BathymetrySourceMetadata['provider'];datasetId?:string;status?:'unchecked'|'available'|'unavailable'|'unsupported'|'error';statusMessage?:string;selection:'automatic'|'manual';thresholdsMeters:number[];dataset?:BathymetryDataset};
  roads:{mode:RoadMode;majorWidthMm:number;minorWidthMm:number};
  roadLabels:{visible:boolean;font:FontId;sizeMm:number;offsetMm:number;flipAllSides:boolean};
  placeLabels:{classes:Record<GeoPlace['class'],boolean>;font:FontId;sizeMm:number};
