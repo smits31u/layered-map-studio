@@ -61,8 +61,12 @@ export function bankRemap(t:number,steepness:number):number{
 // Terracing: round to the nearest of `levels` benches and blend toward it by `strength`. Level 0 is
 // reserved for the shoreline itself — a positive depth never snaps to 0 — because an interior cell
 // at depth 0 would be a dry spot inside the water outline once this grid is contoured into layers.
-export function terrace(v:number,levels:number,strength:number):number{
+// `maxLevel` caps the bench a value may snap to: a body whose design depth sits partway between two
+// benches must not have its deepest cells rounded *up* past that depth.
+export function terrace(v:number,levels:number,strength:number,maxLevel=levels):number{
  if(strength<=0||v<=0)return v;
- const level=Math.max(1,Math.round(v*levels))/levels;
- return v+(level-v)*strength;
+ const level=Math.min(maxLevel,Math.max(1,Math.round(v*levels)))/levels;
+ // At full strength return the bench itself: v+(level−v)·1 can land an ulp off it, which would
+ // split one flat bench into several nearly-equal depths.
+ return strength>=1?level:v+(level-v)*strength;
 }

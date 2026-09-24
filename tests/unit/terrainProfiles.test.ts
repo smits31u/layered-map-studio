@@ -86,6 +86,16 @@ describe('shelf, bank and terrace shaping',()=>{
   expect(terrace(0,6,1)).toBe(0);
  });
 
+ it('caps the bench a value may snap to, and is unchanged when the cap is not reached',()=>{
+  expect(terrace(.35,5,1)).toBeCloseTo(.4,15);
+  expect(terrace(.35,5,1,1)).toBeCloseTo(.2,15);
+  expect(terrace(.35,5,.5,1)).toBeCloseTo(.275,15);
+  for(const v of [.01,.3,.52,.99])expect(terrace(v,6,1,6)).toBe(terrace(v,6,1));
+  // Capped terracing stays monotonic and never exceeds the larger of the value and the cap.
+  let previous=-Infinity;
+  for(const t of samples){const v=terrace(t,5,1,2);expect(v).toBeGreaterThanOrEqual(previous);expect(v).toBeLessThanOrEqual(Math.max(t,2/5)+1e-15);previous=v}
+ });
+
  it('keeps terrace monotonic for every strength',()=>{
   for(const strength of [.25,.5,1]){let previous=-Infinity;for(const t of samples){const v=terrace(t,5,strength);expect(v).toBeGreaterThanOrEqual(previous);previous=v}}
  });

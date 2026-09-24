@@ -12,9 +12,16 @@ import {cellCenterX,cellCenterY,chamferDistance,labelWaterBodies,rasterizeShorel
 // Pipeline, per inside cell of water body b:
 //   t  = shore distance normalized to b's own deepest point                        (0,1]
 //   t' = t perturbed by seeded noise, enveloped so it cannot reach 0 or wander far   (0,1)
-//   v  = terrace(profile(bank(shelf(t'))))                                          (0,1]
-//   depth = v scaled so b's deepest cell equals maxDepth * areaScale(b)
+//   v  = profile(bank(shelf(t')))                                                   (0,1]
+//   d  = v scaled so b's deepest cell equals maxDepth * areaScale(b)                (0,target]
+//   depth = maxDepth · terrace(d / maxDepth), at the shared global benches k/N · maxDepth
 // Outside cells are 0, and so is every cell of a dropped body (fewer than minBodyCells cells).
+//
+// Terracing comes after normalization so that every body's benches sit at the same depths —
+// the depths the stacked layers are cut at — rather than each body getting its own N benches
+// squeezed into its own depth range. Two rules keep a body from being terraced deeper than it was
+// designed: a body whose target depth is shallower than the first bench is not terraced at all
+// (it keeps its continuous depth), and no cell may snap to a bench deeper than its body's target.
 
 // fBm averages its octaves, so its output clusters around 0.5 (standard deviation ~0.12 at the
 // default settings) and used raw it barely moves the depth. It is re-centred, multiplied by this
@@ -34,8 +41,17 @@ export interface DepthTerrainBody{
  dropped:boolean;
  // (cellCount / largest body's cellCount) ^ bodyScaleExponent; exactly 1 for the largest body.
  areaScale:number;
- // maxDepth * areaScale — the depth this body's deepest cell is normalized to, exactly.
+ // maxDepth * areaScale — the body's design depth. No cell is ever deeper. An un-terraced body's
+ // deepest cell equals it exactly; a terraced body's deepest cells move toward the deepest global
+ // bench at or below it (topBench/terraceLevels · maxDepth), all the way at full strength. The
+ // largest body's bench is maxDepth itself, so it hits maxDepth exactly either way.
  targetDepth:number;
+ // Whether the global benches were applied to this body. False when terracing is off, when the
+ // body is dropped, or when its target is shallower than the first bench (see topBench).
+ terraced:boolean;
+ // The deepest bench (1..terraceLevels) this body's cells may snap to: floor(areaScale · levels).
+ // 0 means the body never reaches the first bench and is left un-terraced.
+ topBench:number;
 }
 
 export interface DepthTerrain{
@@ -71,7 +87,11 @@ export function generateDepthTerrain(shoreline:MultiPolygonMm,input:TerrainParam
  const bodies:DepthTerrainBody[]=stats.map(body=>{
   const dropped=body.cellCount<params.minBodyCells;
   const areaScale=dropped?0:Math.pow(body.cellCount/largest,params.bodyScaleExponent);
-  return {id:body.id,cellCount:body.cellCount,areaMm2:body.cellCount*cellMm*cellMm,maxDistanceMm:body.maxDistanceCells*cellMm,dropped,areaScale,targetDepth:params.maxDepth*areaScale};
+  // Benches are k/levels of maxDepth, so the deepest one within this body's target is
+  // floor(areaScale·levels). No epsilon: a body a hair short of a bench does not reach it.
+  const topBench=dropped?0:Math.min(params.terraceLevels,Math.floor(areaScale*params.terraceLevels));
+  const terraced=!dropped&&params.terraceStrength>0&&topBench>=1;
+  return {id:body.id,cellCount:body.cellCount,areaMm2:body.cellCount*cellMm*cellMm,maxDistanceMm:body.maxDistanceCells*cellMm,dropped,areaScale,targetDepth:params.maxDepth*areaScale,terraced,topBench};
  });
  if(bodies.every(body=>body.dropped))warnings.push(`Every water body is smaller than minBodyCells (${params.minBodyCells} cells), so the terrain is flat. Lower minBodyCells or use a smaller cellMm.`);
 
@@ -100,21 +120,26 @@ export function generateDepthTerrain(shoreline:MultiPolygonMm,input:TerrainParam
     const envelope=t<amplitude?t/amplitude:1;
     t=(t+amplitude*noiseContrast(noise(x,y))*envelope)/noiseHeadroom;
    }
-   const v=terrace(applyProfile(params.profile,bankRemap(shelfRemap(t,params.shelfWidth),params.bankSteepness)),params.terraceLevels,params.terraceStrength);
+   const v=applyProfile(params.profile,bankRemap(shelfRemap(t,params.shelfWidth),params.bankSteepness));
    depth[i]=v;
    if(v>shapedMax[body])shapedMax[body]=v;
   }
  }
 
- // Per-body normalization. The deepest cell is assigned the target outright rather than computed
- // as v*(target/max), which can land an ulp off; every other cell is scaled and clamped under it.
+ // Per-body normalization, then terracing at the global benches. The deepest cell is assigned the
+ // target outright rather than computed as v*(target/max), which can land an ulp off; every other
+ // cell is scaled and clamped under it. The terraced value is clamped under the target too, so
+ // floating-point rounding in the bench arithmetic can never put a cell below its design depth.
+ const {maxDepth,terraceLevels,terraceStrength}=params;
  for(let i=0;i<cellCount;i++){
-  const body=bodyId[i];
-  if(body<0||bodies[body].dropped)continue;
-  const max=shapedMax[body],target=bodies[body].targetDepth;
+  const b=bodyId[i];
+  if(b<0)continue;
+  const body=bodies[b];
+  if(body.dropped)continue;
+  const max=shapedMax[b],target=body.targetDepth;
   if(!(max>0)){depth[i]=0;continue}
-  const v=depth[i];
-  depth[i]=v===max?target:Math.min(target,v*(target/max));
+  const v=depth[i],normalized=v===max?target:Math.min(target,v*(target/max));
+  depth[i]=body.terraced?Math.min(target,maxDepth*terrace(normalized/maxDepth,terraceLevels,terraceStrength,body.topBench)):normalized;
  }
  return {grid,params,inside,bodyId,distanceCells,depth,bodies,warnings};
 }

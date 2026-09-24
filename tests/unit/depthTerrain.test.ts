@@ -5,7 +5,8 @@ import {CropProjection} from '../../src/geometry/projection/cropProjection';
 import {generateDepthTerrain,noiseContrast,type DepthTerrain} from '../../src/geometry/terrain/depthTerrain';
 import {DEFAULT_TERRAIN_PARAMS,expandSimpleControls,normalizeTerrainParams,TERRAIN_PROFILE_NAMES,type TerrainParamsInput} from '../../src/geometry/terrain/terrainParams';
 import {cellCenterX,cellCenterY} from '../../src/geometry/terrain/terrainRaster';
-import {caldronFixture,noquebayFixture} from '../fixtures/regressionFixtures';
+import {terrace} from '../../src/geometry/terrain/terrainProfiles';
+import {caldronFixture,noquebayFixture,regressionFixtures} from '../fixtures/regressionFixtures';
 
 // End-to-end properties of the depth-terrain pipeline. This grid is going to be contoured into
 // cut layers, so the invariants are held to the same standard as cut geometry: exact where exact
@@ -22,6 +23,7 @@ function star(cx:number,cy:number,spikes:number,inner:number,outer:number,seed:n
 }
 const bytes=(array:Float64Array|Int32Array|Uint8Array)=>new Uint8Array(array.buffer,array.byteOffset,array.byteLength);
 const sha256=(array:Float64Array|Int32Array|Uint8Array)=>createHash('sha256').update(bytes(array)).digest('hex');
+const realLakeWater=(fixture:typeof caldronFixture)=>{const {widthMm,heightMm}=fixture.dimensions;return buildWaterModel(fixture.water,new CropProjection(fixture.crop,widthMm,heightMm),widthMm,heightMm,{mode:'primary',minAreaMm2:1}).water};
 const deepFreeze=<T>(value:T):T=>{if(value&&typeof value==='object'){for(const v of Object.values(value))deepFreeze(v);Object.freeze(value)}return value};
 
 // A lake with an island, a separate bay, and a small pond: holes, a MultiPolygon, three bodies.
@@ -55,7 +57,12 @@ function assertTerrainInvariants(terrain:DepthTerrain,label:string){
  for(const body of bodies){
   if(body.dropped){expect(body.areaScale).toBe(0);expect(body.targetDepth).toBe(0);continue}
   expect(Number.isFinite(body.areaScale)&&body.areaScale>0&&body.areaScale<=1,`${label}: areaScale ${body.areaScale}`).toBe(true);
-  expect(max[body.id],`${label}: body ${body.id} max`).toBe(body.targetDepth);
+  // Never deeper than the design depth (checked per cell above); exactly it unless terraced.
+  if(body.terraced)expect(max[body.id],`${label}: body ${body.id} max`).toBeLessThanOrEqual(body.targetDepth);
+  else expect(max[body.id],`${label}: body ${body.id} max`).toBe(body.targetDepth);
+  expect(body.terraced,`${label}: body ${body.id} terraced flag`).toBe(params.terraceStrength>0&&body.topBench>=1);
+  // The largest body's deepest bench is maxDepth itself, so it reaches maxDepth terraced or not.
+  if(body.areaScale===1)expect(max[body.id],`${label}: largest body reaches maxDepth`).toBe(params.maxDepth);
  }
  if(kept.length)expect(Math.max(...kept.map(body=>body.targetDepth)),`${label}: deepest target`).toBe(params.maxDepth);
  else if(bodies.length)expect(terrain.warnings.join(' '),`${label}: all-dropped warning`).toContain('smaller than minBodyCells');
@@ -95,15 +102,29 @@ describe('depth terrain determinism',()=>{
   expect(sha256(terrain.depth)).toBe(PINNED.depthSha256);
  });
 
- it('differs from the pre-threshold fingerprint only by the dropped fragment',()=>{
-  // With nothing dropped the output is byte-identical to the fingerprint pinned before dropping
-  // existed, and the default differs from it in exactly the dropped body's one cell.
+ it('differs from keeping every body only by the dropped fragment',()=>{
+  // With nothing dropped, the default differs in exactly the dropped body's one cell: dropping a
+  // fragment changes nothing else, terraced or not.
   const keepAll=generateDepthTerrain(lake,{...everythingOn,minBodyCells:1}),terrain=generateDepthTerrain(lake,everythingOn);
   expect(sha256(keepAll.depth)).toBe(PINNED.keepAllDepthSha256);
   const changed=[...terrain.depth.keys()].filter(i=>terrain.depth[i]!==keepAll.depth[i]);
   expect(changed).toHaveLength(1);
   expect(terrain.bodyId[changed[0]]).toBe(0);
   expect(terrain.depth[changed[0]]).toBe(0);
+ });
+
+ it('is byte-identical to the terrace-before-normalize order whenever terracing is off',()=>{
+  // Control for the 2026-09-24 move of terracing to after normalization. These hashes were taken
+  // from the previous order's code before the change: with terracing off, nothing may differ — on
+  // the multi-body lake (both minBodyCells settings) and on all four real lakes at the defaults,
+  // which have terracing off. Only terraced output is allowed to change.
+  expect(sha256(generateDepthTerrain(lake,{...everythingOn,terraceStrength:0}).depth)).toBe(PRE_REORDER.unterracedLake);
+  expect(sha256(generateDepthTerrain(lake,{...everythingOn,terraceStrength:0,minBodyCells:1}).depth)).toBe(PRE_REORDER.unterracedLakeKeepAll);
+  expect(DEFAULT_TERRAIN_PARAMS.terraceStrength).toBe(0);
+  for(const fixture of regressionFixtures){
+   const {widthMm,heightMm}=fixture.dimensions,water=buildWaterModel(fixture.water,new CropProjection(fixture.crop,widthMm,heightMm),widthMm,heightMm,{mode:'primary',minAreaMm2:1}).water;
+   expect(sha256(generateDepthTerrain(water,DEFAULT_TERRAIN_PARAMS).depth),fixture.lake).toBe(PRE_REORDER.realLakeDefaults[fixture.lake]);
+  }
  });
 
  it('gives the same terrain for the same lake at another product size (scaled cell size)',()=>{
@@ -277,6 +298,74 @@ describe('tiny-fragment dropping',()=>{
  });
 });
 
+describe('terracing at shared global benches (normalize first)',()=>{
+ // The multi-body lake at 0.5mm cells, as in the terracing-order comparison: the lake (area scale
+ // 1), the bay (≈0.35) and the pond (≈0.123, shallower than the first of six benches, 1/6).
+ const N=6,base:TerrainParamsInput={...DEFAULT_TERRAIN_PARAMS,terraceLevels:N,maxDepth:1,resolution:{cellMm:.5}};
+ const kept=(t:DepthTerrain)=>t.bodies.filter(body=>!body.dropped).sort((a,b)=>b.areaScale-a.areaScale);
+ const valuesOf=(t:DepthTerrain,id:number)=>[...new Set([...t.depth.keys()].filter(i=>t.bodyId[i]===id).map(i=>t.depth[i]))].sort((a,b)=>a-b);
+ const benchOf=(v:number)=>Math.round(v*N);
+
+ it('puts every terraced body on the same global benches, so equal depths mean equal layers',()=>{
+  const terrain=generateDepthTerrain(lake,{...base,terraceStrength:1});
+  const [main,bay]=kept(terrain);
+  expect(main.areaScale).toBe(1);expect(bay.areaScale).toBeCloseTo(.35,2);
+  expect([main.terraced,bay.terraced]).toEqual([true,true]);
+  expect([main.topBench,bay.topBench]).toEqual([6,2]);
+  // Exactly on the bench, not merely near it: full-strength benches are flat to the bit.
+  for(const body of [main,bay])for(const v of valuesOf(terrain,body.id))expect(v,`body ${body.id} value ${v}`).toBe(benchOf(v)/N);
+  expect(valuesOf(terrain,main.id).map(benchOf)).toEqual([1,2,3,4,5,6]);
+  // The bay has the main lake's first two benches, at the same depths — not six of its own.
+  expect(valuesOf(terrain,bay.id).map(benchOf)).toEqual([1,2]);
+  assertTerrainInvariants(terrain,'global benches');
+ });
+
+ it('leaves a body shallower than the first bench un-terraced, at its own continuous depth',()=>{
+  const terraced=generateDepthTerrain(lake,{...base,terraceStrength:1}),off=generateDepthTerrain(lake,{...base,terraceStrength:0});
+  const pond=kept(terraced)[2];
+  expect(pond.targetDepth).toBeLessThan(1/N);
+  expect(pond).toMatchObject({terraced:false,topBench:0});
+  // Byte-identical to the un-terraced run in every pond cell, and still exactly its own target at
+  // its deepest point: not lifted to the 1/6 bench.
+  const cells=[...terraced.depth.keys()].filter(i=>terraced.bodyId[i]===pond.id);
+  expect(cells.length).toBeGreaterThan(100);
+  for(const i of cells)expect(terraced.depth[i]).toBe(off.depth[i]);
+  expect(Math.max(...cells.map(i=>terraced.depth[i]))).toBe(pond.targetDepth);
+  expect(valuesOf(terraced,pond.id).length).toBeGreaterThan(20);
+ });
+
+ it('never snaps a cell to a bench deeper than its body\'s own target',()=>{
+  // With five benches the bay's target (≈0.35) sits past the halfway point between bench 1 (0.2)
+  // and bench 2 (0.4), so plain rounding would lift its deepest cells to 0.4. The cap holds them
+  // at 0.2 instead.
+  const terrain=generateDepthTerrain(lake,{...base,terraceLevels:5,terraceStrength:1}),bay=kept(terrain)[1];
+  expect(bay.targetDepth*5).toBeGreaterThan(1.5);expect(bay.topBench).toBe(1);
+  expect(terrace(bay.targetDepth,5,1)).toBeCloseTo(.4,12);
+  expect(valuesOf(terrain,bay.id)).toEqual([.2]);
+  assertTerrainInvariants(terrain,'capped');
+ });
+
+ it('is exactly the un-terraced grid terraced at the global benches, and nothing else',()=>{
+  // Terracing is the last step, so the terraced grid must be a per-cell function of the untouched
+  // normalized grid. Checked for partial and full strength on the multi-body lake and a real lake.
+  for(const [name,shape] of [['multi-body',lake],['Caldron Falls',realLakeWater(caldronFixture)]] as const){
+   for(const strength of [.4,1]){
+    const on=generateDepthTerrain(shape,{...base,terraceStrength:strength}),off=generateDepthTerrain(shape,{...base,terraceStrength:0});
+    expect(bytes(on.distanceCells)).toEqual(bytes(off.distanceCells));
+    // Plain comparisons: an expect() per cell of a 512-wide real lake grid is most of the runtime.
+    let mismatches=0;
+    for(let i=0;i<on.depth.length;i++){
+     const b=on.bodyId[i];
+     const expected=b<0||on.bodies[b].dropped||!on.bodies[b].terraced?off.depth[i]:Math.min(on.bodies[b].targetDepth,terrace(off.depth[i],N,strength,on.bodies[b].topBench));
+     if(on.depth[i]!==expected)mismatches++;
+    }
+    expect(mismatches,`${name} strength ${strength}`).toBe(0);
+    assertTerrainInvariants(on,`${name} strength ${strength}`);
+   }
+  }
+ },30000);
+});
+
 describe('robustness',()=>{
  const shapes:Record<string,MultiPolygonMm>={
   lake,
@@ -393,8 +482,22 @@ describe('parameter model',()=>{
 // Pinned 2026-09-24, re-pinned the same day when tiny-fragment dropping went in. Bodies in label
 // order: a one-cell spike tip the raster separates from the main lake (now dropped, depth 0), the
 // lake itself, the star-shaped bay, the rectangular pond.
+// Taken from the terrace-before-normalize code immediately before terracing moved (2026-09-24).
+const PRE_REORDER={
+ unterracedLake:'a3424426a0ed15089b38d86906a125e5e275d1b4be2050abf87f56f75bfe04b0',
+ unterracedLakeKeepAll:'41ebd5e89ec723414bcd605eac9745b6f674b1059180cab7ade667792fc0a351',
+ realLakeDefaults:{
+  'Caldron Falls Reservoir':'5e48ff2b2ff4f92d95910232bdd65a3f53887f3e3d0a7705ad100bd5a25866c4',
+  'High Falls Reservoir':'c213f2f9ce8430d1ad1dcac035803ded2beaaa36835490f3791d95e81a115627',
+  'Lake Noquebay':'1b7be0e7935f834ecb61c350d1268c02d8e092d6daa137d00ee0488a3e6dc8de',
+  'Wind Pudding Lake':'a822554b19f9ab17605dfe3044e3002c088cb81fc9b5a581a4273377c0245d01',
+ } as Record<string,string>,
+};
+
 const PINNED={
  cellCounts:[1,6532,800,99],
- depthSha256:'b6ea6ab82e874c2e52b4a534efd7b2d19c8133d94dfb5caff237982679136c54',
- keepAllDepthSha256:'d86b9e1025f79fe4ff1638ad3c1193e9250ad830bfdea6173eff310e03652998',
+ // Re-pinned 2026-09-24 when terracing moved after normalization; everythingOn terraces at 0.6.
+ // The terracing-off controls in PRE_REORDER below did not change.
+ depthSha256:'ca4bc058416d8fb923a2d6b1818b3dd7c71d63399a7148a47e45f8af0c765198',
+ keepAllDepthSha256:'e10e211210a5db323aaedeee9bb117f7ce39f44e72ea0f371ba7b48af60c08d1',
 };
