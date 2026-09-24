@@ -55,10 +55,11 @@ Layered Map Studio is a React + MapLibre GL tool that generates manufacturing-pr
 - No volumes and no `.env` wired in via compose, despite `.env.example` existing in the repo (map style / Photon endpoint config). **Flagging this as a likely gap, not confirmed intentional** — worth checking the `Dockerfile` for whether env vars are baked in at build time instead, before assuming this is broken.
 - This is the first `CLAUDE.md` for this repo. `.claude/` and `.codex/` project-cache directories both exist, meaning the repo has previously been worked on with both Claude Code and Codex.
 
-## Status as of this write (2026-09-16)
+## Status as of this write (2026-09-24)
 
-- Last commit: `f039aaf`, "Add ornament Phase 3: feature geometry (capture/dedup, road/water geometry, land-island detection, Web Worker pipeline)".
-- Ornament generator (see `docs/ornament-implementation-status.md`): Phases 0-4 built — domain model/SVG shell, the original ornament editor, MapLibre map/search/crop, feature geometry (capture, dedupe, road/water buffering, land-island detection, off-main-thread Web Worker pipeline with golden-fixture regression coverage), and SVG export with preflight. 796 tests passing repo-wide. Phase 5 (hardening) is not started.
+- Last commit: `cb1624c` (2026-09-17), "Fix silent generate/rebuild failures: visible error styling, error surfaced next to Generate button and in workspace nav, …". 856 tests passing at that commit. `master` is the only branch; all phases below are committed on it.
+- Ornament generator (see `docs/ornament-implementation-status.md`): Phases 0-5 built — domain model/SVG shell, the original ornament editor, MapLibre map/search/crop, feature geometry (capture, dedupe, road/water buffering, land-island detection, off-main-thread Web Worker pipeline with golden-fixture regression coverage), SVG export with preflight, and Phase 5 hardening (`e372834`: stale-capture guards, capture/worker timeouts, capacity limits and simplification in `src/ornament/limits.ts`, accessibility fixes). Phase 4 is still not exit-criteria-complete — see the xTool Studio note below.
+- Since the ornament phases: bathymetry golden-fixture SVG export test and a distinct `unsupported` status (`dd57a36`), and generate/rebuild failures surfaced in the UI (`cb1624c`).
 - **`CLAUDE_MAP_ORNAMENT_BUILD_PLAN.md` does not exist in this repository.** Earlier revisions of
   this file and of the status document cite it as though it were checked in; it is not on disk, not
   in any commit reachable from any ref, and not in the `.claude` or `.codex` session caches. Treat
