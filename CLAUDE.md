@@ -10,6 +10,7 @@ Layered Map Studio is a React + MapLibre GL tool that generates manufacturing-pr
   - `projection/cropSnapshot.ts` — serializable snapshot of the map's center/zoom/bearing/crop/dimensions for reproducible regeneration.
   - `shoreline/polygonEngine.ts` — core polygon boolean ops: water-fragment union/crop-intersection (`polygon-clipping`) and closed-polygon offsets (`clipper-lib`, integer-scaled to 0.001mm precision); builds the water model and derives panels (`panel = product rect − water opening`).
   - `shoreline/artisticDepth.ts` — the Artistic Depth erosion model: named presets (xfine/fine/narrow/normal/wide/custom) of normalized inward offsets, `normal` being the measured/calibrated preset.
+  - `terrain/` — procedural depth-terrain engine (Phase A, **not yet wired into the app**): rasterized shoreline → chamfer distance → per-body seeded noise/profile shaping → depth grid. Pure and deterministic; see `docs/depth-terrain.md`.
   - `roads/roads.ts` — thin but real (6 lines): filters roads by class (`all` vs `main`: motorway/trunk/primary/secondary) and projects surviving points into crop-bounded millimeter coordinates. Not a stub — this is the complete road-inclusion logic; the "buffering"/presentation work lives in `scene/roadLabels.ts` instead.
   - `scene/compass.ts` — Classic Rose compass geometry with minimum-feature-size floors (a laser-engraving manufacturing constraint, not a UI concern).
   - `scene/keepOut.ts` — non-destructive keep-out clipping so road/label geometry avoids compass/marker footprints.
@@ -57,9 +58,10 @@ Layered Map Studio is a React + MapLibre GL tool that generates manufacturing-pr
 
 ## Status as of this write (2026-09-24)
 
-- Last commit: `cb1624c` (2026-09-17), "Fix silent generate/rebuild failures: visible error styling, error surfaced next to Generate button and in workspace nav, …". 856 tests passing at that commit. `master` is the only branch; all phases below are committed on it.
+- Last commit (2026-09-24): the depth-terrain Phase A engine, below. 940 tests passing. It is not wired into the app, so the last commit that changed the running app is still `cb1624c` (2026-09-17), "Fix silent generate/rebuild failures: …" (856 tests at that point). The container was not rebuilt for the terrain commit, and there is nothing in it for the container to show. `master` is the only branch; everything below is committed on it.
 - Ornament generator (see `docs/ornament-implementation-status.md`): Phases 0-5 built — domain model/SVG shell, the original ornament editor, MapLibre map/search/crop, feature geometry (capture, dedupe, road/water buffering, land-island detection, off-main-thread Web Worker pipeline with golden-fixture regression coverage), SVG export with preflight, and Phase 5 hardening (`e372834`: stale-capture guards, capture/worker timeouts, capacity limits and simplification in `src/ornament/limits.ts`, accessibility fixes). Phase 4 is still not exit-criteria-complete — see the xTool Studio note below.
 - Since the ornament phases: bathymetry golden-fixture SVG export test and a distinct `unsupported` status (`dd57a36`), and generate/rebuild failures surfaced in the UI (`cb1624c`).
+- Procedural depth terrain Phase A (`src/geometry/terrain/`, `docs/depth-terrain.md`) is committed but **not wired into the app**: no UI, scene or export path imports it. Ben's decisions: tiny raster fragments are *dropped* below `minBodyCells` (default 16 cells), not merged. Terracing order (before vs after per-body normalization) is **deferred to Phase B** and deliberately left as originally specified. Verification renders are in `~/renders/depth-terrain-phase-a/` on the VM, outside the repo.
 - **`CLAUDE_MAP_ORNAMENT_BUILD_PLAN.md` does not exist in this repository.** Earlier revisions of
   this file and of the status document cite it as though it were checked in; it is not on disk, not
   in any commit reachable from any ref, and not in the `.claude` or `.codex` session caches. Treat
