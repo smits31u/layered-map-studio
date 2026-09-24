@@ -14,5 +14,5 @@ export type PhysicalLayer={id:string;name:string;shapes:Shape[];depthMeters?:num
 import type {WaterMetrics} from '../geometry/shoreline/polygonEngine';
 import type {BathymetrySourceMetadata} from '../types/project';
 export type LabelMetrics={placeLabels:number;roadLabels:number;rejectedRoadLabels:number};
-export type ManufacturingScene={widthMm:number;heightMm:number;layers:PhysicalLayer[];objects:Shape[];manufacturingWarnings?:string[];geometryMetrics?:WaterMetrics;labelMetrics?:LabelMetrics;depthMode?:'true-bathymetry'|'decorative-offsets';bathymetrySource?:BathymetrySourceMetadata};
+export type ManufacturingScene={widthMm:number;heightMm:number;layers:PhysicalLayer[];objects:Shape[];manufacturingWarnings?:string[];geometryMetrics?:WaterMetrics;labelMetrics?:LabelMetrics;depthMode?:'true-bathymetry'|'decorative-offsets'|'procedural-terrain';bathymetrySource?:BathymetrySourceMetadata};
 export function assertManufacturingSceneUsable(scene:ManufacturingScene){if(scene.manufacturingWarnings?.length)throw new Error(scene.manufacturingWarnings.join(' '))}

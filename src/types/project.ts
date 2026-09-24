@@ -1,3 +1,5 @@
+import type {SimpleTerrainControls} from '../geometry/terrain/terrainParams';
+
 export type LngLat = { lng:number; lat:number };
 export type CropGeography = { nw:LngLat; ne:LngLat; se:LngLat; sw:LngLat; bbox:[number,number,number,number] };
 export type DisplayUnit = 'in'|'mm';
@@ -56,7 +58,12 @@ export interface MapProject {
  map:{latitude:number;longitude:number;zoom:number;bearing:number;crop?:CropGeography};
  dimensions:{widthMm:number;heightMm:number;displayUnit:DisplayUnit;lockAspect:boolean};
  shoreline:{enabledLayers:boolean[];offsetsMm:number[];artisticOffsetsNormalized?:number[];preset:'xfine'|'fine'|'narrow'|'normal'|'wide'|'custom';waterMode?:'all'|'primary';minWaterAreaMm2?:number;minArtisticComponentAreaNormalized?:number};
- bathymetry:{mode:'true-bathymetry'|'decorative-offsets';provider?:BathymetrySourceMetadata['provider'];datasetId?:string;status?:'unchecked'|'available'|'unavailable'|'unsupported'|'error';statusMessage?:string;selection:'automatic'|'manual';thresholdsMeters:number[];dataset?:BathymetryDataset};
+ // mode: 'decorative-offsets' is Artistic Depth (shoreline erosion), 'true-bathymetry' uses an
+ // imported depth dataset, 'procedural-terrain' cuts contours through a generated depth terrain
+ // (geometry/terrain, via geometry/shoreline/proceduralDepth.ts). terrain holds that mode's
+ // user-facing controls; it is optional so projects saved before the mode existed load unchanged,
+ // and absent means DEFAULT_SIMPLE_TERRAIN_CONTROLS. It is ignored in the other two modes.
+ bathymetry:{mode:'true-bathymetry'|'decorative-offsets'|'procedural-terrain';terrain?:SimpleTerrainControls;provider?:BathymetrySourceMetadata['provider'];datasetId?:string;status?:'unchecked'|'available'|'unavailable'|'unsupported'|'error';statusMessage?:string;selection:'automatic'|'manual';thresholdsMeters:number[];dataset?:BathymetryDataset};
  roads:{mode:RoadMode;majorWidthMm:number;minorWidthMm:number};
  roadLabels:{visible:boolean;font:FontId;sizeMm:number;offsetMm:number;flipAllSides:boolean};
  placeLabels:{classes:Record<GeoPlace['class'],boolean>;font:FontId;sizeMm:number};

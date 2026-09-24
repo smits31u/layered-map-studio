@@ -1,12 +1,12 @@
-# Procedural depth terrain (Phase A: engine only)
+# Procedural depth terrain
 
-`src/geometry/terrain/` generates a depth grid from a shoreline for Artistic Depth. It is meant to
-replace the offset-ring approach in `shoreline/artisticDepth.ts` with shoreline-distance-driven
-terrain that has organic noise character. Like Artistic Depth, it is artwork, not bathymetry.
+`src/geometry/terrain/` generates a depth grid from a shoreline and cuts it into nested contour
+layers. It is shoreline-distance-driven terrain with organic noise character, offered as a third
+depth mode, **Procedural Terrain**, alongside Artistic Depth's offset rings and True Bathymetry.
+Like Artistic Depth, it is artwork, not bathymetry.
 
-**Status:** Phase A (the depth grid) is committed. Phase B (contour extraction, below) is built
-and tested, pending review. Neither is wired into `Controls.tsx`, `buildScene.ts`, the geometry
-cache or export.
+**Status:** Phase A (the depth grid, `94b17f1`) and Phase B (contour extraction, `2e8f251`) are
+committed. The app wiring ("In the app", at the end) is built and tested, pending review.
 
 This is a clean-room implementation built from standard, publicly documented techniques. All
 constants, curve shapes and presets are original to this module.
@@ -76,7 +76,7 @@ size, with a proportionally scaled cell size, gives a byte-identical grid (this 
 | `character` 0–1 | noise amplitude 0.2→0.8, octaves 3→6, roughness 0.4→0.6, feature size 0.22→0.12, warp 0.2→1.0. Ridges come in only above 0.4. |
 | `bankSteepness` 0–1 | bank slope at the waterline (0.4× / 1× / 7× for 0 / 0.5 / 1). Shelf width 0.22→0. |
 | `weave` 0–1, `weaveAngleDeg` | grain strength 0→0.85. Also damps the warp by up to 40% and shrinks the features by up to 40%. |
-| `terracing` 0–1 | terrace strength. Levels are fixed at 6. |
+| `terracing` 0–1 | terrace strength. Levels default to 6; in the app they are set to one more than the number of enabled depth panels (see "In the app"). |
 | `seed`, `profile`, `maxDepth` | passed through unchanged |
 
 The four profiles each map [0,1]→[0,1] monotonically, with exact endpoints:
@@ -116,8 +116,8 @@ extractDepthContours(terrain: DepthTerrain, shoreline: MultiPolygonMm, threshold
 ```
 
 This turns the Phase A grid into nested polygons, one per requested depth per kept water body.
-Like Phase A it is pure and UI-independent, and it is not wired into `buildScene`, export or the
-controls.
+Like Phase A it is pure and UI-independent. The app reaches it only through the adapter described
+in "In the app" below.
 
 Thresholds are **absolute** depths on the `depth` scale (0–1), so a threshold means the same depth
 in every body. A body shallower than a threshold has no polygon at it. Invalid thresholds (not in
@@ -230,3 +230,46 @@ exactly:
 
 All four real-lake fixtures are single-body, even with every water feature in the crop included.
 So the shallow-body rule is exercised on the multi-body test lake's pond, not on real geography.
+
+# In the app: the Procedural Terrain depth mode
+
+Procedural Terrain is the third value of `bathymetry.mode`, `'procedural-terrain'`, next to
+`'decorative-offsets'` (Artistic Depth) and `'true-bathymetry'`.
+
+**Settings.** Its settings are the simple controls only, stored in `bathymetry.terrain` as a
+`SimpleTerrainControls`: profile, character, bank steepness, weave and weave angle, terracing, max
+depth, and seed. The field is optional; absent means the defaults, so projects saved earlier load
+unchanged. The Depth Data section shows these controls, plus a Shuffle button for the seed, only
+while the mode is selected.
+
+**The adapter.** `geometry/shoreline/proceduralDepth.ts` connects the app to the engine. Its input
+is `buildWaterModel`'s crop-clipped primary water, the same `MultiPolygonMm` the other two modes
+consume and the format `generateDepthTerrain` takes, so no conversion is needed. Its output is one
+opening per enabled depth panel. `buildScene` turns each opening into a panel exactly as it does
+for the other modes, so layer ids, export groups and every SVG layout are unchanged.
+
+**Where panels are cut.** With *n* enabled depth panels:
+- The terrain is terraced at *n+1* global benches, k/(n+1) of full depth.
+- Panel *j* is cut at (j+½)/(n+1), midway between two benches, on a riser.
+- A cut on the first bench would open the whole lake, because terracing never lowers water to
+  depth 0.
+- The planes are the same with terracing off, and they do not depend on Max depth.
+
+**Max depth.** Max depth sets how far down the stack the lake reaches. Below 100%, the deepest
+panels come out empty. They are then reported as collapsed layers and block export, the same way
+collapsed Artistic Depth layers do.
+
+**Geometry cache.** The terrain controls join the cache key in this mode only. The other modes'
+keys are unchanged, and editing terrain settings never invalidates their cached geometry.
+
+**Failures.**
+- A shoreline the engine cannot model at all (for example, narrower than one grid cell) throws a
+  `PROCEDURAL TERRAIN selected, but …` error. The app shows it the same three places as True
+  Bathymetry's missing-dataset refusal: beside Generate, in the workspace banner, and in the
+  Generated Map panel.
+- A contour-extraction failure is surfaced the same way.
+
+**Isolation.** Artistic Depth and True Bathymetry are unaffected byte for byte.
+`tests/unit/depthModeIsolation.test.ts` pins, from before this mode existed, each mode's whole
+scene, every export layout and its cache key, on the Caldron Falls project fixture, all four
+regression lakes and the True Bathymetry golden fixture.

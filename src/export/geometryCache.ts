@@ -1,5 +1,6 @@
 import type {ExtractedFeatures,MapProject} from '../types/project';
 import {buildGeometryLayers,type GeometryLayers} from './buildScene';
+import {terrainControlsOf} from '../geometry/shoreline/proceduralDepth';
 
 // The subset of MapProject that actually affects buildGeometryLayers's expensive polygon-boolean
 // work (water union/erosion/differencing). Everything else — roads.mode/width, road/place label
@@ -14,6 +15,11 @@ export function geometryKeyOf(project:MapProject):string{
   heightMm:project.dimensions.heightMm,
   shoreline:project.shoreline,
   bathymetry:{mode:project.bathymetry.mode,selection:project.bathymetry.selection,thresholdsMeters:project.bathymetry.thresholdsMeters,dataset:project.bathymetry.dataset},
+  // The terrain controls shape the geometry only in Procedural Terrain mode, so they join the key
+  // only there: the other modes' keys stay exactly what they were, and editing terrain settings
+  // while in another mode never throws away that mode's cached geometry. Defaults are filled in so
+  // "never touched" and "explicitly the defaults" share one cache entry.
+  ...(project.bathymetry.mode==='procedural-terrain'?{terrain:terrainControlsOf(project.bathymetry.terrain)}:{}),
  });
 }
 
