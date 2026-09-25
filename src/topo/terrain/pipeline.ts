@@ -1,4 +1,8 @@
 import type {MultiPolygonMm} from '../../geometry/shoreline/polygonEngine';
+import type {CapturedWater} from '../../ornament/capture/featureTypes';
+import {unionAll} from '../../ornament/geometry/polygonRepair';
+import type {WaterGeometryMetrics} from '../../ornament/geometry/waterGeometry';
+import {buildBoardWater} from '../features/water';
 import {buildTerrainBands,type TerrainBandOptions,type TerrainBandSettings,type TerrainBands} from './bands';
 import {buildMosaic,resampleToBoard,workingGridSpec} from './elevationGrid';
 import {TerrainError} from './errors';
@@ -47,17 +51,26 @@ export interface TerrainJob{
  view:FrozenTerrainView;
  // Terrarium PNG bytes keyed "z/x/y", for every tile in planTerrainTiles(view.bounds, view.zoom).
  tiles:Record<string,Uint8Array>;
+ // Water already in board millimetres. Tests pass polygons here directly.
  water:MultiPolygonMm;
+ // Water as captured from the map (lng/lat rings), projected and unioned here in the worker by the
+ // ornament's water pipeline (features/water.ts), then joined with `water`. This is what the page
+ // passes. Phase 2 had no capture, so a coastal board layered the sea floor as land.
+ capturedWater?:readonly CapturedWater[];
+ waterSimplifyToleranceMm?:number;
  settings:TerrainSettings;
  options?:TerrainBandOptions;
 }
 
-export type TerrainStage='decode'|'resample'|'smooth'|'bands'|'contours';
+export type TerrainStage='decode'|'resample'|'smooth'|'water'|'bands'|'contours';
 
 export interface TerrainResult extends TerrainBands{
  view:FrozenTerrainView;
  settings:TerrainSettings;
  grid:{columns:number;rows:number;cellMm:number;tileZoom:number;tileCount:number};
+ // The water region subtracted from every layer, in board millimetres, and what building it did.
+ water:MultiPolygonMm;
+ waterMetrics?:WaterGeometryMetrics;
 }
 
 export const terrainTilePlan=(view:FrozenTerrainView):TilePlan=>{
@@ -75,7 +88,14 @@ export function generateTerrain(job:TerrainJob,onStage?:(stage:TerrainStage)=>vo
  const grid=resampleToBoard(mosaic,view.bounds,view.widthMm,view.heightMm,spec);
  onStage?.('smooth');
  const smoothed={...grid,values:smoothGrid(grid.values,grid.columns,grid.rows,settings.smoothingRadius)};
+ let water=job.water,waterMetrics:WaterGeometryMetrics|undefined;
+ if(job.capturedWater?.length){
+  onStage?.('water');
+  const built=buildBoardWater(job.capturedWater,view,job.waterSimplifyToleranceMm);
+  water=job.water.length?unionAll([job.water,built.geometry],'Water'):built.geometry;
+  waterMetrics=built.metrics;
+ }
  onStage?.(settings.contoursEnabled?'contours':'bands');
- const bands=buildTerrainBands(smoothed,job.water,settings,job.options);
- return {...bands,view,settings,grid:{columns:grid.columns,rows:grid.rows,cellMm:grid.cellMm,tileZoom:plan.z,tileCount:plan.tiles.length}};
+ const bands=buildTerrainBands(smoothed,water,settings,job.options);
+ return {...bands,view,settings,grid:{columns:grid.columns,rows:grid.rows,cellMm:grid.cellMm,tileZoom:plan.z,tileCount:plan.tiles.length},water,...(waterMetrics?{waterMetrics}:{})};
 }

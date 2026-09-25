@@ -1,6 +1,7 @@
 import {vi} from 'vitest';
 import type {CaptureMapFeature} from '../../src/ornament/capture/mapCapture';
 import {MAPLIBRE_TILE_SIZE} from '../../src/ornament/geometry/mapProjection';
+import type {StyleLike} from '../../src/topo/capture/topoCapture';
 import {FIXTURE_CANVAS_PX} from '../fixtures/ornament/captures';
 import {boundsFor} from './ornamentCapture';
 
@@ -37,7 +38,23 @@ export interface FakeMapLibreOptions{
  // itself idle immediately and `captureOrnamentFeatures` returns before a test can do anything
  // underneath it.
  deferIdle?:boolean;
+ // What getStyle() returns. Defaults to FAKE_BASEMAP_STYLE.
+ style?:StyleLike;
 }
+
+// A minimal stand-in for the OpenFreeMap basemap style the topo builder shows: one layer per feature
+// family, on the OpenMapTiles source-layers, with ids of the kind that style uses.
+export const FAKE_BASEMAP_STYLE:StyleLike={
+ sources:{openmaptiles:{type:'vector'}},
+ layers:[
+  {id:'background',type:'background'},
+  {id:'water',type:'fill',source:'openmaptiles','source-layer':'water'},
+  {id:'highway-minor',type:'line',source:'openmaptiles','source-layer':'transportation'},
+  {id:'highway-major',type:'line',source:'openmaptiles','source-layer':'transportation'},
+  {id:'label-place',type:'symbol',source:'openmaptiles','source-layer':'place'},
+  {id:'label-poi',type:'symbol',source:'openmaptiles','source-layer':'poi'},
+ ],
+};
 
 export interface InstalledFakeMapLibre{
  state:FakeMapState;
@@ -133,6 +150,8 @@ export function installFakeMapLibre(options:FakeMapLibreOptions={}):InstalledFak
   setLayoutProperty(layerId:string,name:string,value:unknown){if(name==='visibility')state.layerVisibility[layerId]=String(value)}
   getLayer(layerId:string){return {id:layerId}}
   getSource(){return {vectorLayerIds:['water','transportation']}}
+  // The topo builder discovers its capture layers by source-layer from the live style.
+  getStyle(){return options.style??FAKE_BASEMAP_STYLE}
   queryRenderedFeatures(_geometry?:unknown,queryOptions?:{layers?:string[]}){
    const layers=queryOptions?.layers??[];
    state.queries.push({layers:[...layers]});

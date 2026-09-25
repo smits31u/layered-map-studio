@@ -34,7 +34,9 @@ export interface ProjectedRoad{roadClass:string;line:PolylineMm}
 export interface RoadGeometryOptions{
  detail:RoadDetail;
  widths:RoadWidthSettings;
- window:MapWindow;
+ // Where centrelines are clipped before buffering: the ornament's map window, or any other clip as a
+ // function of one polyline (the topo builder passes its board rectangle).
+ window:MapWindow|((line:PolylineMm)=>PolylineMm[]);
  // Vertices closer to the outline than this are removed after the union.
  //
  // The default is derived from the narrowest road in the build rather than fixed, and the reason is
@@ -87,7 +89,7 @@ export function buildRoadEngraving(roads:ProjectedRoad[],options:RoadGeometryOpt
  let roadsOutsideDetail=0,clippedPieces=0;
  for(const road of roads){
   if(!allowed.has(road.roadClass)){roadsOutsideDetail++;continue}
-  const pieces=clipPolylinesToMapWindow([road.line],options.window);
+  const pieces=typeof options.window==='function'?options.window(road.line):clipPolylinesToMapWindow([road.line],options.window);
   if(!pieces.length)continue;
   clippedPieces+=pieces.length;
   const width=quantiseWidthMm(roadWidthMm(road.roadClass,options.widths));

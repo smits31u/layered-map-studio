@@ -21,7 +21,13 @@ export type TopoAction=
  |{type:'clearRoute'}
  // Terrain layer count, coverage targets and contours. Coverage is clamped by validation so layers
  // 2–4 never ask for more than the layer below them.
- |{type:'setTerrain';patch:Partial<Omit<TopoProject['terrain'],'coveragePercent'>>&{coveragePercent?:readonly number[]}};
+ |{type:'setTerrain';patch:Partial<Omit<TopoProject['terrain'],'coveragePercent'>>&{coveragePercent?:readonly number[]}}
+ // The board's vector features (Phase 3). None of these is in the terrain's regeneration key.
+ |{type:'setRoads';patch:Partial<TopoProject['roads']>}
+ |{type:'setLabels';patch:Partial<TopoProject['labels']>}
+ |{type:'setFrame';patch:Partial<TopoProject['frame']>}
+ |{type:'setTitle';patch:Partial<TopoProject['title']>}
+ |{type:'setRouteWidth';widthMm:number};
 
 export function topoReducer(state:TopoProject,action:TopoAction):TopoProject{
  switch(action.type){
@@ -35,5 +41,10 @@ export function topoReducer(state:TopoProject,action:TopoAction):TopoProject{
   case 'setRoute':return clampTopoProject({...state,route:action.route});
   case 'clearRoute':return {...state,route:null};
   case 'setTerrain':return clampTopoProject({...state,terrain:{...state.terrain,...action.patch} as TopoProject['terrain']});
+  case 'setRoads':return clampTopoProject({...state,roads:{...state.roads,...action.patch}});
+  case 'setLabels':return clampTopoProject({...state,labels:{...state.labels,...action.patch}});
+  case 'setFrame':return clampTopoProject({...state,frame:{...state.frame,...action.patch}});
+  case 'setTitle':return clampTopoProject({...state,title:{...state.title,...action.patch}});
+  case 'setRouteWidth':return state.route?clampTopoProject({...state,route:{...state.route,widthMm:action.widthMm}}):state;
  }
 }

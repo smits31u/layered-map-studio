@@ -44,7 +44,9 @@ export interface TopoProject{
  displayUnit:TopoUnit;
  terrain:{layerCount:1|2|3|4;coveragePercent:[100,number,number,number];contoursEnabled:boolean;contourCount:TopoContourCount};
  roads:{enabled:boolean;detail:TopoDetail;thicknessScale:number};
- labels:{enabled:boolean;sizeMm:number};
+ // enabled: place names (towns, neighbourhoods). poiEnabled: points of interest (bus stops, shops,
+ // parks …), separate and off by default — on a dense board they crowd out the place names.
+ labels:{enabled:boolean;poiEnabled:boolean;sizeMm:number};
  route:TopoRoute|null;
  frame:{enabled:boolean;thicknessMm:number};
  compass:{position:TopoCompassPosition;sizeMm:number;mergeWithTerrain:boolean};
@@ -64,7 +66,16 @@ export const TOPO_LIMITS={
  outputMm:{min:50,max:600,step:1},
  zoom:{min:6,max:18,step:.5},
  coveragePercent:{min:1,max:99,step:1},
- roadThicknessScale:{min:.25,max:4,step:.05},
+ // A multiplier on the ornament's physical road-width table (roadWidths.ts); 1 is the table itself.
+ // It also sets bridge-tab widths, which are the road's width (features/bridges.ts). On a 9 in board:
+ //   0.5× — residential 0.32 mm, paths at the 0.25 mm engraving floor. Lower, and residential and
+ //          service roads hit the floor too: every class below tertiary becomes one width, so the
+ //          control stops changing anything but the major roads, and bridge tabs only get thinner.
+ //   3×   — motorway 4.05 mm, primary 3.15 mm: the major bridges' tabs clear the ornament's 3 mm
+ //          minimum neck, which is what raising it for a fragile span is for. Residential streets are
+ //          1.9 mm and High-detail footpaths 1.2 mm, already merging with the streets beside them at
+ //          the default zoom; past this, a dense board fills in.
+ roadThicknessScale:{min:.5,max:3,step:.05},
  labelSizeMm:{min:1,max:20,step:.1},
  routeWidthMm:{min:.2,max:2.5,step:.1},
  frameThicknessMm:{min:1,max:40,step:.5},

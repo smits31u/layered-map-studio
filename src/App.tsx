@@ -11,6 +11,7 @@ import {getCachedGeometryLayers,type GeometryCache} from './export/geometryCache
 import {individualSvgsZip,individualZipName,sceneToSvg} from './export/svg/exportSvg';
 import {preloadAllFonts} from './text/fontRegistry';
 import {OrnamentPage} from './ornament/ui/OrnamentPage';
+import {TopoPage} from './topo/ui/TopoPage';
 const empty:ExtractedFeatures={water:[],roads:[],places:[]};
 const download=(name:string,data:string|Uint8Array,type='image/svg+xml')=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data as BlobPart],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
 // M-LIVE: presentation-tier edits from the Controls sidebar (text/number/select fields) are
@@ -23,7 +24,7 @@ export default function App(){
  // Which product is being designed. The ornament is a separate manufacturing target that shares this
  // repo's text/geometry/SVG code but none of its project state, so it owns its own store rather than
  // adding an unused branch to MapProject.
- const[tool,setTool]=useState<'lake-map'|'ornament'>('lake-map');
+ const[tool,setTool]=useState<'lake-map'|'ornament'|'topo'>('lake-map');
  // GEOMETRY CHANGE tier cache (M-LIVE): the expensive polygon-boolean shoreline/depth work,
  // reused across presentation-only rebuilds. featuresRef lets the debounced callback below always
  // read the latest extracted geography without becoming stale across re-renders.
@@ -75,5 +76,6 @@ export default function App(){
  const loaded=features.water.length+features.roads.length+features.places.length>0;
  // Every hook above has already run, so this early return is stable across renders.
  if(tool==='ornament')return <OrnamentPage onExit={()=>setTool('lake-map')}/>;
- return <main><Controls project={project} setProject={setProjectLive} onSelect={select} onGenerate={generate} onExport={exportIt} status={status} generateError={error} counts={{water:features.water.length,roads:features.roads.length,namedRoads:features.roads.filter(r=>r.name).length,places:features.places.length}}/><section className="workspace"><nav><button className={mode==='map'?'active':''} onClick={()=>setMode('map')}>Map Mode</button><button className={mode==='generated'?'active':''} onClick={()=>setMode('generated')}>Generated Map</button><button onClick={()=>setTool('ornament')}>Ornament Studio →</button>{error&&<span className="nav-error error" role="alert" title={error}>{error}</span>}</nav>{mode==='map'?<MapViewer project={project} flyTo={fly} onView={m=>setProjectState(p=>({...p,map:m}))} onCrop={crop=>setProjectState(p=>({...p,map:{...p.map,crop}}))} onStatus={setStatus} onFeatures={f=>{setFeatures(f);setScene(undefined);geometryCacheRef.current=undefined;const total=f.water.length+f.roads.length+f.places.length;setStatus(total?`Loaded ${f.water.length} water, ${f.roads.length} roads, ${f.places.length} places`:'No vector features found in the selected crop.')}}/>:<GeneratedPreview scene={scene} featuresLoaded={loaded} project={project} error={error} onCommitOverride={commitOverride}/>}</section></main>;
+ if(tool==='topo')return <TopoPage onExit={()=>setTool('lake-map')}/>;
+ return <main><Controls project={project} setProject={setProjectLive} onSelect={select} onGenerate={generate} onExport={exportIt} status={status} generateError={error} counts={{water:features.water.length,roads:features.roads.length,namedRoads:features.roads.filter(r=>r.name).length,places:features.places.length}}/><section className="workspace"><nav><button className={mode==='map'?'active':''} onClick={()=>setMode('map')}>Map Mode</button><button className={mode==='generated'?'active':''} onClick={()=>setMode('generated')}>Generated Map</button><button onClick={()=>setTool('ornament')}>Ornament Studio →</button><button onClick={()=>setTool('topo')}>Topo Map Builder →</button>{error&&<span className="nav-error error" role="alert" title={error}>{error}</span>}</nav>{mode==='map'?<MapViewer project={project} flyTo={fly} onView={m=>setProjectState(p=>({...p,map:m}))} onCrop={crop=>setProjectState(p=>({...p,map:{...p.map,crop}}))} onStatus={setStatus} onFeatures={f=>{setFeatures(f);setScene(undefined);geometryCacheRef.current=undefined;const total=f.water.length+f.roads.length+f.places.length;setStatus(total?`Loaded ${f.water.length} water, ${f.roads.length} roads, ${f.places.length} places`:'No vector features found in the selected crop.')}}/>:<GeneratedPreview scene={scene} featuresLoaded={loaded} project={project} error={error} onCommitOverride={commitOverride}/>}</section></main>;
 }

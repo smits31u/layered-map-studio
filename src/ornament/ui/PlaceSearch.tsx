@@ -5,6 +5,8 @@ import type {GeocodeCandidate,GeocodeProviderId,GeocodeProviderInfo} from '../..
 type Props={
  selectedLabel?:string;
  onSelect:(candidate:GeocodeCandidate,fitBounds:boolean)=>void;
+ // The prompt shown before any search. Defaults to the ornament's wording; the topo builder passes its own.
+ hint?:string;
 };
 
 // Place search.
@@ -19,7 +21,7 @@ type Props={
 
 const DEFAULT_PROVIDER:GeocodeProviderId='nominatim';
 
-export function PlaceSearch({selectedLabel,onSelect}:Props){
+export function PlaceSearch({selectedLabel,onSelect,hint='Search for the place this ornament is of.'}:Props){
  const inputId=useId();
  const [query,setQuery]=useState('');
  const [provider,setProvider]=useState<GeocodeProviderId>(DEFAULT_PROVIDER);
@@ -81,7 +83,7 @@ export function PlaceSearch({selectedLabel,onSelect}:Props){
     :error?error
     :response?`${response.results.length} result${response.results.length===1?'':'s'} from ${describe(response.providers,response.provider)}${response.cached?' (cached)':''}`
     :selectedLabel?`Showing ${selectedLabel}`
-    :'Search for the place this ornament is of.'}
+    :hint}
   </p>
 
   {response?.results.length?<ul className="ornament-results">

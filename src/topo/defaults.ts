@@ -21,7 +21,7 @@ export function createDefaultTopoProject():TopoProject{
   displayUnit:'in',
   terrain:{layerCount:1,coveragePercent:[100,50,25,12],contoursEnabled:true,contourCount:8},
   roads:{enabled:true,detail:'high',thicknessScale:1},
-  labels:{enabled:true,sizeMm:3},
+  labels:{enabled:true,poiEnabled:false,sizeMm:3},
   route:null,
   frame:{enabled:false,thicknessMm:6},
   compass:{position:'off',sizeMm:25,mergeWithTerrain:false},

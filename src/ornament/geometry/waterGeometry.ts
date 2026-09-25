@@ -77,6 +77,13 @@ function normalizeWaterPolygon(polygon:ProjectedWater,onReject:()=>void):Polygon
 }
 
 export function buildWaterRegion(water:ProjectedWater[],options:WaterGeometryOptions):WaterGeometryResult{
+ return buildWaterRegionWithin(water,innerDisk(options.innerRadiusMm,options.arcToleranceMm),options);
+}
+
+// The same pipeline against any clip region. The ornament clips to its inner disk (above); the topo
+// builder clips to its rectangular board (src/topo/features/water.ts). One implementation of
+// "normalise rings, union, clip, simplify, repair" rather than two.
+export function buildWaterRegionWithin(water:ProjectedWater[],clipRegion:MultiPolygonMm,options:Omit<WaterGeometryOptions,'innerRadiusMm'|'arcToleranceMm'>={}):WaterGeometryResult{
  const simplifyToleranceMm=options.simplifyToleranceMm??DEFAULT_WATER_SIMPLIFY_TOLERANCE_MM;
  let rejectedRings=0;
  const normalized:MultiPolygonMm=[];
@@ -86,7 +93,7 @@ export function buildWaterRegion(water:ProjectedWater[],options:WaterGeometryOpt
  }
 
  const unioned=unionAll(normalized.map(polygon=>[polygon]),'Water');
- const clipped=intersect(unioned,innerDisk(options.innerRadiusMm,options.arcToleranceMm),'Water');
+ const clipped=intersect(unioned,clipRegion,'Water');
  const simplified=simplifyToleranceMm>0?simplifyGeometry(clipped,simplifyToleranceMm):clipped;
  const {geometry:cleaned,report}=repairGeometry(simplified,'Water',{
   minComponentAreaMm2:options.minComponentAreaMm2??DEFAULT_MIN_WATER_COMPONENT_AREA_MM2,

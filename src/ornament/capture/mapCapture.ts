@@ -125,7 +125,7 @@ export function readViewport(map:CaptureMap):ViewportSnapshot{
  });
 }
 
-const sameViewport=(a:ViewportSnapshot,b:ViewportSnapshot)=>
+export const sameViewport=(a:ViewportSnapshot,b:ViewportSnapshot)=>
  Math.abs(a.center[0]-b.center[0])<1e-9&&Math.abs(a.center[1]-b.center[1])<1e-9
  &&Math.abs(a.zoom-b.zoom)<1e-9&&a.widthPx===b.widthPx&&a.heightPx===b.heightPx;
 

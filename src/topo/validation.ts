@@ -34,16 +34,20 @@ export function validRoute(route:unknown,widthFallback:number):TopoRoute|null{
  if(!route||typeof route!=='object')return null;
  const r=route as Partial<TopoRoute>;
  if(!Array.isArray(r.segments))return null;
- const segments:[number,number][][]=[];
+ let clean=true;
  for(const segment of r.segments){
   if(!Array.isArray(segment)||segment.length<2)return null;
   for(const point of segment){
    if(!Array.isArray(point)||point.length<2)return null;
    const [lng,lat]=point;
    if(!Number.isFinite(lng)||!Number.isFinite(lat)||Math.abs(lng)>180||Math.abs(lat)>90)return null;
+   if(point.length!==2)clean=false;
   }
-  segments.push(segment.map(([lng,lat])=>[lng,lat] as [number,number]));
  }
+ // Already exactly [lng, lat] pairs — what the GPX parser produces — so the same arrays are kept.
+ // Every reducer action re-clamps the project, and copying a 250,000-point route on each one would
+ // also make every toggle look like a new route to the board's overlay cache (features/overlay.ts).
+ const segments:[number,number][][]=clean?r.segments:r.segments.map(segment=>segment.map(([lng,lat])=>[lng,lat] as [number,number]));
  if(!segments.length)return null;
  return {
   segments,
@@ -92,6 +96,7 @@ export function clampTopoProject(input:TopoProject):TopoProject{
   },
   labels:{
    enabled:typeof p.labels?.enabled==='boolean'?p.labels.enabled:d.labels.enabled,
+   poiEnabled:typeof p.labels?.poiEnabled==='boolean'?p.labels.poiEnabled:d.labels.poiEnabled,
    sizeMm:round3(clampTo(p.labels?.sizeMm,TOPO_LIMITS.labelSizeMm,d.labels.sizeMm)),
   },
   route:validRoute(p.route,DEFAULT_ROUTE_WIDTH_MM),

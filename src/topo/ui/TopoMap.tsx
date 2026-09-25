@@ -1,5 +1,6 @@
 import {useCallback,useEffect,useRef,useState,type CSSProperties} from 'react';
 import {getMapLibre,supportsInteractiveMap,type OrnamentMapInstance} from '../../ornament/map/maplibreGlobal';
+import {captureTopoFeatures,type StyleLike,type TopoCaptureMap,type TopoCaptureResult} from '../capture/topoCapture';
 import {TOPO_LIMITS,type TopoRoute} from '../types';
 
 // The topo builder's map: MapLibre with bearing and pitch locked at 0, a crop frame at the board's
@@ -22,7 +23,7 @@ const SAME_CENTER=1e-7,SAME_ZOOM=1e-4;
 const FIT_MARGIN_PX=16;
 
 type Padding={top:number;bottom:number;left:number;right:number};
-type TopoMapInstance=Omit<OrnamentMapInstance,'fitBounds'>&{fitBounds(bounds:[[number,number],[number,number]],options?:{padding?:number|Padding;maxZoom?:number;duration?:number}):void};
+type TopoMapInstance=Omit<OrnamentMapInstance,'fitBounds'>&{fitBounds(bounds:[[number,number],[number,number]],options?:{padding?:number|Padding;maxZoom?:number;duration?:number}):void;getStyle():StyleLike|undefined};
 
 type Props={
  center:[number,number];
@@ -41,6 +42,9 @@ type Props={
 export interface TopoMapHandle{
  // The live centre and zoom, and the crop frame's width in CSS pixels: what generation freezes.
  frozenFrame():{center:[number,number];zoom:number;frameWidthPx:number};
+ // Water, roads and labels inside the crop frame, with the view frozen from the same map read.
+ // Undefined when there is no live map (no WebGL) to capture from.
+ capture(widthMm:number,heightMm:number):Promise<TopoCaptureResult>|undefined;
 }
 
 // The crop frame is `width:min(75%, 75vh·ratio)` of the map (styles.css). When layout reports no size
@@ -117,12 +121,20 @@ export function TopoMap({center,zoom,widthMm,heightMm,route,fitRequest,onViewpor
  viewProps.current={center,zoom};
  useEffect(()=>{
   if(!handleRef)return;
-  handleRef.current={frozenFrame(){
-   const map=mapRef.current,c=map?.getCenter();
+  const frameWidthPx=()=>{
    const measured=frame.current?.getBoundingClientRect().width??0;
-   const frameWidthPx=measured>0?measured:(host.current?.clientWidth||FALLBACK_MAP_WIDTH_PX)*FRAME_FRACTION;
-   return {center:c?[c.lng,c.lat]:[viewProps.current.center[0],viewProps.current.center[1]],zoom:map?map.getZoom():viewProps.current.zoom,frameWidthPx};
-  }};
+   return measured>0?measured:(host.current?.clientWidth||FALLBACK_MAP_WIDTH_PX)*FRAME_FRACTION;
+  };
+  handleRef.current={
+   frozenFrame(){
+    const map=mapRef.current,c=map?.getCenter();
+    return {center:c?[c.lng,c.lat]:[viewProps.current.center[0],viewProps.current.center[1]],zoom:map?map.getZoom():viewProps.current.zoom,frameWidthPx:frameWidthPx()};
+   },
+   capture(widthMm,heightMm){
+    const map=mapRef.current;
+    return map?captureTopoFeatures(map as unknown as TopoCaptureMap,{frameWidthPx:frameWidthPx(),widthMm,heightMm}):undefined;
+   },
+  };
   return ()=>{handleRef.current=null};
  },[handleRef]);
 

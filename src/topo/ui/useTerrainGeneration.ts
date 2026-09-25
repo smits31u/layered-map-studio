@@ -1,4 +1,5 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
+import type {CapturedWater} from '../../ornament/capture/featureTypes';
 import {TerrainError,type TerrainErrorCode} from '../terrain/errors';
 import {TileFetchCancelledError,fetchTerrainTiles,type TileFetchLike} from '../terrain/fetchTiles';
 import {terrainTilePlan,type FrozenTerrainView,type TerrainResult,type TerrainSettings,type TerrainStage} from '../terrain/pipeline';
@@ -28,6 +29,14 @@ export interface GenerationState{
 
 export interface TerrainGenerationDeps{createRunner?:()=>TerrainRunner;fetchImpl?:TileFetchLike}
 
+export interface GenerateOptions{
+ keepResult?:boolean;
+ // The water captured with the view, subtracted from every layer in the worker. Absent only when
+ // there was no live map to capture from.
+ water?:readonly CapturedWater[];
+ waterSimplifyToleranceMm?:number;
+}
+
 export function useTerrainGeneration(deps:TerrainGenerationDeps={}){
  const [state,setState]=useState<GenerationState>({status:'idle'});
  const runner=useRef<TerrainRunner|null>(null);
@@ -52,7 +61,7 @@ export function useTerrainGeneration(deps:TerrainGenerationDeps={}){
   setState(previous=>previous.status==='working'?{status:previous.result?'ready':'idle',result:previous.result}:previous);
  },[]);
 
- const generate=useCallback(async(view:FrozenTerrainView,settings:TerrainSettings,{keepResult=false}:{keepResult?:boolean}={})=>{
+ const generate=useCallback(async(view:FrozenTerrainView,settings:TerrainSettings,{keepResult=false,water,waterSimplifyToleranceMm}:GenerateOptions={})=>{
   stopActive();
   const mine=++token.current,isCurrent=()=>token.current===mine;
   const abort=new AbortController();
@@ -68,7 +77,7 @@ export function useTerrainGeneration(deps:TerrainGenerationDeps={}){
     tileCache.current={key,tiles};
    }
    runner.current??=(depsRef.current.createRunner??createTerrainRunner)();
-   const handle=runner.current.run({view,tiles,water:[],settings},{onStage:stage=>{if(isCurrent())setState(s=>({...s,stage}))}});
+   const handle=runner.current.run({view,tiles,water:[],...(water?.length?{capturedWater:water,waterSimplifyToleranceMm}:{}),settings},{onStage:stage=>{if(isCurrent())setState(s=>({...s,stage}))}});
    if(active.current)active.current.handle=handle;
    setState(s=>({...s,stage:'decode'}));
    const result=await handle.result;

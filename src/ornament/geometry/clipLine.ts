@@ -113,6 +113,26 @@ export function clipPolylineAboveChord(line:PolylineMm,chordYMm:number,minLength
  return clipPolyline(line,(a,b)=>segmentAboveChordInterval(a,b,chordYMm),minLengthMm);
 }
 
+// The sub-interval of a→b inside the axis-aligned rectangle [x0,x1]×[y0,y1], boundary included
+// (Liang–Barsky). A segment lying exactly along an edge counts as inside, like a point on the circle.
+export function segmentRectInterval(a:PointMm,b:PointMm,x0:number,y0:number,x1:number,y1:number):[number,number]|undefined{
+ const dx=b[0]-a[0],dy=b[1]-a[1];
+ let enter=0,exit=1;
+ for(const [p,q] of [[-dx,a[0]-x0],[dx,x1-a[0]],[-dy,a[1]-y0],[dy,y1-a[1]]] as const){
+  if(p===0){if(q<0)return undefined;continue}
+  const t=q/p;
+  if(p<0){if(t>enter)enter=t}else if(t<exit)exit=t;
+  if(exit<enter)return undefined;
+ }
+ return [enter,exit];
+}
+
+// The rectangle counterpart of clipPolylineToDisk, for products whose map window is a rectangle
+// (the topo board). Same walker, so re-entry, tangents and zero-length pieces behave identically.
+export function clipPolylineToRect(line:PolylineMm,x0:number,y0:number,x1:number,y1:number,minLengthMm=MIN_PIECE_LENGTH_MM):PolylineMm[]{
+ return clipPolyline(line,(a,b)=>segmentRectInterval(a,b,x0,y0,x1,y1),minLengthMm);
+}
+
 export interface MapWindow{innerRadiusMm:number;chordYMm:number}
 
 export const mapWindowOf=(geometry:OrnamentGeometry):MapWindow=>({innerRadiusMm:geometry.innerRadiusMm,chordYMm:geometry.chordYMm});

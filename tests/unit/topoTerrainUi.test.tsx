@@ -46,7 +46,8 @@ describe('terrain generation in the topo page',()=>{
   const {fetchMock}=serveTiles(hill);
   render(<TopoPage/>);
   fireEvent.click(generateButton());
-  expect(screen.getByText('Edit mode')).toBeTruthy();
+  // Capture waits for the map to settle before edit mode opens.
+  expect(await screen.findByText('Edit mode')).toBeTruthy();
   await waitFor(()=>expect(screen.getByTestId('terrain-preview')).toBeTruthy(),{timeout:HEAVY});
   // Every request went through the proxy route, one per tile, padding ring included.
   const downloads=fetchMock.mock.calls.length;
@@ -95,7 +96,7 @@ describe('terrain generation in the topo page',()=>{
   serveTiles(hill,{hold:new Promise<void>(r=>{release=r})});
   render(<TopoPage/>);
   fireEvent.click(generateButton());
-  expect(screen.getAllByText(/Downloading elevation tiles/).length).toBeGreaterThan(0);
+  expect((await screen.findAllByText(/Downloading elevation tiles/)).length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole('button',{name:'← Back to map'}));
   expect(generateButton()).toBeTruthy();
   release();
