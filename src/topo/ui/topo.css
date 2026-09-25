@@ -17,3 +17,5 @@
 .topo-preview-frame{min-height:0;display:grid;place-items:center}.topo-preview-frame.busy{opacity:.55}
 .topo-terrain-preview{width:100%;height:100%;max-height:calc(100vh - 190px);background:#e8ece9}
 .topo-terrain-stats{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;font-size:11px;color:#9facb8}.topo-terrain-stats div{display:flex;gap:5px}.topo-terrain-stats dt{color:#d9e0e8}.topo-terrain-stats dd{margin:0}
+.topo-export{display:grid;gap:6px;margin-top:14px}.topo-export button{width:100%}
+.topo-preflight{margin:0;padding-left:16px;font-size:12px;display:grid;gap:4px}.topo-preflight li.error{color:#ff8a80}.topo-preflight li.warning{color:#ffe3a8}

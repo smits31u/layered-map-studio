@@ -8,7 +8,7 @@ Tracks `docs/CLAUDE_TOPO_MAP_BUILD_PLAN.md` against this repository.
 | 1 — map / search / size / GPX | built and tested; **not wired into the running app** |
 | 2 — terrain preview | built and tested; proxy **deployed** (image `c9c7c59a627c`); builder UI **not wired into the running app** |
 | 3 — vector features and editing | built and tested; water masking verified on real data; bridges kept as tabs; compass not built (see below); builder **wired into the app for review** (nav button “Topo Map Builder →”, as the ornament's “Ornament Studio →”); **deployed for review** as image `099657b1cb45`; rollbacks `layered-map-studio:rollback-pre-road-thickness-review` (`ee53e18d30de`) and `layered-map-studio:rollback-pre-topo-phase3-review` (`c9c7c59a627c`) |
-| 4 — laser-ready SVG | not started |
+| 4 — laser-ready SVG | built and tested: SVG export with the plan's groups, full preflight, SVG + project JSON download — **deployed for review** as image `a706f8e45424`; rollbacks `rollback-pre-glyph-nan-fix` (`0d79a250e43e`) and `rollback-pre-topo-export-review` (`099657b1cb45`). A real export was downloaded from the live app and checked: valid XML, 12 groups, no NaN |
 | 5 — hardening | not started |
 
 ## Repository shape: a feature area, not a monorepo
@@ -652,6 +652,128 @@ Three new test files and a fixture helper (`tests/helpers/topoFixtures.ts`). The
   mapped as areas are.
 - **Contour lines are still not crossing-checked** (a Phase 2 note).
 - **Playwright** is still not set up. Real-browser checks were run ad hoc in headless Chromium.
+
+## Phase 4 — built
+
+"Export SVG + project" sits in the sidebar above "Reset to defaults". It is enabled in edit mode once
+terrain exists. It uses the ornament's flow (`src/topo/export/exportTopo.ts`):
+1. build the board from the current settings and the terrain as it stands — never a terrain run;
+2. preflight exactly what will be written;
+3. serialise and download only if preflight passed.
+
+A blocked export returns no SVG at all. The findings are listed under the button, errors first.
+
+### The SVG (`export/board.ts`, `export/svg.ts`, `export/metadata.ts`)
+
+- **Groups.** The plan's twelve, always emitted, in its order: `cut/frame`, `cut/terrain-1…4`,
+  `cut/water`, `cut/roads`, `score/contours`, `score/route`, `engrave/labels`, `engrave/title`,
+  `engrave/compass`. An unused group is empty, with `data-empty` and a `data-empty-reason`. The
+  compass is not built, so `engrave/compass` is always empty; the structure does not depend on it.
+- **Bridge tabs are in `cut/terrain-1`.** Phase 3 built them as layer-1 material, so layer 1 is cut
+  as land ∪ tabs. `cut/water` is the water minus the tabs, so the two tile the board exactly. On the
+  Golden Gate, layer 1 is one piece from Marin to San Francisco.
+- **Rules carried over from the ornament.** Real millimetres (`width`/`height` in mm, a 1:1
+  viewBox). Every number goes through the ornament's 3-decimal formatter, now exported as
+  `formatMm`. No transforms. Even-odd fill on every closed group (water holes, the blocks between
+  roads, the frame opening, bridge gaps); nonzero on glyphs. One `<path>` per piece.
+- **Score lines** (contours, route) are open paths. Contours carry a `data-label` with their
+  elevation. The route is clipped to land ∪ tabs and stroked at its physical width.
+- **Colours.** The ornament's LightBurn convention — red cut, black engrave — plus blue for score.
+  Unverified in xTool Studio, as CLAUDE.md records; the group ids are the contract.
+- **Metadata** (namespace `…/topo/1`). App version, generation time, and the viewport (centre, zoom,
+  frame, bounds). Board size, the terrain summary (tile zoom and count, grid, smoothing, elevation
+  range, layer thresholds and coverage, contour elevations), the capture counts and the bridges. Then
+  both data sources, with the bathymetry module's provenance fields (id, title, attribution, source,
+  retrieved-at, quality): OpenStreetMap/OpenFreeMap, and Terrain Tiles with its URL template. Last,
+  the project as CDATA, with a loaded route summarised.
+- **Project JSON.** Downloaded alongside, whole, route included: it is the reprint source, and a file
+  the user chose to save. Browser storage still never holds the route.
+- **File names** are deterministic: `topo-<place or centre>-<W>x<H>mm.svg` and `.json`.
+
+### Preflight (`export/preflight.ts`)
+
+The plan's list, all of it, on the emitted groups. It reuses the ornament's checkers.
+
+- **non-finite** (run first): NaN or Infinity in any geometry or glyph path. Error.
+- **dimensions**, all errors:
+  - the board has been resized since generation;
+  - the SVG size is wrong;
+  - layer 1 and the water do not tile the board to within 0.1 mm around its edge;
+  - anything reaches outside the board (a title dragged off it);
+  - there is no land.
+- **open-cut-paths.** A cut ring that is not closed, or a glyph subpath with no Z. Error.
+- **self-intersections.** A cut ring that crosses or touches itself. Error.
+- **tiny-islands.** A piece of material under 0.25 mm² is an error: it falls through the bed. A tiny
+  opening is only a warning, since nothing falls out.
+- **minimum-width.** Each bridge is **measured on the emitted layer-1 geometry**, as the ornament
+  measures its neck. Every 0.25 mm along the span over the water, twice the distance to the nearest
+  edge is the material's width there.
+  - Under the 0.25 mm laser minimum is an error: the cuts either side would sever it. A 0.2 mm GPX
+    route over the Golden Gate blocks, and says to raise Route width.
+  - Under the ornament's 3 mm neck is a warning: fragile, but it cuts. Road thickness is the remedy.
+  - Terrain slivers under 0.25 mm are warnings.
+  - Measuring the cut material rather than the tab parameters matters. At 3× the Golden Gate's
+    sidewalk tabs are 1.17 mm, but they merge into the 4.05 mm deck, and measure 2.83 mm.
+- **attribution.** Missing app version, timestamp, viewport, OpenStreetMap attribution, or Terrain
+  Tiles attribution and source. Error.
+- **design.** What building the features reported (gaps filled, labels left off, roads running out
+  over water, no map capture, a compass that is set but not built). Warnings.
+
+**Preflight found a real bug.** On downtown San Francisco at the page's 480 px frame, a small pond's
+water ring came out of the shared water pipeline pinched: it passes through one vertex twice, with a
+zero-width needle out and back. That is fine to draw, and a slit when cut. The topo water region now
+goes through a strictly-simple Clipper union and drops the leftover needle (`features/water.ts`,
+`simpleForCutting`). The ornament's pipeline is untouched, so its goldens cannot move; whether the
+ornament can hit the same case is worth checking.
+
+**The live check found a second, older bug, in shared code.** A real export with a Cinzel title was
+blocked by the non-finite check: the title's path data contained `NaN`. The cause is opentype.js
+2.0.0. Its `toPathData` rounds each coordinate by building the string `fraction + "e+3"`, and for a
+coordinate within about 10⁻⁶ of a whole number the fraction stringifies in exponent form
+(`"2.8e-14e+3"`), which parses to NaN.
+- **How common.** It is rare with Inter and common with Cinzel at whole-millimetre sizes: Cinzel's
+  "Golden Gate" hit it at 475 of 622 positions sampled.
+- **The fix.** `src/text/textVector.ts` — shared by the lake tool, the ornament and the topo builder
+  — now snaps such coordinates to the whole number first. Correct rounding would print exactly that,
+  so every coordinate that was not NaN formats byte-identically; this is tested against opentype's own
+  output across all three fonts.
+- **Who was affected.** The ornament's preflight would have blocked a NaN title. **The lake tool has
+  no such check**: a lake SVG with Cinzel or Great Vibes text may have been exported with NaN in a
+  text path. `grep -c NaN file.svg` on any recent lake export will say.
+
+### Tests
+
+**`topoExport.test.ts`:**
+- **Golden: the real Golden Gate board**, with frame, title, 4 layers and bridges. It is parsed back
+  as XML and checked:
+  - the groups are in order, with no transforms and the right fill rules;
+  - every cut subpath is closed, numbers have at most 3 decimals, and there is no NaN;
+  - the Golden Gate spans are inside `cut/terrain-1` and outside `cut/water`, read back from the
+    emitted path data, and layer 1 is one piece joining Marin and the Presidio;
+  - the provenance is present;
+  - it is byte-deterministic, and its SHA-256 is pinned.
+- **Other boards export too:** the Phase 2 mountain golden (synthetic tiles, no capture), and the
+  real downtown capture on synthetic terrain.
+- **Every preflight check is triggered individually and blocks.** That includes a real title dragged
+  off the board, and a real 0.2 mm route across the strait; both exports return no SVG. A tiny
+  opening only warns.
+- The pinched-pond regression.
+
+**`topoFeaturesUi.test.tsx`** (the page):
+- Export is disabled before generation.
+- A click downloads two files; the SVG parses as XML and the JSON as the project.
+- Exporting never reruns terrain or fetches a tile.
+- A title dragged off the board blocks, lists the reason, and downloads nothing.
+
+### Not done
+
+- **The compass**, still: `engrave/compass` is empty.
+- **No LightBurn/xTool colour preset choice.** There is one convention.
+- **Opening the file in LightBurn, xTool Studio or Inkscape** is a manual step, as for the ornament.
+  Chrome was used here.
+- **Export runs on the main thread, about 1–2 s.** It builds the roads' buffered geometry and
+  measures the bridges; "Exporting…" shows while it runs. Moving it to the feature worker is a
+  follow-up.
 
 ## Data attribution
 

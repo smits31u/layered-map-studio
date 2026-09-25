@@ -6,7 +6,7 @@ import {clipPolylineToRect,type PolylineMm} from '../../ornament/geometry/clipLi
 import {projectLine} from '../../ornament/geometry/mapProjection';
 import {countVertices,geometryAreaMm2,unionAll} from '../../ornament/geometry/polygonRepair';
 import {roadKey} from '../capture/topoCapture';
-import {bridgeTabWarnings,bridgeTabs,findBridgeSpans,type BridgeCandidate} from './bridges';
+import {bridgeTabWarnings,bridgeTabs,findBridgeSpans,type BridgeCandidate,type BridgeSpan} from './bridges';
 import {buildRoadEngraving,type RoadGeometryMetrics} from '../../ornament/geometry/roadGeometry';
 import {MIN_ENGRAVABLE_WIDTH_MM,ROAD_WIDTH_TABLE_MM,UNKNOWN_ROAD_WIDTH_MM,diameterWidthFactor,roadClassesForDetailSet,roadWidthMm,type RoadWidthSettings} from '../../ornament/geometry/roadWidths';
 import {simplifyLine} from '../../ornament/geometry/simplify';
@@ -44,6 +44,8 @@ export interface TopoRoadLayer{
  // Material kept across water where a road genuinely crosses it. Belongs to terrain layer 1: the
  // export (Phase 4) cuts layer 1 as the land plus these.
  bridgeTabs:MultiPolygonMm;
+ // The crossings the tabs were built along: each span's centreline over the water and its width.
+ bridgeSpans:BridgeSpan[];
  bridges:{spans:number;lengthMm:number;narrowestTabMm?:number;widestTabMm?:number;deadEndsOverWater:number;tunnelsOverWater:number};
  metrics:RoadGeometryMetrics&{overWaterAreaMm2:number;finalAreaMm2:number;finalVertices:number};
  warnings:TopoFeatureWarning[];
@@ -105,6 +107,7 @@ export function buildTopoRoads(roads:readonly CapturedRoad[],view:FrozenTerrainV
  return {
   geometry:onLand,
   bridgeTabs:tabs,
+  bridgeSpans:analysis.spans,
   bridges:{spans:analysis.spans.length,lengthMm:analysis.spans.reduce((sum,s)=>sum+s.lengthMm,0),narrowestTabMm:analysis.spans.length?Math.min(...analysis.spans.map(s=>s.widthMm)):undefined,widestTabMm:analysis.spans.length?Math.max(...analysis.spans.map(s=>s.widthMm)):undefined,deadEndsOverWater:analysis.deadEnds,tunnelsOverWater:analysis.tunnelsOverWater},
   metrics:{...built.metrics,overWaterAreaMm2,finalAreaMm2,finalVertices:countVertices(onLand)},
   warnings,

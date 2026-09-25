@@ -5,7 +5,7 @@ import {clipPolylineToRect,polylineLengthMm,type PolylineMm} from '../../ornamen
 import {projectLine} from '../../ornament/geometry/mapProjection';
 import {offsetPaths} from '../../ornament/geometry/offsetPaths';
 import {assertFinite,geometryAreaMm2,unionAll} from '../../ornament/geometry/polygonRepair';
-import {bridgeTabWarnings,bridgeTabs,findBridgeSpans} from './bridges';
+import {bridgeTabWarnings,bridgeTabs,findBridgeSpans,type BridgeSpan} from './bridges';
 import {capArcToleranceMm} from '../../ornament/geometry/roadGeometry';
 import {simplifyLine} from '../../ornament/geometry/simplify';
 import type {FrozenTerrainView} from '../terrain/pipeline';
@@ -39,7 +39,7 @@ export function projectRouteLines(route:TopoRoute,view:FrozenTerrainView):RouteL
  return {lines,lengthMm:lines.reduce((sum,line)=>sum+polylineLengthMm(line),0),inputPoints:route.pointCount,outsideBoard:lines.length===0};
 }
 
-export interface TopoRouteLayer{geometry:MultiPolygonMm;bridgeTabs:MultiPolygonMm;bridgeSpans:number;areaMm2:number;removedOverWaterMm2:number;warnings:TopoFeatureWarning[]}
+export interface TopoRouteLayer{geometry:MultiPolygonMm;bridgeTabs:MultiPolygonMm;bridgeSpans:number;bridgeSpanLines:BridgeSpan[];areaMm2:number;removedOverWaterMm2:number;warnings:TopoFeatureWarning[]}
 
 // With `water`, a route that genuinely crosses it — over a bridge, say — keeps a tab of material as
 // wide as the route across the gap, exactly as roads do (bridges.ts); a route that runs out over the
@@ -56,5 +56,5 @@ export function buildRouteGeometry(lines:readonly PolylineMm[],widthMm:number,la
  // The round caps that reach past the board edge are clipped too; only a real stretch counts.
  if(removed>widthMm*widthMm*4)warnings.push({code:'route-over-water',message:`About ${Math.round(removed/widthMm)} mm of the route runs out over water without reaching land again, so that part has nothing under it and was left off.`});
  warnings.push(...bridgeTabWarnings(spans,'route'));
- return {geometry,bridgeTabs:tabs,bridgeSpans:spans.length,areaMm2,removedOverWaterMm2:removed,warnings};
+ return {geometry,bridgeTabs:tabs,bridgeSpans:spans.length,bridgeSpanLines:spans,areaMm2,removedOverWaterMm2:removed,warnings};
 }

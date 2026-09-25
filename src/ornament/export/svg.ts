@@ -25,6 +25,9 @@ const n=(value:number):string=>{
  return String(Object.is(rounded,-0)?0:rounded);
 };
 
+// Exported so every file this app writes rounds the same way (the topo builder's export uses it too).
+export const formatMm=n;
+
 export function geometryPathMm(geometry:MultiPolygonMm):string{
  return geometry
   .flat()

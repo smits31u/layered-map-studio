@@ -75,3 +75,32 @@ describe('font registry',()=>{
   }
  });
 });
+
+// opentype.js 2.0.0 writes NaN into path data for a coordinate within ~1e-6 of a whole number (its
+// roundDecimal builds "2.8e-14e+3" and parses it). Found by the topo export's non-finite preflight on
+// a real "Golden Gate" title in Cinzel. textPathData snaps those coordinates first; everything else
+// must format exactly as opentype formats it, so no existing output moves.
+describe('opentype.js near-integer NaN',()=>{
+ const withClose=(d:string)=>d.split('M').filter(Boolean).map(s=>{const sub=`M${s}`.trimEnd();return sub.endsWith('Z')?sub:`${sub}Z`}).join('');
+ it('never writes NaN, in any bundled font, at any position — Cinzel\'s "Golden Gate" included',()=>{
+  let raw=0;
+  for(const id of ['inter','cinzel','great-vibes'] as const){
+   const f=getLoadedFont(id)!;
+   for(const text of ['Golden Gate','CALDRON FALLS','Wausau, WI 54401'])for(let x=-20;x<230;x+=1.37){
+    const ours=textPathData(f,text,10,'center',x,217);
+    expect(ours.d).not.toMatch(/NaN|Infinity/);
+    // What opentype itself writes for the same layout, for comparison.
+    const theirs=withClose(f.getPath(text,x-ours.widthMm/2,217,10).toPathData(3));
+    if(/NaN/.test(theirs)){raw++;continue}
+    expect(ours.d).toBe(theirs);
+   }
+  }
+  // The bug is real and common: without the fix, hundreds of these layouts contain NaN.
+  expect(raw).toBeGreaterThan(50);
+ },60_000);
+ it('the exact title that exposed it: Cinzel, 10 mm, at the live board\'s position',()=>{
+  const {d}=textPathData(getLoadedFont('cinzel')!,'Golden Gate',10,'center',74.3,216.73);
+  expect(d).not.toMatch(/NaN/);
+  expect(d.length).toBeGreaterThan(1000);
+ });
+});

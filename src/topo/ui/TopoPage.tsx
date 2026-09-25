@@ -20,6 +20,9 @@ import {TOPO_CONTOUR_COUNTS,TOPO_LIMITS,type NumericLimit,type TopoProject,type 
 import {TerrainPreview} from './TerrainPreview';
 import {TopoMap,type TopoMapHandle} from './TopoMap';
 import {useFeatureFabrication} from './useFeatureFabrication';
+import {downloadFiles,PROJECT_MIME,SVG_MIME} from '../../ornament/export/download';
+import {exportTopo} from '../export/exportTopo';
+import {topoPreflightSummary,type TopoPreflightReport} from '../export/preflight';
 import {useTerrainGeneration,type GenerationStage,type TerrainGenerationDeps} from './useTerrainGeneration';
 import './topo.css';
 
@@ -196,6 +199,26 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
  ];
 
  const boardChanged=Boolean(frozen&&(frozen.widthMm!==output.widthMm||frozen.heightMm!==output.heightMm));
+
+ // Export: the ornament's flow. Build the board from the current settings and the terrain as it
+ // stands (never a terrain run), preflight it, and download only if preflight passed; a blocked
+ // report is the whole result and is shown where the button is. Deferred one tick so "Exporting…"
+ // paints before the ~1 s build.
+ const [exportState,setExportState]=useState<{busy:boolean;report?:TopoPreflightReport;message?:string;ok?:boolean}>({busy:false});
+ const canExport=mode==='edit'&&Boolean(result)&&!working&&!exportState.busy;
+ useEffect(()=>{setExportState(previous=>previous.busy?previous:{busy:false})},[project,result,capture]);
+ const onExport=()=>{
+  if(!canExport||!result)return;
+  setExportState({busy:true});
+  setTimeout(()=>{
+   try{
+    const exported=exportTopo({project,terrain:result,capture,font:getLoadedFont});
+    if(!exported.ok||!exported.svg){setExportState({busy:false,ok:false,report:exported.preflight,message:topoPreflightSummary(exported.preflight)});return}
+    const wrote=downloadFiles([{name:exported.fileNames.svg,content:exported.svg,type:SVG_MIME},{name:exported.fileNames.project,content:exported.projectJson,type:PROJECT_MIME}]);
+    setExportState({busy:false,ok:wrote,report:exported.preflight,message:wrote?`Exported ${exported.fileNames.svg} and ${exported.fileNames.project}. ${topoPreflightSummary(exported.preflight)}`:'This browser would not accept the download. The board passed preflight — try another browser.'});
+   }catch(error){setExportState({busy:false,ok:false,message:`The export could not be built: ${(error as Error)?.message??String(error)}`})}
+  },0);
+ };
  const progressText=working&&generation.stage?`${STAGE_LABELS[generation.stage]}${generation.stage==='download'&&generation.total?` (${generation.done}/${generation.total})`:''}…`:'';
 
  return <main className="topo-page">
@@ -265,6 +288,14 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
      <input type="number" aria-label="Title offset Y (mm)" step={TOPO_LIMITS.titleOffsetMm.step} value={project.title.dyMm} onChange={e=>dispatch({type:'setTitle',patch:{dyMm:Number(e.target.value)}})}/>mm</span></label>
     <small>The title sits at the bottom centre, inside the frame; the offset moves it from there.</small>
    </details>
+   <div className="topo-export">
+    <button type="button" className="topo-primary" disabled={!canExport} onClick={onExport}>{exportState.busy?'Exporting…':'Export SVG + project'}</button>
+    {!canExport&&!exportState.busy&&<small>{mode!=='edit'||!result?'Generate terrain first; the export is built from it.':'Wait for the terrain to finish.'}</small>}
+    {exportState.message&&<p className={exportState.ok?'topo-note':'error'} role={exportState.ok?'status':'alert'} data-testid="topo-export-status">{exportState.message}</p>}
+    {exportState.report&&exportState.report.findings.length>0&&<ul className="topo-preflight" data-testid="topo-preflight" aria-label="Preflight findings">
+     {[...exportState.report.findings].sort((a,b)=>a.severity===b.severity?0:a.severity==='error'?-1:1).map((f,i)=><li key={i} className={f.severity} data-code={f.code}><strong>{f.severity==='error'?'Blocks export':'Warning'}:</strong> {f.message}</li>)}
+    </ul>}
+   </div>
    <button type="button" className="topo-reset" onClick={()=>{dispatch({type:'reset'});setGpxNote(undefined);setSmoothingRadius(DEFAULT_SMOOTHING_RADIUS)}}>Reset to defaults</button>
   </aside>
   <section className="workspace">

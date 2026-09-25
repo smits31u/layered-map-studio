@@ -145,4 +145,51 @@ describe('the board overlay in edit mode',()=>{
   expect(screen.getByRole('button',{name:'Map Mode'})).toBeTruthy();
   fake=installFakeMapLibre();
  });
+
+ it('exports the SVG and project JSON from edit mode without regenerating terrain, and a blocked design downloads nothing',async()=>{
+  const blobs:Blob[]=[],names:string[]=[];
+  const original={create:URL.createObjectURL,revoke:URL.revokeObjectURL,click:HTMLAnchorElement.prototype.click};
+  URL.createObjectURL=((blob:Blob)=>{blobs.push(blob);return `blob:test/${blobs.length}`}) as typeof URL.createObjectURL;
+  URL.revokeObjectURL=()=>{};
+  HTMLAnchorElement.prototype.click=function(this:HTMLAnchorElement){names.push(this.download)};
+  try{
+   render(<TopoPage terrainDeps={{createRunner:countingTerrainRunner}} featureRunner={countingFeatureRunner}/>);
+   const exportButton=()=>screen.getByRole('button',{name:/Export SVG \+ project|Exporting…/});
+   // Nothing to export until terrain exists.
+   expect((exportButton() as HTMLButtonElement).disabled).toBe(true);
+   expect(screen.getByText(/Generate terrain first/)).toBeTruthy();
+   fireEvent.click(screen.getByRole('button',{name:'Generate terrain'}));
+   await waitFor(()=>expect(screen.getByTestId('board-roads')).toBeTruthy(),{timeout:HEAVY});
+   await waitFor(()=>expect((exportButton() as HTMLButtonElement).disabled).toBe(false),{timeout:HEAVY});
+   const downloads=fetchMock.mock.calls.length;
+   fireEvent.click(exportButton());
+   const status=await screen.findByTestId('topo-export-status',{},{timeout:HEAVY});
+   expect(status.textContent).toMatch(/^Exported topo-.+\.svg and topo-.+\.json\. Preflight passed all 8 checks/);
+   expect(names).toHaveLength(2);
+   expect(names[0]).toMatch(/^topo-37_7881n-122_4097w-228\.6x228\.6mm\.svg$/);
+   expect(names[1]).toBe(names[0].replace(/svg$/,'json'));
+   const svg=await blobs[0].text();
+   const doc=new DOMParser().parseFromString(svg,'image/svg+xml');
+   expect(doc.getElementsByTagName('parsererror')).toHaveLength(0);
+   expect(doc.documentElement.getAttribute('width')).toBe('228.6mm');
+   expect(doc.getElementById('cut/roads')!.getElementsByTagName('path').length).toBeGreaterThan(0);
+   expect(JSON.parse(await blobs[1].text()).output).toEqual({widthMm:228.6,heightMm:228.6});
+   // Exporting did not regenerate terrain or fetch a tile.
+   expect(terrainJobs).toHaveLength(1);
+   expect(fetchMock.mock.calls.length).toBe(downloads);
+
+   // A title dragged off the board fails preflight: the reason is shown and nothing is downloaded.
+   fireEvent.change(screen.getByRole('textbox',{name:'Title'}),{target:{value:'Downtown'}});
+   fireEvent.change(screen.getByRole('spinbutton',{name:'Title offset X (mm)'}),{target:{value:'200'}});
+   fireEvent.click(exportButton());
+   const alert=await screen.findByTestId('topo-export-status',{},{timeout:HEAVY});
+   await waitFor(()=>expect(alert.getAttribute('role')).toBe('alert'),{timeout:HEAVY});
+   expect(screen.getByTestId('topo-export-status').textContent).toMatch(/must be fixed before this board can be exported/);
+   expect(screen.getByLabelText('Preflight findings').textContent).toMatch(/Blocks export:.*engrave\/title reaches outside/);
+   expect(names).toHaveLength(2);
+   expect(terrainJobs).toHaveLength(1);
+  }finally{
+   URL.createObjectURL=original.create;URL.revokeObjectURL=original.revoke;HTMLAnchorElement.prototype.click=original.click;
+  }
+ },HEAVY);
 });
