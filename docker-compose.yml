@@ -6,4 +6,12 @@ services:
       # Nominatim's usage policy requires a contactable identifier in the User-Agent. Replace this
       # before pointing the proxy at the public instance.
       GEOCODER_CONTACT: "${GEOCODER_CONTACT:-contact not configured}"
+    volumes:
+      # Terrain tile cache for the topo builder's /api/terrain proxy (ADR 0004). A named volume, so
+      # cached tiles survive `docker compose build` and container recreation. Public, immutable
+      # elevation data only; safe to delete (`docker volume rm`) at any time — tiles refetch.
+      - terrain-cache:/app/cache/terrain
     restart: unless-stopped
+
+volumes:
+  terrain-cache:

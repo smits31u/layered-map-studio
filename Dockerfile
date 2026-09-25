@@ -16,6 +16,11 @@ ENV NODE_ENV=production PORT=8080 HOST=0.0.0.0 STATIC_ROOT=/app/dist
 # policy requires it; without it the outgoing User-Agent says so rather than pretending otherwise.
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/dist-server ./server
+# The terrain tile cache (ADR 0004). Created here, owned by the unprivileged user the server runs
+# as, because /app is root-owned. docker-compose mounts a named volume at this path; Docker seeds a
+# new named volume from the image directory, ownership included, so the volume starts writable.
+ENV TERRAIN_CACHE_DIR=/app/cache/terrain
+RUN mkdir -p /app/cache/terrain && chown -R node:node /app/cache
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:8080/health || exit 1

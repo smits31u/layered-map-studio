@@ -4,6 +4,10 @@ import {stat} from 'node:fs/promises';
 import {extname,join,normalize,resolve,sep} from 'node:path';
 import {createGeocodeHandler} from '../src/server/geocode/handler';
 import {GEOCODE_PATH,serveGeocode} from '../src/server/geocode/httpRoute';
+import {createTerrainTileHandler} from '../src/server/terrain/handler';
+import {serveTerrainTile} from '../src/server/terrain/httpRoute';
+import {createDiskTileCache} from '../src/server/terrain/tileCache';
+import {DEFAULT_TERRAIN_TILES_URL,TERRAIN_PATH_PREFIX} from '../src/server/terrain/tilePath';
 
 // Production entry point.
 //
@@ -36,11 +40,19 @@ function safePath(pathname:string):string|undefined{
 }
 
 const geocode=createGeocodeHandler();
+// The topo builder's terrain tile proxy (ADR 0004): same process, its own route. The cache
+// directory is a named volume in the container (docker-compose.yml) so tiles survive a rebuild.
+const TERRAIN_CACHE_DIR=resolve(process.env.TERRAIN_CACHE_DIR??'.cache/terrain');
+const terrain=createTerrainTileHandler({
+ cache:createDiskTileCache(TERRAIN_CACHE_DIR,{maxBytes:Number(process.env.TERRAIN_CACHE_MAX_BYTES)||undefined}),
+ urlTemplate:process.env.TERRAIN_TILES_URL||DEFAULT_TERRAIN_TILES_URL,
+});
 
 const server=createServer(async(request,response)=>{
  try{
   const url=new URL(request.url??'/','http://localhost');
   if(url.pathname===GEOCODE_PATH){await serveGeocode(request,response,geocode);return}
+  if(url.pathname.startsWith(TERRAIN_PATH_PREFIX)){await serveTerrainTile(request,response,terrain);return}
   if(url.pathname==='/health'){response.statusCode=200;response.setHeader('Content-Type','text/plain; charset=utf-8');response.end('ok');return}
   if(request.method!=='GET'&&request.method!=='HEAD'){response.statusCode=405;response.setHeader('Allow','GET, HEAD');response.end();return}
 
@@ -66,5 +78,5 @@ async function isFile(path:string):Promise<boolean>{
 
 server.listen(PORT,HOST,()=>{
  if(!process.env.GEOCODER_CONTACT)console.warn('GEOCODER_CONTACT is not set. Nominatim requires a contactable identifier in the User-Agent; set it before using the public instance.');
- console.log(`Layered Map Studio listening on http://${HOST}:${PORT} (static root ${ROOT})`);
+ console.log(`Layered Map Studio listening on http://${HOST}:${PORT} (static root ${ROOT}, terrain cache ${TERRAIN_CACHE_DIR})`);
 });

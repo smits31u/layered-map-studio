@@ -4,3 +4,5 @@ dist-server/
 .env
 *.log
 *.tsbuildinfo
+# Dev terrain tile cache (topo /api/terrain proxy, ADR 0004)
+.cache/

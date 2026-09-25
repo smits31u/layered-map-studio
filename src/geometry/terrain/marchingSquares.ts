@@ -41,10 +41,19 @@
 // the start of exactly one segment and the end of exactly one, so the segments form disjoint
 // cycles.
 //
-// Samples outside the grid are treated as 0 — below every valid threshold, which must be > 0. So
+// Samples outside the grid read as `outside` (TraceOptions), which must be below the threshold. So
 // a contour that runs off the grid is closed half a cell beyond it rather than left open. The
-// depth-terrain grid already has a padding ring of zero-depth cells, so for terrain this never
-// comes into play. It is what keeps "closed" true for any grid handed in.
+// default, 0, is what depth grids need: their outside is the shore, and their thresholds are > 0.
+// The depth-terrain grid already has a padding ring of zero-depth cells, so for it this never comes
+// into play. An elevation grid passes -Infinity, "below every threshold" symbolically, because
+// its thresholds can be 0 or negative (sea level, below sea level); its crossings against the
+// outside are then placed hard against the outside sample, half a cell beyond the grid, so a band
+// that reaches the grid edge reaches the board edge once clipped to it.
+//
+// traceContourLines is the other mode: no virtual outside at all, so a contour that reaches the
+// grid edge ends there as an open polyline instead of being closed around the outside. That is what
+// contour *lines* need (a score line that leaves the board stops at the board), where bands need
+// closed regions.
 //
 // A crossing point is kept at least EDGE_CROSSING_MARGIN (in cells) away from both ends of its
 // edge. A value exactly at the threshold would otherwise put the crossing on the sample point
@@ -82,6 +91,10 @@ export function cellSegments(tl:number,tr:number,br:number,bl:number,threshold:n
 // *lower* end toward the higher. Measuring from the lower end makes the result independent of the
 // direction the edge is walked in, which is what lets two cells agree on a shared edge.
 export function crossingFraction(low:number,high:number,threshold:number):number{
+ // An infinitely low end (the symbolic "below everything" outside) has no finite interpolation;
+ // the crossing sits against it. Unreachable with a finite outside value, so depth grids never
+ // take this branch.
+ if(low===-Infinity)return EDGE_CROSSING_MARGIN;
  const f=(threshold-low)/(high-low);
  return f<EDGE_CROSSING_MARGIN?EDGE_CROSSING_MARGIN:f>1-EDGE_CROSSING_MARGIN?1-EDGE_CROSSING_MARGIN:f;
 }
@@ -96,13 +109,19 @@ export interface IndexRing{
 // Traces every contour of `values` at `threshold` into closed rings. `tagOf(sampleIndex)` labels
 // each ring by one of the above samples it borders (the depth pipeline passes the water-body id).
 // Rings come out in ascending order of their lowest edge id, so the output is deterministic.
-export function traceContourRings(values:ArrayLike<number>,columns:number,rows:number,threshold:number,tagOf:(sampleIndex:number)=>number=()=>0):IndexRing[]{
- if(!(threshold>0))throw new Error(`Contour threshold must be > 0 (got ${threshold}); samples outside the grid are treated as 0.`);
+export interface TraceOptions{
+ // The value every sample outside the grid reads as. Must be below the threshold. Default 0.
+ outside?:number;
+}
+
+export function traceContourRings(values:ArrayLike<number>,columns:number,rows:number,threshold:number,tagOf:(sampleIndex:number)=>number=()=>0,options:TraceOptions={}):IndexRing[]{
+ const outside=options.outside??0;
+ if(!(threshold>outside))throw new Error(outside===0?`Contour threshold must be > 0 (got ${threshold}); samples outside the grid are treated as 0.`:`Contour threshold must be above the outside value ${outside} (got ${threshold}).`);
  const stride=columns+2,edgeCount=2*stride*(rows+2);
  // Edge ids over the virtually padded lattice, columns -1..columns and rows -1..rows.
  const hEdge=(c:number,r:number)=>((r+1)*stride+(c+1))*2;
  const vEdge=(c:number,r:number)=>((r+1)*stride+(c+1))*2+1;
- const sample=(c:number,r:number)=>c<0||r<0||c>=columns||r>=rows?0:values[r*columns+c];
+ const sample=(c:number,r:number)=>c<0||r<0||c>=columns||r>=rows?outside:values[r*columns+c];
  const next=new Int32Array(edgeCount).fill(-1),tags=new Int32Array(edgeCount);
  for(let r=-1;r<rows;r++){
   for(let c=-1;c<columns;c++){
@@ -145,4 +164,69 @@ export function traceContourRings(values:ArrayLike<number>,columns:number,rows:n
   rings.push({points,tag:tags[start]});
  }
  return rings;
+}
+
+export interface IndexLine{
+ // Index-space points; a closed line repeats its first point at the end.
+ points:[number,number][];
+ closed:boolean;
+}
+
+// Contour lines rather than regions: the same segments, stitched by the same edge identity, but
+// with no virtual outside. Cells run only across the grid, so a contour that reaches the grid edge
+// has no segment beyond it and simply ends there — an open polyline — while one that stays inside
+// closes on itself. Any finite threshold is valid.
+//
+// An open chain starts at a crossed edge that no segment leads into and runs to one that leads
+// nowhere; both are necessarily on the grid boundary. Open chains come first, in ascending order of
+// their starting edge id, then closed ones in ascending order of their lowest edge id, so the output
+// is deterministic. Winding follows the same convention as the rings: higher ground on the right.
+export function traceContourLines(values:ArrayLike<number>,columns:number,rows:number,threshold:number):IndexLine[]{
+ if(!Number.isFinite(threshold))throw new Error(`Contour threshold must be a finite number (got ${threshold}).`);
+ const stride=columns+2,edgeCount=2*stride*(rows+2);
+ const hEdge=(c:number,r:number)=>((r+1)*stride+(c+1))*2;
+ const vEdge=(c:number,r:number)=>((r+1)*stride+(c+1))*2+1;
+ const sample=(c:number,r:number)=>values[r*columns+c];
+ const next=new Int32Array(edgeCount).fill(-1),hasPrev=new Uint8Array(edgeCount);
+ for(let r=0;r<rows-1;r++){
+  for(let c=0;c<columns-1;c++){
+   const tl=sample(c,r),tr=sample(c+1,r),br=sample(c+1,r+1),bl=sample(c,r+1);
+   const index=caseIndex(tl,tr,br,bl,threshold);
+   if(index===0||index===15)continue;
+   const edges=[hEdge(c,r),vEdge(c+1,r),hEdge(c,r+1),vEdge(c,r)];
+   for(const segment of cellSegments(tl,tr,br,bl,threshold)){
+    const from=edges[segment.fromEdge],to=edges[segment.toEdge];
+    if(next[from]!==-1)throw new Error('Contour tracing: an edge was claimed as a segment start twice. This is a bug.');
+    next[from]=to;hasPrev[to]=1;
+   }
+  }
+ }
+ const point=(edge:number):[number,number]=>{
+  const node=edge>>1,c=node%stride-1,r=Math.floor(node/stride)-1;
+  const [c2,r2]=edge&1?[c,r+1]:[c+1,r];
+  const a=sample(c,r),b=sample(c2,r2);
+  if(a<b){const f=crossingFraction(a,b,threshold);return [c+f*(c2-c),r+f*(r2-r)]}
+  const f=crossingFraction(b,a,threshold);return [c2+f*(c-c2),r2+f*(r-r2)];
+ };
+ const lines:IndexLine[]=[],visited=new Uint8Array(edgeCount);
+ for(let start=0;start<edgeCount;start++){
+  if(next[start]===-1||hasPrev[start]||visited[start])continue;
+  const points:[number,number][]=[];
+  for(let edge=start;edge!==-1;edge=next[edge]){visited[edge]=1;points.push(point(edge))}
+  lines.push({points,closed:false});
+ }
+ for(let start=0;start<edgeCount;start++){
+  if(next[start]===-1||visited[start])continue;
+  const points:[number,number][]=[];
+  let edge=start;
+  do{
+   if(visited[edge])throw new Error('Contour tracing: lines share an edge. This is a bug.');
+   visited[edge]=1;points.push(point(edge));
+   edge=next[edge];
+   if(edge===-1)throw new Error('Contour tracing: an interior contour did not close. This is a bug.');
+  }while(edge!==start);
+  points.push([points[0][0],points[0][1]]);
+  lines.push({points,closed:true});
+ }
+ return lines;
 }
