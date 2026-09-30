@@ -183,10 +183,23 @@ describe('nesting',HEAVY,()=>{
   // marching squares sees (every sample on a bench equals the threshold). Thresholds exactly on the
   // benches, midway between them, and uneven ones, at full and partial strength, 5 and 6 benches,
   // on the multi-body lake (terraced lake and bay, un-terraced shallow pond) and both real lakes.
+  //
+  // Resolution here was DEFAULT_TERRAIN_RESOLUTION's cellMm (0.5mm — the ternary that used to pick
+  // it for the real lakes was dead: DEFAULT_TERRAIN_PARAMS.resolution.cellMm already equals the
+  // multi-body branch's own literal .5, so every one of the 36 (shape × N × strength × thresholds)
+  // combinations below ran at full production resolution: on a 355.6×279.4mm lake that's roughly
+  // 710×560 ≈ 400,000 cells, terraced and marching-squares-traced from scratch 12 times per lake.
+  // The property under test — nesting/no-self-intersection surviving the degenerate every-sample-
+  // exactly-on-a-bench input — depends on the terracing/threshold *values* landing exactly on grid
+  // samples, not on how many samples there are, so a much coarser grid exercises exactly the same
+  // degenerate case for a fraction of the marching-squares/Clipper cost. 2mm keeps every shape's
+  // long side comfortably above TerrainResolution's 64-cell floor (~140-180 cells) while cutting
+  // cell counts (and so terrain generation + contour tracing time) by roughly 16x.
+  const CELL_MM=2;
   let checked=0;
   for(const [name,shape] of [['multi-body',multiLake],...LAKES.map(l=>[l.name,l.water] as const)] as const){
    for(const N of [5,6])for(const strength of [1,.5]){
-    const terrain=generateDepthTerrain(shape,{...DEFAULT_TERRAIN_PARAMS,terraceLevels:N,terraceStrength:strength,maxDepth:1,resolution:{cellMm:name==='multi-body'?.5:DEFAULT_TERRAIN_PARAMS.resolution.cellMm}});
+    const terrain=generateDepthTerrain(shape,{...DEFAULT_TERRAIN_PARAMS,terraceLevels:N,terraceStrength:strength,maxDepth:1,resolution:{cellMm:CELL_MM}});
     const onBenches=Array.from({length:N},(_,k)=>(k+1)/N),midway=Array.from({length:N},(_,k)=>(k+.5)/N);
     for(const thresholds of [onBenches,midway,THRESHOLD_SETS.uneven]){
      const contours=extractDepthContours(terrain,shape,thresholds);

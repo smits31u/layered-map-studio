@@ -138,7 +138,12 @@ export function installFakeMapLibre(options:FakeMapLibreOptions={}):InstalledFak
    const [west,south,east,north]=boundsFor([state.center.lng,state.center.lat],state.zoom,size);
    return {getWest:()=>west,getSouth:()=>south,getEast:()=>east,getNorth:()=>north};
   }
-  getCanvas(){return {clientWidth:size,clientHeight:size}}
+  // The lake tool's own MapViewer (unlike ornament/topo capture) reads the canvas's on-screen
+  // rect directly, so this needs to behave like a real DOM canvas element there too.
+  getCanvas(){return {clientWidth:size,clientHeight:size,getBoundingClientRect:()=>({left:0,top:0,right:size,bottom:size,width:size,height:size})}}
+  // The lake tool's MapViewer (unlike ornament/topo capture) adds the built-in zoom/rotate
+  // control; a no-op is enough since no test asserts on the control itself.
+  addControl(){}
   project(lngLat:[number,number]){
    const worldSize=MAPLIBRE_TILE_SIZE*Math.pow(2,state.zoom);
    return {

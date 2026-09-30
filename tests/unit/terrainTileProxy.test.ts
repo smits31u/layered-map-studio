@@ -219,6 +219,39 @@ describe('disk tile cache',()=>{
   expect(await exists(9)).toBe(true);
  });
 
+ it('stays consistent under many concurrent set() calls racing each other',async()=>{
+  // Regression test for a missing lock in createDiskTileCache: concurrent set() calls could
+  // both see `index` undefined and both call buildIndex(), or run overlapping evict() passes,
+  // corrupting `total`/`index`. This reproduces it via unresolved-promise concurrency
+  // (Promise.all of many .set() calls) on a single cache instance with a tiny maxBytes so
+  // eviction actually runs during the race.
+  dir=await mkdtemp(join(tmpdir(),'terrain-cache-'));
+  const tileBytes=new Uint8Array(100);tileBytes.set(PNG);
+  const cache=createDiskTileCache(dir,{maxBytes:1000});
+  const tiles=Array.from({length:40},(_,i)=>({z:8,x:i,y:0}));
+  await Promise.all(tiles.map(t=>cache.set(t,tileBytes)));
+  // Walk the actual files on disk independently of the cache's own index.
+  const walk=async(d:string,out:string[]):Promise<void>=>{
+   for(const entry of await readdir(d,{withFileTypes:true})){
+    const p=join(d,entry.name);
+    if(entry.isDirectory())await walk(p,out);
+    else out.push(p);
+   }
+  };
+  const allFiles:string[]=[];
+  await walk(dir,allFiles);
+  const tempFiles=allFiles.filter(f=>f.endsWith('.tmp'));
+  const pngFiles=allFiles.filter(f=>f.endsWith('.png'));
+  // No leftover temp files from a corrupted rename sequence.
+  expect(tempFiles).toEqual([]);
+  const actualBytes=(await Promise.all(pngFiles.map(f=>stat(f)))).reduce((sum,s)=>sum+s.size,0);
+  // Eviction should have kept the cache at or under its cap (with the 90%-drain headroom),
+  // and the files actually on disk must match what got evicted -- no double-counted or lost
+  // bytes, no index/disk drift from a lost lock.
+  expect(actualBytes).toBeLessThanOrEqual(1000);
+  expect(pngFiles.length).toBe(actualBytes/tileBytes.length);
+ });
+
  it('serves through the handler as a hit after a restart',async()=>{
   dir=await mkdtemp(join(tmpdir(),'terrain-cache-'));
   await createTerrainTileHandler({fetchImpl:async()=>reply(200),cache:createDiskTileCache(dir)})({z:4,x:3,y:2});

@@ -5,6 +5,7 @@ import type {FontId} from '../../types/project';
 import type {TopoCapture} from '../capture/topoCapture';
 import type {FrozenTerrainView} from '../terrain/pipeline';
 import type {TopoProject} from '../types';
+import {getFontLoadError} from '../../text/fontRegistry';
 import {buildFrame,type TopoFrame} from './frame';
 import {placeLabels,type TopoLabelLayer} from './labels';
 import {findBridgeSpans} from './bridges';
@@ -115,9 +116,17 @@ export function buildOverlay(inputs:OverlayInputs,previous:OverlayCache={entries
  warnings.push(...framed.warnings);
  const insetMm=framed.frame?.insetMm??0;
 
+ // Distinguishes a font that simply hasn't arrived yet from one that genuinely failed to load
+ // (bad URL, corrupt file, network error) — the two used to be indistinguishable (undefined
+ // either way), so a permanent failure surfaced as a misleading "still loading" forever.
+ const fontWarning=(id:FontId,thing:string):TopoFeatureWarning=>{
+  const loadError=getFontLoadError(id);
+  return loadError?{code:'font-load-failed',message:`The ${thing} font failed to load: ${loadError.message}`}:{code:'font-loading',message:`The ${thing} font is still loading.`};
+ };
+
  const titleFont=inputs.font(settings.title.fontId);
- const titled=cached('title',JSON.stringify([settings.title,W,H,insetMm,idOf(titleFont),waterKey]),()=>
-  titleFont?buildTitle(settings.title,W,H,insetMm,titleFont,water):{warnings:settings.title.text.trim()?[{code:'font-loading',message:'The title font is still loading.'}]:[]} as ReturnType<typeof buildTitle>);
+ const titled=cached('title',JSON.stringify([settings.title,W,H,insetMm,idOf(titleFont),waterKey,getFontLoadError(settings.title.fontId)?.message]),()=>
+  titleFont?buildTitle(settings.title,W,H,insetMm,titleFont,water):{warnings:settings.title.text.trim()?[fontWarning(settings.title.fontId,'title')]:[]} as ReturnType<typeof buildTitle>);
  warnings.push(...titled.warnings);
 
  const labelFont=inputs.font('inter');
@@ -128,7 +137,7 @@ export function buildOverlay(inputs:OverlayInputs,previous:OverlayCache={entries
  const labelLayer=cached('labels',JSON.stringify([idOf(capture),viewKey,settings.labels.sizeMm,kinds,insetMm,waterKey,titled.title?.box??null,idOf(labelFont)]),()=>
   capture&&labelFont?placeLabels(capture.labels.filter(label=>kinds[label.kind]),view,labelFont,{sizeMm:settings.labels.sizeMm,insetMm,water,keepOut:titled.title?[titled.title.box]:[]}):undefined);
  if(labelsVisible&&labelLayer)warnings.push(...labelLayer.warnings);
- if(labelsVisible&&capture&&!labelFont)warnings.push({code:'font-loading',message:'The label font is still loading.'});
+ if(labelsVisible&&capture&&!labelFont)warnings.push(fontWarning('inter','label'));
 
  return {
   overlay:{roads,...(route?{route}:{}),labels:{visible:labelsVisible,...(labelLayer?{layer:labelLayer}:{})},...(framed.frame?{frame:framed.frame}:{}),...(titled.title?{title:titled.title}:{}),warnings},

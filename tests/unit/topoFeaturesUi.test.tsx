@@ -132,13 +132,16 @@ describe('the board overlay in edit mode',()=>{
   fake=installFakeMapLibre();
  },HEAVY);
 
- it('is reachable from the app, like the ornament: a nav button in, and back out',()=>{
+ it('is reachable from the app, like the ornament: a nav button in, and back out',async()=>{
   // The lake tool's own map needs more of MapLibre than the shared fake has; the app is rendered as
   // generateFailureUi.test.tsx renders it, with no map runtime.
   fake.uninstall();
   render(<App/>);
   fireEvent.click(screen.getByRole('button',{name:'Topo Map Builder →'}));
-  expect(screen.getByRole('heading',{name:'Topographic Map Builder'})).toBeTruthy();
+  // Phase 0 backlog item 5: TopoPage is code-split (React.lazy) off the initial bundle, so it
+  // arrives via a dynamic import — findByRole (which polls) rather than getByRole (which doesn't)
+  // waits out that async chunk load instead of asserting before it resolves.
+  expect(await screen.findByRole('heading',{name:'Topographic Map Builder'})).toBeTruthy();
   expect(screen.getByRole('button',{name:'Generate terrain'})).toBeTruthy();
   fireEvent.click(screen.getByRole('button',{name:'← Back'}));
   expect(screen.queryByRole('heading',{name:'Topographic Map Builder'})).toBeNull();

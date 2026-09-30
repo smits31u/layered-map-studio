@@ -1,5 +1,5 @@
 import type {MultiPolygonMm} from '../../geometry/shoreline/polygonEngine';
-import {getLoadedFont} from '../../text/fontRegistry';
+import {getFontLoadError,getLoadedFont} from '../../text/fontRegistry';
 import {textPathData} from '../../text/textVector';
 import {ARC_TOLERANCE_MM,circle} from '../geometry/circle';
 import type {FeatureGeometryResult} from '../geometry/featureGeometry';
@@ -255,8 +255,14 @@ export function buildOrnamentPieces(input:PieceSetInput):OrnamentPieceSet{
   const text=labelPath(`${piece.label} · ${project.ornament.diameterMm.toFixed(1)}mm`,centreX,labelBaselineY);
   if(text)labels.push(text);
  }
- if(!labels.length&&pieces.length)
-  warnings.push(issue('labels-unavailable','warning','The label font is still loading, so the non-production labels were left out of the export.'));
+ if(!labels.length&&pieces.length){
+  // A genuine load failure (bad URL, corrupt file, network error) is a different, actionable
+  // state from the font simply not having arrived yet -- previously both looked identical here.
+  const loadError=getFontLoadError('inter');
+  warnings.push(loadError
+   ?issue('labels-unavailable','warning',`The label font failed to load (${loadError.message}), so the non-production labels were left out of the export.`)
+   :issue('labels-unavailable','warning','The label font is still loading, so the non-production labels were left out of the export.'));
+ }
 
  const groups:ExportGroup[]=[
   group('piece/base/cut','base','cut',place(baseCut,'base'),[],true,true),

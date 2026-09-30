@@ -43,6 +43,16 @@ export function createDiskTileCache(directory:string,options:DiskTileCacheOption
  let index:Map<string,{bytes:number;mtimeMs:number}>|undefined;
  let total=0;
  let tempCounter=0;
+ // Serializes the buildIndex-through-evict critical section of `set()` so concurrent set() calls
+ // on this cache instance can't race (e.g. two calls both seeing `index` undefined and both
+ // rebuilding it, or two evictions mis-accounting `total` against each other). `get()` stays
+ // lock-free: it only ever reads a file that a prior write already renamed atomically into place.
+ let lockTail:Promise<void>=Promise.resolve();
+ const withLock=<T>(fn:()=>Promise<T>):Promise<T>=>{
+  const result=lockTail.then(fn,fn);
+  lockTail=result.then(()=>undefined,()=>undefined);
+  return result;
+ };
 
  const buildIndex=async()=>{
   index=new Map();total=0;
@@ -77,12 +87,14 @@ export function createDiskTileCache(directory:string,options:DiskTileCacheOption
    await mkdir(join(directory,String(tile.z),String(tile.x)),{recursive:true});
    await writeFile(temp,bytes);
    await rename(temp,path);
-   if(!index)await buildIndex();
-   const previous=index!.get(path);
-   if(previous)total-=previous.bytes;
-   index!.set(path,{bytes:bytes.length,mtimeMs:Date.now()});
-   total+=bytes.length;
-   await evict();
+   await withLock(async()=>{
+    if(!index)await buildIndex();
+    const previous=index!.get(path);
+    if(previous)total-=previous.bytes;
+    index!.set(path,{bytes:bytes.length,mtimeMs:Date.now()});
+    total+=bytes.length;
+    await evict();
+   });
   },
  };
 }

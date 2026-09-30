@@ -24,6 +24,8 @@ import {downloadFiles,PROJECT_MIME,SVG_MIME} from '../../ornament/export/downloa
 import {exportTopo} from '../export/exportTopo';
 import {topoPreflightSummary,type TopoPreflightReport} from '../export/preflight';
 import {useTerrainGeneration,type GenerationStage,type TerrainGenerationDeps} from './useTerrainGeneration';
+import {Slider} from '../../components/ui/Slider';
+import {ThemeToggle} from '../../components/ui/ThemeToggle';
 import './topo.css';
 
 // The topographic laser-map builder (docs/CLAUDE_TOPO_MAP_BUILD_PLAN.md).
@@ -69,9 +71,9 @@ function DimensionField({label,valueMm,unit,onCommit}:{label:string;valueMm:numb
  return <label>{label}<span className="topo-dimension"><input type="number" aria-label={`${label} (${unit})`} inputMode="decimal" step={unit==='in'?.125:1} value={draft??shown} onChange={e=>setDraft(e.target.value)} onBlur={commit} onKeyDown={e=>{if(e.key==='Enter')commit()}}/>{unit}</span></label>;
 }
 
-// A slider over one of TOPO_LIMITS' ranges, with its value shown beside it.
-function RangeField({label,unit,limit,value,onChange}:{label:string;unit:string;limit:NumericLimit;value:number;onChange:(value:number)=>void}){
- return <label>{label} <span className="topo-zoom"><input type="range" aria-label={label} min={limit.min} max={limit.max} step={limit.step} value={value} onChange={e=>onChange(+e.target.value)}/><output>{fmt(value,2)}{unit==='×'?'×':` ${unit}`}</output></span></label>;
+// A slider over one of TOPO_LIMITS' ranges, with its value shown beside it: the shared Slider.
+function RangeField({label,unit,limit,value,onChange,disabled}:{label:string;unit:string;limit:NumericLimit;value:number;onChange:(value:number)=>void;disabled?:boolean}){
+ return <Slider label={label} min={limit.min} max={limit.max} step={limit.step} value={value} disabled={disabled} onChange={onChange} format={v=>`${fmt(v,2)}${unit==='×'?'×':unit?` ${unit}`:''}`}/>;
 }
 
 // Same commit-on-blur behaviour for a coverage percentage.
@@ -101,11 +103,13 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
  useEffect(()=>{mounted.current=true;return ()=>{mounted.current=false}},[]);
  const {state:generation,generate,cancel}=useTerrainGeneration(terrainDeps);
  // Fonts load asynchronously; the overlay reads them synchronously (getLoadedFont) and is rebuilt
- // once each one arrives.
+ // once each one arrives -- or once one fails, so a genuine failure (getFontLoadError) reaches the
+ // overlay's warnings instead of the UI being stuck showing "still loading" forever.
  const [fontTick,setFontTick]=useState(0);
  useEffect(()=>{
   let live=true;
-  for(const id of new Set<FontId>(['inter',project.title.fontId]))if(!getLoadedFont(id))loadFont(id).then(()=>{if(live)setFontTick(t=>t+1)},()=>undefined);
+  const bump=()=>{if(live)setFontTick(t=>t+1)};
+  for(const id of new Set<FontId>(['inter',project.title.fontId]))if(!getLoadedFont(id))loadFont(id).then(bump,bump);
   return ()=>{live=false};
  },[project.title.fontId]);
  const fit=(bounds:[number,number,number,number])=>setFitRequest(previous=>({bounds,token:(previous?.token??0)+1}));
@@ -221,28 +225,34 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
  };
  const progressText=working&&generation.stage?`${STAGE_LABELS[generation.stage]}${generation.stage==='download'&&generation.total?` (${generation.done}/${generation.total})`:''}…`:'';
 
- return <main className="topo-page">
+ // The design system's sidebar (styles/studio.css), as in the lake tool: the product wordmark over
+ // this tool's name, the numbered steps scrolling beneath, and the export pinned to the foot.
+ return <main className="studio topo-page">
   <aside>
-   <h1>Topographic Map Builder</h1>
-   {onExit&&<button onClick={onExit}>← Back</button>}
-   <details open><summary>1. Place</summary>
+   <header className="studio-brand">
+    <div className="studio-wordmark">Layered Map Studio</div>
+    <h1 className="studio-tool">Topographic Map Builder</h1>
+    {onExit&&<button className="btn-quiet studio-back" onClick={onExit}>← Back</button>}
+   </header>
+   <div className="sidebar-scroll">
+   <details open><summary>1. Place</summary><div className="section-body">
     <PlaceSearch selectedLabel={project.viewport.selectedPlaceLabel} hint="Search for the place this map is of." onSelect={(candidate,fitToResult)=>{
      dispatch({type:'selectPlace',label:candidate.label,center:candidate.coordinates});
      if(fitToResult&&candidate.boundingBox)fit(candidate.boundingBox);
     }}/>
-   </details>
-   <details open><summary>2. Board size</summary>
+   </div></details>
+   <details open><summary>2. Board size</summary><div className="section-body">
     <div className="topo-segmented" role="group" aria-label="Units">
      {(['in','mm'] as const).map(value=><button key={value} type="button" aria-pressed={unit===value} className={unit===value?'active':''} onClick={()=>dispatch({type:'setDisplayUnit',value})}>{value==='in'?'Inches':'Millimetres'}</button>)}
     </div>
     <DimensionField label="Width" valueMm={output.widthMm} unit={unit} onCommit={widthMm=>dispatch({type:'setOutput',patch:{widthMm}})}/>
     <DimensionField label="Height" valueMm={output.heightMm} unit={unit} onCommit={heightMm=>dispatch({type:'setOutput',patch:{heightMm}})}/>
     <small>{fmt(output.widthMm,3)} × {fmt(output.heightMm,3)} mm. Allowed {min}–{max} mm ({fmt(mmToInches(min),2)}–{fmt(mmToInches(max),2)} in); values outside are clamped.</small>
-   </details>
-   <details open><summary>3. Map zoom</summary>
-    <label>Zoom <span className="topo-zoom"><input type="range" aria-label="Zoom" disabled={mode==='edit'} min={TOPO_LIMITS.zoom.min} max={TOPO_LIMITS.zoom.max} step={TOPO_LIMITS.zoom.step} value={project.viewport.zoom} onChange={e=>dispatch({type:'setZoom',value:+e.target.value})}/><output>{fmt(project.viewport.zoom,2)}</output></span></label>
-   </details>
-   <details open><summary>4. GPX route</summary>
+   </div></details>
+   <details open><summary>3. Map zoom</summary><div className="section-body">
+    <RangeField label="Zoom" unit="" limit={TOPO_LIMITS.zoom} value={project.viewport.zoom} disabled={mode==='edit'} onChange={value=>dispatch({type:'setZoom',value})}/>
+   </div></details>
+   <details open><summary>4. GPX route</summary><div className="section-body">
     <label>{route?'Replace GPX':'Load GPX'}<input ref={fileInput} type="file" aria-label={route?'Replace GPX file':'Load GPX file'} accept=".gpx,application/gpx+xml,application/xml,text/xml" onChange={e=>loadGpx(e.target.files?.[0])}/></label>
     {route&&<div className="topo-route-summary">
      <span>{route.name??'Unnamed route'} · {route.pointCount.toLocaleString('en-US')} points from the {SOURCE_LABELS[route.source]}</span>
@@ -252,32 +262,32 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
     </div>}
     {gpxNote&&<p className={gpxNote.kind==='error'?'error':'topo-note'} role={gpxNote.kind==='error'?'alert':'status'}>{gpxNote.text}</p>}
     <small>The route is read in your browser and is not saved between sessions; load the file again after a reload.</small>
-   </details>
-   <details open><summary>5. Terrain</summary>
+   </div></details>
+   <details open><summary>5. Terrain</summary><div className="section-body">
     <div className="topo-segmented" role="group" aria-label="Terrain layers">
      {([1,2,3,4] as const).map(value=><button key={value} type="button" aria-pressed={terrain.layerCount===value} className={terrain.layerCount===value?'active':''} onClick={()=>dispatch({type:'setTerrain',patch:{layerCount:value}})}>{value} {value===1?'layer':'layers'}</button>)}
     </div>
     {([2,3,4] as const).filter(k=>k<=terrain.layerCount).map(k=><PercentField key={k} label={`Layer ${k} coverage`} value={terrain.coveragePercent[k-1]} onCommit={value=>{const next=[...terrain.coveragePercent];next[k-1]=value;dispatch({type:'setTerrain',patch:{coveragePercent:next}})}}/>)}
     <label>Contours<input type="checkbox" aria-label="Contours" checked={terrain.contoursEnabled} onChange={e=>dispatch({type:'setTerrain',patch:{contoursEnabled:e.target.checked}})}/></label>
     <label>Contour density<select aria-label="Contour density" disabled={!terrain.contoursEnabled} value={terrain.contourCount} onChange={e=>dispatch({type:'setTerrain',patch:{contourCount:Number(e.target.value) as TopoProject['terrain']['contourCount']}})}>{TOPO_CONTOUR_COUNTS.map(n=><option key={n} value={n}>{CONTOUR_LABELS[n]}</option>)}</select></label>
-    <label>Smoothing <span className="topo-zoom"><input type="range" aria-label="Smoothing" min={0} max={MAX_SMOOTHING_RADIUS/2} step={1} value={smoothingRadius} onChange={e=>setSmoothingRadius(+e.target.value)}/><output>{smoothingRadius}</output></span></label>
+    <Slider label="Smoothing" min={0} max={MAX_SMOOTHING_RADIUS/2} step={1} value={smoothingRadius} onChange={setSmoothingRadius}/>
     <small>Layer 1 is all land on the board. Each further layer covers the highest share of it you set, and must not cover more than the layer below.</small>
-   </details>
-   <details open><summary>6. Roads</summary>
+   </div></details>
+   <details open><summary>6. Roads</summary><div className="section-body">
     <label>Roads<input type="checkbox" aria-label="Roads" checked={project.roads.enabled} onChange={e=>dispatch({type:'setRoads',patch:{enabled:e.target.checked}})}/></label>
     <div className="topo-segmented" role="group" aria-label="Road detail">
      {(['low','medium','high'] as const).map(value=><button key={value} type="button" aria-pressed={project.roads.detail===value} className={project.roads.detail===value?'active':''} onClick={()=>dispatch({type:'setRoads',patch:{detail:value}})}>{DETAIL_LABELS[value]}</button>)}
     </div>
     <RangeField label="Road thickness" unit="×" limit={TOPO_LIMITS.roadThicknessScale} value={project.roads.thicknessScale} onChange={thicknessScale=>dispatch({type:'setRoads',patch:{thicknessScale}})}/>
     <small>Widths are physical millimetres, not screen pixels: at {fmt(project.roads.thicknessScale,2)}× a residential street on this board is {fmt(roadWidthMm('minor',{diameterMm:Math.min(output.widthMm,output.heightMm),widthScale:project.roads.thicknessScale}),2)} mm wide and a motorway {fmt(roadWidthMm('motorway',{diameterMm:Math.min(output.widthMm,output.heightMm),widthScale:project.roads.thicknessScale}),2)} mm. Bridge tabs are as wide as their road, so this also sets how sturdy bridges are; 1× is the standard width table.</small>
-   </details>
-   <details open><summary>7. Labels</summary>
+   </div></details>
+   <details open><summary>7. Labels</summary><div className="section-body">
     <label>Place names<input type="checkbox" aria-label="Place names" checked={project.labels.enabled} onChange={e=>dispatch({type:'setLabels',patch:{enabled:e.target.checked}})}/></label>
     <label>Points of interest<input type="checkbox" aria-label="Points of interest" checked={project.labels.poiEnabled} onChange={e=>dispatch({type:'setLabels',patch:{poiEnabled:e.target.checked}})}/></label>
     <RangeField label="Label size" unit="mm" limit={TOPO_LIMITS.labelSizeMm} value={project.labels.sizeMm} onChange={sizeMm=>dispatch({type:'setLabels',patch:{sizeMm}})}/>
     <small>Points of interest (bus stops, shops, parks) are off by default: on a busy board they crowd out the place names.</small>
-   </details>
-   <details open><summary>8. Frame and title</summary>
+   </div></details>
+   <details open><summary>8. Frame and title</summary><div className="section-body">
     <label>Frame<input type="checkbox" aria-label="Frame" checked={project.frame.enabled} onChange={e=>dispatch({type:'setFrame',patch:{enabled:e.target.checked}})}/></label>
     <RangeField label="Frame thickness" unit="mm" limit={TOPO_LIMITS.frameThicknessMm} value={project.frame.thicknessMm} onChange={thicknessMm=>dispatch({type:'setFrame',patch:{thicknessMm}})}/>
     <label>Title<input type="text" aria-label="Title" maxLength={200} value={project.title.text} onChange={e=>dispatch({type:'setTitle',patch:{text:e.target.value}})}/></label>
@@ -287,25 +297,28 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
      <input type="number" aria-label="Title offset X (mm)" step={TOPO_LIMITS.titleOffsetMm.step} value={project.title.dxMm} onChange={e=>dispatch({type:'setTitle',patch:{dxMm:Number(e.target.value)}})}/>
      <input type="number" aria-label="Title offset Y (mm)" step={TOPO_LIMITS.titleOffsetMm.step} value={project.title.dyMm} onChange={e=>dispatch({type:'setTitle',patch:{dyMm:Number(e.target.value)}})}/>mm</span></label>
     <small>The title sits at the bottom centre, inside the frame; the offset moves it from there.</small>
-   </details>
-   <div className="topo-export">
-    <button type="button" className="topo-primary" disabled={!canExport} onClick={onExport}>{exportState.busy?'Exporting…':'Export SVG + project'}</button>
+   </div></details>
+   <button type="button" className="topo-reset btn-quiet" onClick={()=>{dispatch({type:'reset'});setGpxNote(undefined);setSmoothingRadius(DEFAULT_SMOOTHING_RADIUS)}}>Reset to defaults</button>
+   </div>
+   {/* Pinned to the foot of the sidebar and always open: the summary only titles it. */}
+   <details open className="action-panel topo-export"><summary onClick={e=>e.preventDefault()}>Export</summary>
+    <button type="button" className="btn-primary" disabled={!canExport} onClick={onExport}>{exportState.busy?'Exporting…':'Export SVG + project'}</button>
     {!canExport&&!exportState.busy&&<small>{mode!=='edit'||!result?'Generate terrain first; the export is built from it.':'Wait for the terrain to finish.'}</small>}
     {exportState.message&&<p className={exportState.ok?'topo-note':'error'} role={exportState.ok?'status':'alert'} data-testid="topo-export-status">{exportState.message}</p>}
     {exportState.report&&exportState.report.findings.length>0&&<ul className="topo-preflight" data-testid="topo-preflight" aria-label="Preflight findings">
      {[...exportState.report.findings].sort((a,b)=>a.severity===b.severity?0:a.severity==='error'?-1:1).map((f,i)=><li key={i} className={f.severity} data-code={f.code}><strong>{f.severity==='error'?'Blocks export':'Warning'}:</strong> {f.message}</li>)}
     </ul>}
-   </div>
-   <button type="button" className="topo-reset" onClick={()=>{dispatch({type:'reset'});setGpxNote(undefined);setSmoothingRadius(DEFAULT_SMOOTHING_RADIUS)}}>Reset to defaults</button>
+   </details>
   </aside>
   <section className="workspace">
    {mode==='map'?<>
     <nav>
      <span className="topo-mode">Map mode</span>
-     <button type="button" className="topo-primary" disabled={capturing} onClick={()=>void startGeneration()}>Generate terrain</button>
+     <button type="button" className="btn-primary" disabled={capturing} onClick={()=>void startGeneration()}>Generate terrain</button>
      {capturing&&<span className="topo-progress" role="status">Capturing water, roads and labels…</span>}
      {viewError&&<span className="error" role="alert">{viewError}</span>}
      <span className="topo-attribution">Map © OpenStreetMap contributors · OpenFreeMap</span>
+     <ThemeToggle/>
     </nav>
     <TopoMap center={project.viewport.center} zoom={project.viewport.zoom} widthMm={output.widthMm} heightMm={output.heightMm} route={route} fitRequest={fitRequest} handleRef={mapHandle} onViewportChange={view=>dispatch({type:'setViewport',...view})}/>
    </>:<>
@@ -315,6 +328,7 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
      {working&&<button type="button" onClick={cancel}>Cancel</button>}
      <span className="topo-progress" role="status" aria-live="polite">{progressText}</span>
      <span className="topo-attribution">Elevation: Terrain Tiles (Mapzen, AWS Open Data) · Map © OpenStreetMap contributors</span>
+     <ThemeToggle/>
     </nav>
     <div className="topo-edit">
      {boardChanged&&<p className="topo-banner" role="status">The board size changed after this terrain was generated. Go back to the map and generate again to use the new size.</p>}
@@ -335,7 +349,7 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
       {result.waterMetrics&&<div><dt>Water</dt><dd>{fmt(result.waterMetrics.areaMm2/(result.widthMm*result.heightMm)*100,1)}% of the board, cut from every layer</dd></div>}
       <div><dt>Source</dt><dd>{result.grid.tileCount} tiles at zoom {result.grid.tileZoom} · {result.grid.columns}×{result.grid.rows} samples · {Math.round(result.durationMs)} ms</dd></div>
       {capture&&<div><dt>Captured</dt><dd>{capture.features.water.length} water · {capture.features.roads.length.toLocaleString('en-US')} roads ({capture.features.counts.duplicateRoads.toLocaleString('en-US')} duplicates removed) · {capture.labels.length} labels</dd></div>}
-      {project.roads.enabled&&<div><dt>Roads</dt><dd>{fabrication.roads?`${fmt(fabrication.roads.metrics.finalAreaMm2,0)} mm² engraved, ${fabrication.roads.metrics.widthGroups} widths ${fabrication.roads.metrics.widthsMm.map(w=>fmt(w,2)).join('/')} mm`:'building…'}</dd></div>}
+      {project.roads.enabled&&<div><dt>Roads</dt><dd>{fabrication.roads?`${fmt(fabrication.roads.metrics.finalAreaMm2,0)} mm² engraved, ${fabrication.roads.metrics.widthGroups} widths ${fabrication.roads.metrics.widthsMm.map(w=>fmt(w,2)).join('/')} mm`:fabrication.error?<span className="topo-fabrication-error" role="alert">Could not build road geometry: {fabrication.error}</span>:'building…'}</dd></div>}
       {project.roads.enabled&&fabrication.roads&&fabrication.roads.bridges.spans>0&&<div><dt>Bridges</dt><dd>{fabrication.roads.bridges.spans} span{fabrication.roads.bridges.spans>1?'s':''} kept across water on tabs, {fmt(fabrication.roads.bridges.lengthMm,1)} mm in all{fabrication.roads.bridges.narrowestTabMm!==undefined?`; tabs ${fmt(fabrication.roads.bridges.narrowestTabMm,2)}–${fmt(fabrication.roads.bridges.widestTabMm??fabrication.roads.bridges.narrowestTabMm,2)} mm wide`:''}</dd></div>}
       {overlay?.labels.visible&&overlay.labels.layer&&<div><dt>Labels</dt><dd>{overlay.labels.layer.placed.length} placed</dd></div>}
      </dl>}

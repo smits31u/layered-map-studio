@@ -162,10 +162,22 @@ export function nestedBandLevel(raw:RingMm[],container:MultiPolygonMm,options:Co
  return clip(ClipperLib.ClipType.ctIntersection,polygons,eroded,ClipperLib.PolyFillType.pftNonZero,label,context).filter(polygon=>polygonAreaMm2(polygon)>=options.minComponentAreaMm2);
 }
 
+// Below this, an "outside" area is float/rounding noise rather than a real containment breach,
+// and does not fail the chain. It comes up only with very complex, many-small-island real
+// coastlines: each vertex the ctDifference clip introduces is rounded to the integer grid (see
+// the file-level comment on NESTING_MARGIN_UNITS), which can leave a single-grid-unit sliver —
+// about 1e-6mm² — outside the container at any one boundary crossing. A coastline with hundreds
+// of small islands can have hundreds of such crossings, whose slivers areaMm2 then sums; that
+// accumulation is what this tolerance absorbs. It is picked to comfortably cover that (roughly
+// a thousand single-unit slivers) while staying two orders of magnitude below anything
+// manufacturable — a 0.15mm-kerf-scale feature is already ~0.02mm², twenty times this tolerance —
+// so a real nesting violation, which starts at a full grid cell, is never masked by it.
+export const NESTING_AREA_TOLERANCE_MM2=1e-3;
+
 // Independent check of a chain of levels before it is returned: every coordinate finite, every ring
 // closed, the first level inside the container, and every level inside the one before it, with
-// exactly zero area outside. Throws rather than returning something that would cut a deeper layer
-// outside a shallower one.
+// zero area outside (up to NESTING_AREA_TOLERANCE_MM2 of floating-point noise). Throws rather than
+// returning something that would cut a deeper layer outside a shallower one.
 export function assertLevelChain(levels:readonly {threshold:number;geometry:MultiPolygonMm}[],container:MultiPolygonMm,containerLabel:string,labelOf:(threshold:number)=>string,context='Depth contours'):void{
  let outer=container,outerLabel=containerLabel;
  for(const level of levels){
@@ -178,7 +190,7 @@ export function assertLevelChain(levels:readonly {threshold:number;geometry:Mult
   }
   if(level.geometry.length){
    const outside=areaMm2(clip(ClipperLib.ClipType.ctDifference,level.geometry,toPaths(outer),ClipperLib.PolyFillType.pftEvenOdd,label,context));
-   if(outside>0)throw new Error(`${context}: ${label} extends ${outside}mm² outside ${outerLabel}.`);
+   if(outside>NESTING_AREA_TOLERANCE_MM2)throw new Error(`${context}: ${label} extends ${outside}mm² outside ${outerLabel}.`);
   }
   outer=level.geometry;outerLabel=`the ${level.threshold} level`;
  }

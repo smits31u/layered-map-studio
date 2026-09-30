@@ -1,4 +1,4 @@
-import {useCallback,useEffect,useRef,useState} from 'react';
+import {Suspense,lazy,useCallback,useEffect,useRef,useState} from 'react';
 import {Controls} from './components/controls/Controls';
 import {GeneratedPreview} from './components/preview/GeneratedPreview';
 import {MapViewer} from './map/mapViewer/MapViewer';
@@ -10,8 +10,13 @@ import {buildScene,buildPresentationScene} from './export/buildScene';
 import {getCachedGeometryLayers,type GeometryCache} from './export/geometryCache';
 import {individualSvgsZip,individualZipName,sceneToSvg} from './export/svg/exportSvg';
 import {preloadAllFonts} from './text/fontRegistry';
-import {OrnamentPage} from './ornament/ui/OrnamentPage';
-import {TopoPage} from './topo/ui/TopoPage';
+import {ThemeToggle} from './components/ui/ThemeToggle';
+// Bundle splitting (Phase 0 backlog item 5): the ornament and topo tools are separate manufacturing
+// targets from the lake map (see the `tool` state comment below) and are only ever rendered once the
+// user actually switches to them. Loading them lazily keeps their code — including each tool's own
+// worker bundles and UI — out of the initial chunk instead of shipping all three tools up front.
+const OrnamentPage=lazy(()=>import('./ornament/ui/OrnamentPage').then(m=>({default:m.OrnamentPage})));
+const TopoPage=lazy(()=>import('./topo/ui/TopoPage').then(m=>({default:m.TopoPage})));
 const empty:ExtractedFeatures={water:[],roads:[],places:[]};
 const download=(name:string,data:string|Uint8Array,type='image/svg+xml')=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data as BlobPart],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)};
 // M-LIVE: presentation-tier edits from the Controls sidebar (text/number/select fields) are
@@ -74,8 +79,10 @@ export default function App(){
   rebuildScene(next);
  };
  const loaded=features.water.length+features.roads.length+features.places.length>0;
- // Every hook above has already run, so this early return is stable across renders.
- if(tool==='ornament')return <OrnamentPage onExit={()=>setTool('lake-map')}/>;
- if(tool==='topo')return <TopoPage onExit={()=>setTool('lake-map')}/>;
- return <main><Controls project={project} setProject={setProjectLive} onSelect={select} onGenerate={generate} onExport={exportIt} status={status} generateError={error} counts={{water:features.water.length,roads:features.roads.length,namedRoads:features.roads.filter(r=>r.name).length,places:features.places.length}}/><section className="workspace"><nav><button className={mode==='map'?'active':''} onClick={()=>setMode('map')}>Map Mode</button><button className={mode==='generated'?'active':''} onClick={()=>setMode('generated')}>Generated Map</button><button onClick={()=>setTool('ornament')}>Ornament Studio →</button><button onClick={()=>setTool('topo')}>Topo Map Builder →</button>{error&&<span className="nav-error error" role="alert" title={error}>{error}</span>}</nav>{mode==='map'?<MapViewer project={project} flyTo={fly} onView={m=>setProjectState(p=>({...p,map:m}))} onCrop={crop=>setProjectState(p=>({...p,map:{...p.map,crop}}))} onStatus={setStatus} onFeatures={f=>{setFeatures(f);setScene(undefined);geometryCacheRef.current=undefined;const total=f.water.length+f.roads.length+f.places.length;setStatus(total?`Loaded ${f.water.length} water, ${f.roads.length} roads, ${f.places.length} places`:'No vector features found in the selected crop.')}}/>:<GeneratedPreview scene={scene} featuresLoaded={loaded} project={project} error={error} onCommitOverride={commitOverride}/>}</section></main>;
+ // Every hook above has already run, so this early return is stable across renders. The Suspense
+ // fallback only ever shows for the moment it takes to fetch that tool's chunk on first visit —
+ // once loaded, React caches the lazy component so switching tools again is instant.
+ if(tool==='ornament')return <Suspense fallback={<div className="tool-loading">Loading Ornament Studio…</div>}><OrnamentPage onExit={()=>setTool('lake-map')}/></Suspense>;
+ if(tool==='topo')return <Suspense fallback={<div className="tool-loading">Loading Topo Map Builder…</div>}><TopoPage onExit={()=>setTool('lake-map')}/></Suspense>;
+ return <main className="studio"><Controls project={project} setProject={setProjectLive} onSelect={select} onGenerate={generate} onExport={exportIt} status={status} generateError={error} counts={{water:features.water.length,roads:features.roads.length,namedRoads:features.roads.filter(r=>r.name).length,places:features.places.length}}/><section className="workspace"><nav><div className="nav-tabs" role="group" aria-label="View"><button className={mode==='map'?'active':''} onClick={()=>setMode('map')}>Map Mode</button><button className={mode==='generated'?'active':''} onClick={()=>setMode('generated')}>Generated Map</button></div>{error&&<span className="nav-error error" role="alert" title={error}>{error}</span>}<div className="nav-tools"><button onClick={()=>setTool('ornament')}>Ornament Studio →</button><button onClick={()=>setTool('topo')}>Topo Map Builder →</button></div><ThemeToggle/></nav>{mode==='map'?<MapViewer project={project} flyTo={fly} onView={m=>setProjectState(p=>({...p,map:m}))} onCrop={crop=>setProjectState(p=>({...p,map:{...p.map,crop}}))} onStatus={setStatus} onFeatures={f=>{setFeatures(f);setScene(undefined);geometryCacheRef.current=undefined;const total=f.water.length+f.roads.length+f.places.length;setStatus(total?`Loaded ${f.water.length} water, ${f.roads.length} roads, ${f.places.length} places`:'No vector features found in the selected crop.')}}/>:<GeneratedPreview scene={scene} featuresLoaded={loaded} project={project} error={error} onCommitOverride={commitOverride}/>}</section></main>;
 }

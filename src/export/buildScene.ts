@@ -13,7 +13,7 @@ import {clipPolylineAgainstCircles,keepOutFootprint,pointInsideAnyCircle,type Ke
 import {buildMarkerSceneObjects} from '../geometry/scene/markers';
 import {markerDefinition,markerFootprintRadiusMm,markerPathData} from '../geometry/scene/markerRegistry';
 import {titleBackerPath} from '../geometry/scene/titleBacker';
-import {getLoadedFont} from '../text/fontRegistry';
+import {getFontLoadError,getLoadedFont} from '../text/fontRegistry';
 import {textPathData} from '../text/textVector';
 import type {ManufacturingScene,PhysicalLayer,Shape} from './scene';
 const linePath=(p:{x:number;y:number}[])=>p.map((q,i)=>`${i?'L':'M'}${q.x.toFixed(3)} ${q.y.toFixed(3)}`).join(' ');
@@ -21,8 +21,13 @@ const MAJOR_CLASSES=['motorway','trunk','primary','secondary'];
 
 function requireFont(id:FontId){
  const font=getLoadedFont(id);
- if(!font)throw new Error(`Font "${id}" is still loading — wait a moment and try again.`);
- return font;
+ if(font)return font;
+ // A genuine failure (bad URL, corrupt file, network error) is a different, actionable state
+ // from simply not having arrived yet — surface it rather than telling the user to wait for
+ // something that will never finish.
+ const loadError=getFontLoadError(id);
+ if(loadError)throw new Error(`${loadError.message} — reload the page to retry.`);
+ throw new Error(`Font "${id}" is still loading — wait a moment and try again.`);
 }
 
 // GEOMETRY CHANGE tier (M-LIVE): the expensive part — polygon union/erosion/differencing for
