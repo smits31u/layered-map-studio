@@ -1,0 +1,18 @@
+[
+ {
+  "preset": "semantic",
+  "sha256": "a42672acaba34474ceb9b58881ff0a1769243c381a207d37d39fbeb02e4a1b01",
+  "bytes": 60482,
+  "blocked": false,
+  "findings": [],
+  "neckMm": 3.984
+ },
+ {
+  "preset": "lightburn-colors",
+  "sha256": "331ca04fbac9f93cca51b057164f23dbe1611db68e039b0793f9c3d05c196770",
+  "bytes": 60506,
+  "blocked": false,
+  "findings": [],
+  "neckMm": 3.984
+ }
+]

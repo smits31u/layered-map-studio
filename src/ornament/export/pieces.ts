@@ -3,7 +3,7 @@ import {getFontLoadError,getLoadedFont} from '../../text/fontRegistry';
 import {textPathData} from '../../text/textVector';
 import {ARC_TOLERANCE_MM,circle} from '../geometry/circle';
 import type {FeatureGeometryResult} from '../geometry/featureGeometry';
-import type {OrnamentGeometry,OrnamentIssue} from '../geometry/ornamentShape';
+import {buildThreePieceShapes,type OrnamentGeometry,type OrnamentIssue} from '../geometry/ornamentShape';
 import {normalizeTopology,unionAll} from '../geometry/polygonRepair';
 import type {OrnamentTextLayout} from '../text/ornamentText';
 import type {BuildMode,OrnamentProject} from '../types';
@@ -54,6 +54,12 @@ export type OrnamentGroupId=typeof ORNAMENT_GROUP_ORDER[number];
 // now added by hand in the laser software, per order.
 export type PieceId='base'|'land'|'frame';
 
+// The piece the hanging loop is cut as part of. Classic mode hangs from the frame; water-cutout mode
+// hangs from the backing (the `base` piece), whose solid disk is a far stronger anchor than the
+// frame's hollowed-out rim — see `buildThreePieceShapes`. Preflight measures the neck on whichever
+// piece this names, so the check always follows the loop.
+export const loopPieceFor=(mode:BuildMode):PieceId=>mode==='water-cutout-3-piece'?'base':'frame';
+
 // `engrave-light` is a distinct operation rather than an engrave with a different colour, because it
 // is a distinct machine setting: the water shading on a classic ornament is a shallow raster pass at
 // a fraction of the power the roads get. Merging it into `engrave` would lose that at the one point
@@ -87,11 +93,14 @@ export interface OrnamentSheet{widthMm:number;heightMm:number;marginMm:number;ga
 
 export interface OrnamentPieceSet{
  buildMode:BuildMode;
+ loopPiece:PieceId;
  pieces:PlacedPiece[];
  groups:ExportGroup[];
  sheet:OrnamentSheet;
- // Measured from the emitted base-piece geometry, not from the setting. The exit criterion is about
- // what comes out of the file, so this is what the dimension preflight check compares.
+ // Measured from emitted geometry, not from the setting. The exit criterion is about what comes out
+ // of the file, so this is what the dimension preflight check compares. Classic mode measures the
+ // base; water-cutout mode measures the frame, because there the base also carries the loop and its
+ // bounding box is taller than the ornament by the loop's height.
  finishedDiameterMm:number;
  warnings:OrnamentIssue[];
 }
@@ -177,9 +186,12 @@ export function buildOrnamentPieces(input:PieceSetInput):OrnamentPieceSet{
  const mapPiece:PieceId=cutout?'land':'base';
 
  // ---- local geometry, ornament-centred ------------------------------------------------------
- const baseCut=geometry.outerRadiusMm>0?circle(0,0,geometry.outerRadiusMm,tolerance):[];
+ // Water-cutout mode moves the hanging loop onto the backing; classic mode keeps the plain disk and
+ // the looped frame exactly as before.
+ const threePiece=cutout?buildThreePieceShapes(geometry,tolerance):undefined;
+ const baseCut=threePiece?threePiece.backing:geometry.outerRadiusMm>0?circle(0,0,geometry.outerRadiusMm,tolerance):[];
  const landCut=cutout?(featureGeometry?.landCut??[]):[];
- const frameCut=geometry.frame;
+ const frameCut=threePiece?threePiece.frame:geometry.frame;
  const roads=featureGeometry?.roadsEngrave??[];
  const waterLight=cutout?[]:(featureGeometry?.waterEngrave??[]);
  const registration=registrationDots(geometry,project.land.structuralRingWidthMm,tolerance);
@@ -212,8 +224,14 @@ export function buildOrnamentPieces(input:PieceSetInput):OrnamentPieceSet{
  }));
 
  // Every piece keeps its own origin on one horizontal line, so two pieces that are meant to stack
- // are drawn in register on the sheet. Vertical alignment by bounding box would put the frame's loop
- // level with the base's rim and quietly destroy that.
+ // are drawn in register on the sheet. Vertical alignment by bounding box would put the loop-carrying
+ // piece's loop level with the other pieces' rims and quietly destroy that.
+ //
+ // Spacing follows each piece's own bounds, loop included, so whichever piece carries the loop is
+ // given its height and width: the sheet's top edge is set by the tallest piece (globalMinY), and
+ // the horizontal cursor advances by each piece's full width, which is the loop's width wherever the
+ // loop is wider than the disk. Moving the loop from frame to backing therefore needs no special
+ // case here — the backing's bounds grow and the layout grows with them.
  const globalMinY=Math.min(...measured.map(piece=>piece.localBounds.minY));
  const globalMaxY=Math.max(...measured.map(piece=>piece.localBounds.maxY));
 
@@ -282,10 +300,14 @@ export function buildOrnamentPieces(input:PieceSetInput):OrnamentPieceSet{
  // from three layers inside the boolean engine. Throwing at this point would make that check
  // unreachable for exactly the geometry it exists to catch.
 
- const baseBounds=geometryBounds(place(baseCut,'base'));
- const finishedDiameterMm=baseBounds?Math.max(baseBounds.maxX-baseBounds.minX,baseBounds.maxY-baseBounds.minY):0;
+ // The frame is the full-diameter piece without a loop in water-cutout mode. If it is empty (an
+ // ornament that failed its own checks) the base is measured instead, so the dimension finding
+ // reports the disk rather than a spurious zero alongside the real errors.
+ const diameterPiece:PieceId=cutout&&frameCut.length?'frame':'base';
+ const diameterBounds=geometryBounds(place(diameterPiece==='frame'?frameCut:baseCut,diameterPiece));
+ const finishedDiameterMm=diameterBounds?Math.max(diameterBounds.maxX-diameterBounds.minX,diameterBounds.maxY-diameterBounds.minY):0;
 
- return {buildMode:project.buildMode,pieces,groups,sheet,finishedDiameterMm,warnings};
+ return {buildMode:project.buildMode,loopPiece:loopPieceFor(project.buildMode),pieces,groups,sheet,finishedDiameterMm,warnings};
 }
 
 function group(

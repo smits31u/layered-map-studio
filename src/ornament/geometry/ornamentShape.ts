@@ -105,3 +105,48 @@ export function buildOrnamentGeometry(ornament:OrnamentProject['ornament'],toler
 
  return {frame,mapOpening,textBand,outerRadiusMm,innerRadiusMm,chordYMm,textBandHeightMm,mapOpeningHeightMm,loop,issues};
 }
+
+export type ThreePieceShapes={
+ // The backing / water piece: the solid disk the water shows through, carrying the hanging loop.
+ backing:MultiPolygonMm;
+ // The frame / text piece: the rim and the text band, with no loop.
+ frame:MultiPolygonMm;
+};
+
+// Water-cutout mode moves the hanging loop from the frame to the backing.
+//
+// The frame in that mode is a thin rim joined to the text band, and the rim was where the whole
+// ornament hung from: the loop pulled on the top of a 6mm ring that the map window had already
+// hollowed out. The backing is a solid disk, so hanging from it puts the load path through the
+// widest, most continuous piece in the stack, and the frame becomes purely decorative.
+//
+// The loop itself is unchanged. It is the same circles from `evaluateHangingLoop`, the same
+// configurable overlap, and the same minimum neck width, and `buildOrnamentGeometry` has already
+// refused anything that fails those checks — so the backing is built only from a loop that passed.
+// What changes is which piece it is unioned into:
+//
+//   backing = body ∪ loop outer disk − loop hole
+//   frame   = body − loop hole − map window
+//
+// The frame keeps the loop-hole subtraction even though it has no loop. On the default ornament the
+// hole sits wholly above the body and the subtraction removes nothing, so the frame is exactly the
+// ring plus the text band. With a large overlap the hole dips into the rim, and then the frame has
+// to be notched where the backing is, or the stacked frame would cover part of the hole the ribbon
+// goes through. Nothing of the loop's outer disk survives on the frame, so there is no bridge stub.
+//
+// Classic mode never calls this. Its frame is `geometry.frame` and its base is the plain disk,
+// untouched, which is what keeps two-piece output byte-identical.
+export function buildThreePieceShapes(geometry:OrnamentGeometry,toleranceMm=ARC_TOLERANCE_MM):ThreePieceShapes{
+ const body=geometry.outerRadiusMm>0?circle(0,0,geometry.outerRadiusMm,toleranceMm):[];
+ // An ornament that failed its own checks has no frame. The backing falls back to the plain disk,
+ // with no loop on it, so preflight's neck measurement on the backing finds the loop detached and
+ // blocks — the same outcome as classic mode, reached through the piece that now owns the loop.
+ if(!geometry.frame.length)return {backing:body,frame:[]};
+ const {loop}=geometry;
+ const loopOuter=circle(0,loop.centerY,loop.outerRadiusMm,toleranceMm);
+ const loopHole=circle(0,loop.centerY,loop.innerRadiusMm,toleranceMm);
+ const withLoop=boolean('backing loop union',()=>polygonClipping.union(body,loopOuter) as MultiPolygonMm);
+ const backing=boolean('backing loop hole',()=>polygonClipping.difference(withLoop,loopHole) as MultiPolygonMm);
+ const frame=boolean('three-piece frame',()=>polygonClipping.difference(body,loopHole,geometry.mapOpening) as MultiPolygonMm);
+ return {backing,frame};
+}

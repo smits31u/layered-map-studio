@@ -6,7 +6,7 @@ import type {OrnamentTextLayout} from '../text/ornamentText';
 import type {OrnamentProject} from '../types';
 import {measureLoopNeck,neckSummary,type NeckMeasurement} from './neck';
 import {thinFeatures} from './morphology';
-import type {ExportGroup,OrnamentGroupId,OrnamentPieceSet} from './pieces';
+import {loopPieceFor,type ExportGroup,type OrnamentGroupId,type OrnamentPieceSet} from './pieces';
 
 // Preflight: everything that has to be true before a file is allowed to reach a machine.
 //
@@ -321,34 +321,42 @@ export function runPreflight(input:PreflightInput):PreflightReport{
   }
  }
 
- // 6 — minimum neck and feature width. The neck is measured on the emitted frame geometry, which is
+ // 6 — minimum neck and feature width. The neck is measured on the emitted geometry of whichever
+ // piece carries the loop — the frame in classic mode, the backing in water-cutout mode — which is
  // the whole argument of neck.ts; the general feature-width sweep runs over every cut piece.
  // Measured on the group geometry exactly as it will be serialised — sheet coordinates and all —
  // with the probes moved to meet it rather than the other way round.
- const framePlacement=pieces.pieces.find(piece=>piece.id==='frame')?.offsetMm;
- const neck=poisoned.has('piece/frame/cut')
+ //
+ // The piece name is substituted into the messages rather than the messages being duplicated per
+ // mode; in classic mode it is "frame", so classic findings read exactly as they always have.
+ const loopPiece=pieces.loopPiece??loopPieceFor(pieces.buildMode);
+ const loopGroupId:OrnamentGroupId=loopPiece==='base'?'piece/base/cut':'piece/frame/cut';
+ const loopPieceName=loopPiece==='base'?'backing':'frame';
+ const loopGroup=loopPiece==='base'?base:frame;
+ const loopPlacement=pieces.pieces.find(piece=>piece.id===loopPiece)?.offsetMm;
+ const neck=poisoned.has(loopGroupId)
   ?unmeasurableNeck(project.ornament.hangingLoop.minNeckWidthMm,geometry.loop.junctionWidthMm,geometry.loop.annulusWidthMm)
   :guard(
-    ()=>measureLoopNeck(frame?.geometry??[],geometry,project.ornament,{offsetMm:framePlacement}),
+    ()=>measureLoopNeck(loopGroup?.geometry??[],geometry,project.ornament,{offsetMm:loopPlacement}),
     unmeasurableNeck(project.ornament.hangingLoop.minNeckWidthMm,geometry.loop.junctionWidthMm,geometry.loop.annulusWidthMm),
     message=>findings.push(finding('minimum-width','error','neck-unmeasurable',
      `The hanging loop's neck could not be measured on the exported geometry (${message}). An unmeasured neck is not an acceptable neck — this blocks the export.`)),
    );
- if(poisoned.has('piece/frame/cut'))
+ if(poisoned.has(loopGroupId))
   findings.push(finding('minimum-width','error','neck-unmeasurable',
-   'The hanging loop\'s neck could not be measured because the frame geometry contains non-finite coordinates. An unmeasured neck is not an acceptable neck — this blocks the export.'));
+   `The hanging loop's neck could not be measured because the ${loopPieceName} geometry contains non-finite coordinates. An unmeasured neck is not an acceptable neck — this blocks the export.`));
  else if(!neck.attachedAtAll)
   findings.push(finding('minimum-width','error','loop-detached-in-export',
-   'The exported frame geometry does not join the hanging loop to the ornament body at all. The loop would cut as a loose ring.'));
+   `The exported ${loopPieceName} geometry does not join the hanging loop to the ornament body at all. The loop would cut as a loose ring.`));
  else if(!neck.meetsMinimum)
   findings.push(finding('minimum-width','error','loop-neck-too-narrow-in-export',
-   `The exported frame joins the hanging loop to the body over only ${neck.measuredMm.toFixed(2)}mm, below the ${neck.requiredMm}mm minimum neck width. Measured on the cut geometry itself. At this width the loop snaps off the finished ornament — increase the loop overlap, widen the loop, or lower the minimum if that is genuinely wanted.`));
+   `The exported ${loopPieceName} joins the hanging loop to the body over only ${neck.measuredMm.toFixed(2)}mm, below the ${neck.requiredMm}mm minimum neck width. Measured on the cut geometry itself. At this width the loop snaps off the finished ornament — increase the loop overlap, widen the loop, or lower the minimum if that is genuinely wanted.`));
  // A wide gap between what the parameters predict and what the polygon measures means one of the two
  // is describing geometry that is not there. Worth saying even when both pass, because the next edit
  // in that direction is the one that fails.
  if(neck.attachedAtAll&&!neck.saturated&&neck.analyticNeckMm>0&&neck.measuredMm<neck.analyticNeckMm*.5)
   findings.push(finding('minimum-width','warning','neck-measurement-disagrees',
-   `The loop's dimensions predict about ${neck.analyticNeckMm.toFixed(2)}mm of connecting material, but the exported geometry measures ${neck.measuredMm.toFixed(2)}mm. The frame polygon is not the shape its parameters describe — treat the measured figure as the real one and check the frame before cutting.`));
+   `The loop's dimensions predict about ${neck.analyticNeckMm.toFixed(2)}mm of connecting material, but the exported geometry measures ${neck.measuredMm.toFixed(2)}mm. The ${loopPieceName} polygon is not the shape its parameters describe — treat the measured figure as the real one and check the ${loopPieceName} before cutting.`));
 
  let measuredMinFeatureWidthMm=minWidthMm;
  for(const group of groups.filter(isCutGroup)){
@@ -361,9 +369,13 @@ export function runPreflight(input:PreflightInput):PreflightReport{
   );
   if(thin.regions>0){
    measuredMinFeatureWidthMm=0;
-   const severity:PreflightSeverity=group.id==='piece/frame/cut'?'error':'warning';
+   // The frame is structural in both modes (it is one ring holding the text band), and in water-cutout
+   // mode the backing is too, because the ornament now hangs from it.
+   const structural=group.id==='piece/frame/cut'||group.id===loopGroupId;
+   const severity:PreflightSeverity=structural?'error':'warning';
+   const structuralNote=group.id==='piece/frame/cut'?' On the frame that is structural.':' On the backing, which carries the hanging loop, that is structural.';
    findings.push(finding('minimum-width',severity,'feature-below-minimum-width',
-    `${group.id} has ${thin.regions} region(s) totalling ${round(thin.areaMm2)}mm² narrower than the ${minWidthMm}mm minimum feature width.${severity==='error'?' On the frame that is structural.':' These are usually thin peninsulas or spits; they are fragile but cuttable.'}`,
+    `${group.id} has ${thin.regions} region(s) totalling ${round(thin.areaMm2)}mm² narrower than the ${minWidthMm}mm minimum feature width.${severity==='error'?structuralNote:' These are usually thin peninsulas or spits; they are fragile but cuttable.'}`,
     thin.geometry[0]?.[0]?.length?[round(thin.geometry[0][0][0][0]),round(thin.geometry[0][0][0][1])]:undefined));
   }
  }

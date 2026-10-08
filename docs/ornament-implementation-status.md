@@ -442,6 +442,53 @@ so a regression that replaced the measurement with `geometry.loop.junctionWidthM
 case sweeps every loop the editor will accept and asserts that each one is either refused or really
 does have the material.
 
+### Product direction change: the hanging loop moved to the backing in three-piece mode
+
+In water-cutout (three-piece) mode the hanging loop is now cut as part of the **backing / water**
+piece (`piece/base/cut`), not the frame. Classic two-piece mode is unchanged.
+
+The reason is structural. The three-piece frame is a 6mm rim with the map window hollowed out of it,
+joined to the text band, and the whole ornament used to hang from the top of that rim. The backing
+is a solid disk, so hanging from it puts the load through the widest, most continuous piece in the
+stack, and the frame becomes decorative.
+
+- **Backing** = body disk ∪ loop outer disk − loop hole (`buildThreePieceShapes` in
+  `geometry/ornamentShape.ts`). It is the same loop: the same circles from `evaluateHangingLoop`,
+  the same configurable overlap, the same minimum neck width. `buildOrnamentGeometry` has already
+  refused any loop that fails those checks, and when it has, the backing falls back to the plain
+  disk so preflight finds the loop detached and blocks.
+- **Frame** = body disk − loop hole − map window: the ring plus the text band. None of the loop's
+  outer disk survives, so there is no bridge stub. The loop-hole subtraction is a no-op on the
+  default ornament, where the hole sits wholly above the body. It is kept so that a large overlap,
+  which dips the hole into the rim, notches the frame where the backing is notched rather than
+  covering part of the hole the ribbon goes through.
+- **Preflight** measures the neck on whichever piece `OrnamentPieceSet.loopPiece` names
+  (`loopPieceFor(mode)` in `export/pieces.ts`): the frame in classic mode, the backing in
+  three-piece mode. The measurement itself (`neck.ts`) is unchanged. The probes are built from the
+  same circles, and the body probe's ring is solid material on the backing just as it is on the
+  frame. On the default ornament the backing measures 3.984mm, the same figure the classic frame
+  measures. The thin-feature sweep now treats the backing as structural (an error, not a warning)
+  in three-piece mode, as it always has the frame. Messages name the piece. In classic mode that
+  name is "frame", so classic findings read exactly as before.
+- **Finished diameter** is measured on the frame in three-piece mode, because the backing's bounding
+  box is now taller than the ornament by the loop's height. Classic mode still measures the base.
+- **Layout** needed no special case. Pieces are spaced by their own bounds, loop included, so the
+  backing's bounds grow by the loop and the sheet grows with them. On the default ornament the sheet
+  is the same size as before, since the loop's height moved from one piece to another rather than
+  being added. The new tests sweep the default, 25mm and 300mm ornaments, plus a loop wider than the
+  disk, and assert that no two pieces overlap and that every piece is inside the margins.
+- **Stack diagram** draws the loop as a ring on the layer that carries it: the frame in classic
+  mode, the backing in three-piece mode. The frame's description reads "no loop" in three-piece mode.
+
+Proof that classic output is byte-identical: `tests/unit/ornamentPieceGolden.test.ts` pins the
+SHA-256 of the whole classic SVG for all four golden fixtures under both presets, plus preflight's
+verdict and finding codes. The goldens were recorded before any source changed and pass unchanged
+after it. The existing feature-geometry goldens are digests of roads, water and land, which never
+reach the pieces, so on their own they could not have shown this. The three-piece sheet goldens
+beside them record each piece's components, holes, area, bounds and offset, so a reviewer can see
+the loop move from frame to backing. Behaviour is pinned in
+`tests/unit/ornamentLoopOnBacking.test.tsx`.
+
 ## Phase 5 — complete
 
 The plan's four hardening items. Marker-related coverage is absent throughout because the feature is

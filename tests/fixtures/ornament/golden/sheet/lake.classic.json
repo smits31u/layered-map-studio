@@ -1,0 +1,22 @@
+[
+ {
+  "preset": "semantic",
+  "sha256": "93eaddf851cbadbb349c5a2e808371dcc55d89b959cad5b7c8542b39b0076f9b",
+  "bytes": 58002,
+  "blocked": false,
+  "findings": [
+   "warning:water-holes-filled"
+  ],
+  "neckMm": 3.984
+ },
+ {
+  "preset": "lightburn-colors",
+  "sha256": "d5b498356031899487eba049595c7bbe1220832c004265b05bd1ab07b23f83b5",
+  "bytes": 58026,
+  "blocked": false,
+  "findings": [
+   "warning:water-holes-filled"
+  ],
+  "neckMm": 3.984
+ }
+]

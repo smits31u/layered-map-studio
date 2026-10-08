@@ -53,6 +53,14 @@ import {erodeGeometry} from './morphology';
 //
 // Both are derived from the same circles the frame was built from, so a frame that does not contain
 // them is itself the finding.
+//
+// ## Which piece
+//
+// "Frame" below means whichever piece the loop is cut as part of — `OrnamentPieceSet.loopPiece`. In
+// classic mode that is the frame; in water-cutout mode it is the backing, a solid disk with the same
+// loop unioned on (see `buildThreePieceShapes`). Nothing here changes between the two: the probes
+// come from the same circles, and the body probe's ring is solid material on the backing just as it
+// is on the frame. Preflight passes in the right piece's geometry and placement.
 
 export interface NeckMeasurement{
  // The largest width, in millimetres, at which the loop is still joined to the body through the

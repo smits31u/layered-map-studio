@@ -1,0 +1,74 @@
+{
+ "sha256": "498a70cd066274c88bc55b0f4a092b48c8b04377293a3ecbc058677854225d10",
+ "bytes": 68348,
+ "loopPiece": "base",
+ "sheetMm": [
+  308.8,
+  124.595
+ ],
+ "finishedDiameterMm": 101.6,
+ "pieces": [
+  {
+   "id": "base",
+   "components": 1,
+   "holes": 1,
+   "areaMm2": 8229.253,
+   "localBounds": [
+    -50.8,
+    -63.795,
+    50.8,
+    50.8
+   ],
+   "offsetMm": [
+    52.8,
+    65.795
+   ]
+  },
+  {
+   "id": "land",
+   "components": 4,
+   "holes": 1,
+   "areaMm2": 2605.49,
+   "localBounds": [
+    -44.8,
+    -44.78,
+    44.8,
+    44.78
+   ],
+   "offsetMm": [
+    154.4,
+    65.795
+   ]
+  },
+  {
+   "id": "frame",
+   "components": 1,
+   "holes": 1,
+   "areaMm2": 3718.958,
+   "localBounds": [
+    -50.8,
+    -50.8,
+    50.8,
+    50.8
+   ],
+   "offsetMm": [
+    256,
+    65.795
+   ]
+  }
+ ],
+ "neck": {
+  "measuredMm": 3.984,
+  "requiredMm": 3,
+  "meetsMinimum": true
+ },
+ "blocked": false,
+ "findings": [
+  "warning:feature-below-minimum-width",
+  "warning:land-disconnected",
+  "warning:land-islands-detected",
+  "warning:land-islands-remaining",
+  "warning:land-islands-unbridged",
+  "warning:water-holes-filled"
+ ]
+}
