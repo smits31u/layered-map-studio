@@ -3,7 +3,7 @@ import {getFontLoadError,getLoadedFont} from '../../text/fontRegistry';
 import {textPathData} from '../../text/textVector';
 import {ARC_TOLERANCE_MM,circle} from '../geometry/circle';
 import type {FeatureGeometryResult} from '../geometry/featureGeometry';
-import {buildThreePieceShapes,type OrnamentGeometry,type OrnamentIssue} from '../geometry/ornamentShape';
+import {buildThreePieceShapes,extendLandToRim,type OrnamentGeometry,type OrnamentIssue} from '../geometry/ornamentShape';
 import {normalizeTopology,unionAll} from '../geometry/polygonRepair';
 import type {OrnamentTextLayout} from '../text/ornamentText';
 import type {BuildMode,OrnamentProject} from '../types';
@@ -190,13 +190,15 @@ export function buildOrnamentPieces(input:PieceSetInput):OrnamentPieceSet{
  // the looped frame exactly as before.
  const threePiece=cutout?buildThreePieceShapes(geometry,tolerance):undefined;
  const baseCut=threePiece?threePiece.backing:geometry.outerRadiusMm>0?circle(0,0,geometry.outerRadiusMm,tolerance):[];
- const landCut=cutout?(featureGeometry?.landCut??[]):[];
+ const capturedLand=cutout?(featureGeometry?.landCut??[]):[];
+ // Extended under the frame's rim to the full diameter, so backing, land and frame stack flush.
+ const landCut=cutout?extendLandToRim(capturedLand,geometry,project.land.structuralRingWidthMm,tolerance):[];
  const frameCut=threePiece?threePiece.frame:geometry.frame;
  const roads=featureGeometry?.roadsEngrave??[];
  const waterLight=cutout?[]:(featureGeometry?.waterEngrave??[]);
  const registration=registrationDots(geometry,project.land.structuralRingWidthMm,tolerance);
 
- if(cutout&&!landCut.length)
+ if(cutout&&!capturedLand.length)
   warnings.push(issue('land-piece-empty','warning','Water-cutout mode is selected but no land geometry was built, so the land piece would be empty. Capture the map geometry first.'));
 
  // ---- pieces and their local extents ---------------------------------------------------------

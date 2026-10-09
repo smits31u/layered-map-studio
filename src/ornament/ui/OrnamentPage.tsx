@@ -3,7 +3,7 @@ import {preloadAllFonts} from '../../text/fontRegistry';
 import type {CaptureResult,CaptureWarning} from '../capture/mapCapture';
 import type {FeatureCapture} from '../capture/featureTypes';
 import {createDefaultOrnamentProject} from '../defaults';
-import {downloadFiles,PROJECT_MIME,SVG_MIME} from '../export/download';
+import {downloadFiles,SVG_MIME} from '../export/download';
 import {exportOrnament} from '../export/exportOrnament';
 import type {PreflightReport} from '../export/preflight';
 import {preflightSummary} from '../export/preflight';
@@ -141,12 +141,12 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
     setStatus(preflightSummary(result.preflight));
     return;
    }
-   const wrote=downloadFiles([
-    {name:result.fileNames.svg,content:result.svg,type:SVG_MIME},
-    {name:result.fileNames.project,content:result.projectJson,type:PROJECT_MIME},
-   ]);
+   // The SVG only. The project .json used to go out alongside it, but nothing in the app reads it
+   // back (the project persists in the browser), and a second download per click was one more file
+   // to throw away — and, before download.ts staggered them, the one that won.
+   const wrote=downloadFiles([{name:result.fileNames.svg,content:result.svg,type:SVG_MIME}]);
    setStatus(wrote
-    ?`Exported ${result.fileNames.svg} and ${result.fileNames.project} · ${preflightSummary(result.preflight)}`
+    ?`Exported ${result.fileNames.svg} · ${preflightSummary(result.preflight)}`
     :'This browser would not accept the download. The geometry passed preflight — try a different browser.');
   }catch(error){
    setPreflight(undefined);

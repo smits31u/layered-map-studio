@@ -6,7 +6,7 @@ import {measureLoopNeck} from '../../src/ornament/export/neck';
 import {PIECE_GAP_MM,SHEET_MARGIN_MM,buildOrnamentPieces,loopPieceFor,type OrnamentPieceSet} from '../../src/ornament/export/pieces';
 import {runPreflight} from '../../src/ornament/export/preflight';
 import {circle} from '../../src/ornament/geometry/circle';
-import {buildOrnamentGeometry,buildThreePieceShapes} from '../../src/ornament/geometry/ornamentShape';
+import {buildOrnamentGeometry,buildThreePieceShapes,extendLandToRim} from '../../src/ornament/geometry/ornamentShape';
 import {geometryAreaMm2,intersect,subtract} from '../../src/ornament/geometry/polygonRepair';
 import {layoutOrnamentText} from '../../src/ornament/text/ornamentText';
 import type {BuildMode,OrnamentProject} from '../../src/ornament/types';
@@ -262,5 +262,61 @@ describe('stack diagram',()=>{
   const {container}=render(<StackDiagram mode="classic-2-piece"/>);
   const looped=[...container.querySelectorAll('[data-loop="true"]')].map(g=>g.getAttribute('data-layer'));
   expect(looped).toEqual(['Frame + text']);
+ });
+});
+
+describe('three-piece mode: backing, land and frame are all the full ornament diameter',()=>{
+ const width=(pieces:OrnamentPieceSet,id:'base'|'land'|'frame')=>{
+  const b=pieces.pieces.find(item=>item.id===id)!.localBounds;
+  return b.maxX-b.minX;
+ };
+
+ it('cuts the land piece at the full diameter, not the map window',()=>{
+  const {project:p,result}=goldenExport('lake','water-cutout-3-piece');
+  const {pieces}=result;
+  expect(width(pieces,'land')).toBeCloseTo(p.ornament.diameterMm,2);
+  expect(width(pieces,'frame')).toBeCloseTo(p.ornament.diameterMm,2);
+  expect(width(pieces,'base')).toBeCloseTo(p.ornament.diameterMm,2);
+ });
+
+ it('keeps the captured land exactly inside the map window, and adds only the band under the rim',()=>{
+  const {geometry}=build('water-cutout-3-piece');
+  const window=circle(0,0,geometry.innerRadiusMm);
+  // Captured land with a lake in it, as the feature pipeline would hand over.
+  const captured=subtract(window,circle(10,5,15),'Captured land');
+  const land=extendLandToRim(captured,geometry,2);
+  // Inside the window: the same land, the lake still open. The visible map is unchanged.
+  expect(geometryAreaMm2(intersect(land,window,'Visible land'))).toBeCloseTo(geometryAreaMm2(captured),2);
+  expect(geometryAreaMm2(intersect(land,circle(10,5,14.9),'Lake'))).toBeLessThan(1e-6);
+  // Outside it: the solid rim band, out to the full diameter.
+  const band=subtract(circle(0,0,geometry.outerRadiusMm),window,'Rim band');
+  expect(geometryAreaMm2(subtract(band,land,'Missing band'))).toBeLessThan(1e-3);
+  expect(land).toHaveLength(1);
+ });
+
+ it('stays empty when nothing was captured, rather than becoming a bare ring',()=>{
+  const {geometry}=build('water-cutout-3-piece');
+  expect(extendLandToRim([],geometry,2)).toEqual([]);
+  const {pieces}=build('water-cutout-3-piece');
+  expect(pieces.pieces.find(item=>item.id==='land')!.cutLocal).toEqual([]);
+  expect(pieces.warnings.map(w=>w.code)).toContain('land-piece-empty');
+ });
+
+ it('notches the land where a deep loop hole dips into the rim, as it does the frame',()=>{
+  const {geometry}=build('water-cutout-3-piece',{hangingLoop:loopWith({overlapMm:6})});
+  const captured=subtract(circle(0,0,geometry.innerRadiusMm),circle(0,0,10),'Captured land');
+  const land=extendLandToRim(captured,geometry,2);
+  const hole=circle(0,geometry.loop.centerY,geometry.loop.innerRadiusMm);
+  expect(geometryAreaMm2(intersect(circle(0,0,geometry.outerRadiusMm),hole,'Hole in body'))).toBeGreaterThan(0);
+  expect(geometryAreaMm2(intersect(land,hole,'Hole on land'))).toBeLessThan(1e-6);
+ });
+
+ it.each(EXTREMES)('reaches the full diameter at %s too',(_label,over)=>{
+  const {geometry}=build('water-cutout-3-piece',over);
+  const captured=circle(0,0,geometry.innerRadiusMm*.5);
+  const land=extendLandToRim(captured,geometry,2);
+  const xs=land.flat(2).map(([x])=>x);
+  // To 0.05mm: the flattened circle sits within the 0.02mm arc tolerance of the true one.
+  expect(Math.max(...xs)-Math.min(...xs)).toBeCloseTo(geometry.outerRadiusMm*2,1);
  });
 });

@@ -150,3 +150,32 @@ export function buildThreePieceShapes(geometry:OrnamentGeometry,toleranceMm=ARC_
  const frame=boolean('three-piece frame',()=>polygonClipping.difference(body,loopHole,geometry.mapOpening) as MultiPolygonMm);
  return {backing,frame};
 }
+
+// The land piece at the full ornament diameter.
+//
+// The feature pipeline builds land inside the map window only: the inner disk less the water, held
+// together by a solid structural ring at its edge. Cut as-is, that piece is 2·innerRadius across —
+// 89.6mm on a 101.6mm ornament — and the stack of backing, land and frame does not line up at the
+// edge. So the land is extended outward, under the frame's rim, to the outer radius. The extension
+// is hidden behind the rim, so nothing visible changes; what changes is that all three pieces are
+// the same diameter and glue flush.
+//
+// The extension starts half a structural ring inside the map window's edge, so the seam falls in
+// material that is already solid rather than on a boundary two polygons approximate differently.
+// The loop hole is subtracted for the same reason it is on the frame: a deep loop overlap dips the
+// hole into the rim, and a land piece covering that would block the hole the ribbon goes through.
+//
+// No captured land means no land piece at all, not a bare ring: the empty-land warning stays the
+// signal that the map has not been captured.
+export function extendLandToRim(landCut:MultiPolygonMm,geometry:OrnamentGeometry,structuralRingWidthMm:number,toleranceMm=ARC_TOLERANCE_MM):MultiPolygonMm{
+ if(!landCut.length||!(geometry.outerRadiusMm>0)||!(geometry.innerRadiusMm>0))return landCut;
+ const seamRadius=Math.max(0,geometry.innerRadiusMm-Math.max(0,structuralRingWidthMm)/2);
+ const body=circle(0,0,geometry.outerRadiusMm,toleranceMm);
+ const rimBand=seamRadius>0
+  ?boolean('land rim band',()=>polygonClipping.difference(body,circle(0,0,seamRadius,toleranceMm)) as MultiPolygonMm)
+  :body;
+ const extended=boolean('land rim union',()=>polygonClipping.union(landCut,rimBand) as MultiPolygonMm);
+ const {loop}=geometry;
+ if(!(loop.innerRadiusMm>0))return extended;
+ return boolean('land loop hole',()=>polygonClipping.difference(extended,circle(0,loop.centerY,loop.innerRadiusMm,toleranceMm)) as MultiPolygonMm);
+}

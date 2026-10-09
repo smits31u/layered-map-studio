@@ -489,6 +489,24 @@ beside them record each piece's components, holes, area, bounds and offset, so a
 the loop move from frame to backing. Behaviour is pinned in
 `tests/unit/ornamentLoopOnBacking.test.tsx`.
 
+### Product direction change: the land piece is the full diameter; Export SVG saves only the SVG
+
+**Land at 4in.** The water-cutout land piece used to be cut at the map window: the inner disk less
+the water, plus its structural ring, 89.6mm across on a 101.6mm (4in) ornament. The owner wants all
+three stacked pieces at the ornament's full diameter so they glue flush. `extendLandToRim`
+(`geometry/ornamentShape.ts`) unions the captured land with a solid band from half a structural ring
+inside the window's edge out to the outer radius, then subtracts the loop hole, as the frame does.
+The band sits behind the frame's rim, so the visible map is unchanged. With no captured land there
+is still no land piece, so the empty-land warning keeps working. The extension happens at layout
+(`pieces.ts`), not in the feature pipeline, so the feature-geometry goldens and the island counts
+are untouched. The three-piece sheet goldens record the land at ±50.8mm, and the sheet is 12mm
+wider. Classic mode has no land piece, and its SVG hashes are unchanged.
+
+**SVG only.** Export SVG no longer downloads the project `.json` beside the SVG. Nothing in the app
+reads it back (the project persists in browser storage), and it was a second file per export. The
+topo builder's button is labelled "Export SVG + project" and still saves both, staggered by
+`download.ts`.
+
 ## Phase 5 — complete
 
 The plan's four hardening items. Marker-related coverage is absent throughout because the feature is

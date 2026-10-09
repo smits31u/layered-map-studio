@@ -1,9 +1,9 @@
 {
- "sha256": "734e76fb759a22a6dd7d52f143ccd37db4d103d388b39a50280afed92220397e",
- "bytes": 71011,
+ "sha256": "9ed26522eb444c4e3eb7998fc1849246ba8f64cc6ebdfe1cb35a82338ffe6377",
+ "bytes": 71108,
  "loopPiece": "base",
  "sheetMm": [
-  308.8,
+  320.8,
   124.595
  ],
  "finishedDiameterMm": 101.6,
@@ -28,15 +28,15 @@
    "id": "land",
    "components": 1,
    "holes": 0,
-   "areaMm2": 6301.61,
+   "areaMm2": 8103.068,
    "localBounds": [
-    -44.8,
-    -44.78,
-    44.8,
-    44.78
+    -50.8,
+    -50.8,
+    50.8,
+    50.8
    ],
    "offsetMm": [
-    154.4,
+    160.4,
     65.795
    ]
   },
@@ -52,7 +52,7 @@
     50.8
    ],
    "offsetMm": [
-    256,
+    268,
     65.795
    ]
   }
