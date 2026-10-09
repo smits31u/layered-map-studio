@@ -168,7 +168,8 @@ describe('the board overlay in edit mode',()=>{
    fireEvent.click(exportButton());
    const status=await screen.findByTestId('topo-export-status',{},{timeout:HEAVY});
    expect(status.textContent).toMatch(/^Exported topo-.+\.svg and topo-.+\.json\. Preflight passed all 8 checks/);
-   expect(names).toHaveLength(2);
+   // The SVG goes out inside the click; the project file follows in a later task (download.ts).
+   await waitFor(()=>expect(names).toHaveLength(2),{timeout:HEAVY});
    expect(names[0]).toMatch(/^topo-37_7881n-122_4097w-228\.6x228\.6mm\.svg$/);
    expect(names[1]).toBe(names[0].replace(/svg$/,'json'));
    const svg=await blobs[0].text();

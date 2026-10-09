@@ -18,7 +18,22 @@ export interface DownloadHost{
  createObjectURL(blob:Blob):string;
  revokeObjectURL(url:string):void;
  createAnchor():Anchor;
+ // Runs `run` after `ms`. Injected so tests can drive the stagger without real timers.
+ schedule?(run:()=>void,ms:number):void;
 }
+
+// Gap between successive downloads from one export.
+//
+// Clicking two download anchors in the same task does not give two downloads in Chromium or Safari:
+// each click starts a navigation-like download, and the second cancels the first. Users got only the
+// last file, which is the project .json, from a button labelled "Export SVG". Each file after the
+// first therefore goes out in its own task, far enough apart that the earlier download has started.
+export const DOWNLOAD_STAGGER_MS=500;
+
+// How long a blob URL outlives its click. Revoking on the next tick (as this used to) can race the
+// browser's read of the blob and produce an empty or failed download. 40s is the delay FileSaver.js
+// uses, and the cost is one export's worth of memory held for that long.
+export const BLOB_REVOKE_DELAY_MS=40_000;
 
 const browserHost=():DownloadHost|undefined=>{
  if(typeof document==='undefined'||typeof URL==='undefined'||typeof URL.createObjectURL!=='function')return undefined;
@@ -26,27 +41,35 @@ const browserHost=():DownloadHost|undefined=>{
   createObjectURL:blob=>URL.createObjectURL(blob),
   revokeObjectURL:url=>URL.revokeObjectURL(url),
   createAnchor:()=>document.createElement('a'),
+  schedule:(run,ms)=>{setTimeout(run,ms)},
  };
 };
 
+function downloadOne(file:DownloadFile,host:DownloadHost,schedule:(run:()=>void,ms:number)=>void):void{
+ const url=host.createObjectURL(new Blob([file.content],{type:file.type}));
+ try{
+  const anchor=host.createAnchor();
+  anchor.href=url;
+  anchor.download=file.name;
+  anchor.rel='noopener';
+  anchor.click();
+ }finally{
+  schedule(()=>host.revokeObjectURL(url),BLOB_REVOKE_DELAY_MS);
+ }
+}
+
 // `host` is optional-with-a-default for the browser, and explicitly nullable so a caller (or a test)
 // can say "there is no host" rather than falling back to one.
+//
+// The first file is clicked synchronously, inside the user's click, so it can never be lost to a
+// popup or multiple-download policy. Callers put the file that matters first: the SVG. Later files
+// follow at DOWNLOAD_STAGGER_MS intervals. A browser that asks "allow multiple downloads?" may hold
+// those back, but it can no longer drop the SVG in their favour.
 export function downloadFiles(files:DownloadFile[],host:DownloadHost|null|undefined=browserHost()):boolean{
  if(!host||!files.length)return false;
- for(const file of files){
-  const url=host.createObjectURL(new Blob([file.content],{type:file.type}));
-  try{
-   const anchor=host.createAnchor();
-   anchor.href=url;
-   anchor.download=file.name;
-   anchor.rel='noopener';
-   anchor.click();
-  }finally{
-   // Revoked on the next turn of the event loop rather than immediately: a synchronous revoke can
-   // race the browser's own read of the blob and produce a zero-byte download.
-   const revoke=()=>host.revokeObjectURL(url);
-   if(typeof setTimeout==='function')setTimeout(revoke,0);else revoke();
-  }
- }
+ const schedule=host.schedule?.bind(host)??((run:()=>void,ms:number)=>{if(typeof setTimeout==='function')setTimeout(run,ms);else run()});
+ const [first,...rest]=files;
+ downloadOne(first,host,schedule);
+ rest.forEach((file,index)=>schedule(()=>downloadOne(file,host,schedule),DOWNLOAD_STAGGER_MS*(index+1)));
  return true;
 }

@@ -1,8 +1,8 @@
-import {describe,expect,it} from 'vitest';
+import {describe,expect,it,vi} from 'vitest';
 import {createDefaultOrnamentProject} from '../../src/ornament/defaults';
 import {buildFeatureGeometry,type FeatureGeometryResult} from '../../src/ornament/geometry/featureGeometry';
 import {buildOrnamentGeometry} from '../../src/ornament/geometry/ornamentShape';
-import {downloadFiles,PROJECT_MIME,SVG_MIME,type DownloadFile,type DownloadHost} from '../../src/ornament/export/download';
+import {BLOB_REVOKE_DELAY_MS,DOWNLOAD_STAGGER_MS,downloadFiles,PROJECT_MIME,SVG_MIME,type DownloadHost} from '../../src/ornament/export/download';
 import {exportFileNames,exportOrnament} from '../../src/ornament/export/exportOrnament';
 import {CUT_STROKE_MM} from '../../src/ornament/export/lightburn';
 import {METADATA_NAMESPACE} from '../../src/ornament/export/metadata';
@@ -263,13 +263,19 @@ describe('ornament SVG export',()=>{
   expect(result.projectJson.endsWith('\n')).toBe(true);
  });
 
- it('hands the browser both files with the right names and types',()=>{
-  const written:DownloadFile[]=[];
+ // Two anchor clicks in one task give one download in Chromium and Safari: the second cancels the
+ // first, so "Export SVG" used to save only the .json. The SVG must be clicked synchronously, inside
+ // the user's gesture, and the project file must wait for a later task.
+ it('hands the browser the SVG at once and the project file in a later task',()=>{
+  const written:string[]=[];
   const revoked:string[]=[];
+  const queue:{run:()=>void;at:number}[]=[];
+  let created=0;
   const host:DownloadHost={
-   createObjectURL:()=>`blob:${written.length}`,
+   createObjectURL:()=>`blob:${created++}`,
    revokeObjectURL:url=>{revoked.push(url)},
-   createAnchor:()=>({href:'',download:'',rel:'',click(){written.push({name:this.download,content:'',type:''})}}),
+   createAnchor:()=>({href:'',download:'',rel:'',click(){written.push(this.download)}}),
+   schedule:(run,ms)=>{queue.push({run,at:ms})},
   };
   const result=runExport('classic-2-piece');
   const ok=downloadFiles([
@@ -278,7 +284,35 @@ describe('ornament SVG export',()=>{
   ],host);
 
   expect(ok).toBe(true);
-  expect(written.map(file=>file.name)).toEqual([result.fileNames.svg,result.fileNames.project]);
+  // Synchronously: the SVG and nothing else.
+  expect(written).toEqual([result.fileNames.svg]);
+  // The project file is queued at the stagger, the SVG's URL is freed long after its click.
+  expect(queue.map(item=>item.at).sort((a,b)=>a-b)).toEqual([DOWNLOAD_STAGGER_MS,BLOB_REVOKE_DELAY_MS]);
+  expect(revoked).toEqual([]);
+
+  queue.splice(queue.findIndex(item=>item.at===DOWNLOAD_STAGGER_MS),1)[0].run();
+  expect(written).toEqual([result.fileNames.svg,result.fileNames.project]);
+
+  for(const item of queue.splice(0))item.run();
+  expect(revoked.sort()).toEqual(['blob:0','blob:1']);
+ });
+
+ it('falls back to real timers when the host cannot schedule, still clicking the first file at once',()=>{
+  vi.useFakeTimers();
+  try{
+   const written:string[]=[];
+   const host:DownloadHost={
+    createObjectURL:()=>'blob:x',
+    revokeObjectURL:()=>{},
+    createAnchor:()=>({href:'',download:'',rel:'',click(){written.push(this.download)}}),
+   };
+   downloadFiles([{name:'a.svg',content:'x',type:SVG_MIME},{name:'a.json',content:'{}',type:PROJECT_MIME}],host);
+   expect(written).toEqual(['a.svg']);
+   vi.advanceTimersByTime(DOWNLOAD_STAGGER_MS);
+   expect(written).toEqual(['a.svg','a.json']);
+  }finally{
+   vi.useRealTimers();
+  }
  });
 
  it('reports rather than throws when a download host is unavailable',()=>{
