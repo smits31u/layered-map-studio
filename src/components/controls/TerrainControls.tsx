@@ -1,4 +1,5 @@
 import type {MapProject} from '../../types/project';
+import {Slider} from '../ui/Slider';
 import {terrainControlsOf} from '../../geometry/shoreline/proceduralDepth';
 import {TERRAIN_PROFILE_NAMES,type SimpleTerrainControls,type TerrainProfileName} from '../../geometry/terrain/terrainParams';
 
@@ -9,12 +10,13 @@ import {TERRAIN_PROFILE_NAMES,type SimpleTerrainControls,type TerrainProfileName
 
 const PROFILE_LABELS:Record<TerrainProfileName,string>={'smooth-basin':'Smooth basin','broad-shelf':'Broad shelf','stepped-benches':'Stepped benches','even-slope':'Even slope'};
 type SliderKey='character'|'bankSteepness'|'weave'|'terracing'|'maxDepth';
-const SLIDERS:{key:SliderKey;label:string;hint:string;min:number}[]=[
- {key:'character',label:'Character',hint:'calm → rugged',min:0},
- {key:'bankSteepness',label:'Bank steepness',hint:'beach → drop-off',min:0},
- {key:'weave',label:'Weave',hint:'directional grain',min:0},
- {key:'terracing',label:'Terracing',hint:'slopes → benches',min:0},
- {key:'maxDepth',label:'Max depth',hint:'how far down the layers the lake reaches',min:.1},
+// Each slider says what its two ends mean, or, where the ends are not opposites, what it controls.
+const SLIDERS:{key:SliderKey;label:string;ends?:readonly [string,string];hint?:string;min:number}[]=[
+ {key:'character',label:'Character',ends:['Calm','Rugged'],min:0},
+ {key:'bankSteepness',label:'Bank steepness',ends:['Beach','Drop-off'],min:0},
+ {key:'weave',label:'Weave',ends:['None','Strong grain'],min:0},
+ {key:'terracing',label:'Terracing',ends:['Slopes','Benches'],min:0},
+ {key:'maxDepth',label:'Max depth',hint:'How far down the depth layers the lake reaches.',min:.1},
 ];
 
 export function TerrainControls({project,patch}:{project:MapProject;patch:(x:Partial<MapProject>)=>void}){
@@ -23,9 +25,9 @@ export function TerrainControls({project,patch}:{project:MapProject;patch:(x:Par
  const shuffle=()=>{const value=new Uint32Array(1);crypto.getRandomValues(value);set({seed:value[0]%1000000})};
  return <div className="terrain-controls">
   <label>Bottom profile <select aria-label="Bottom profile" value={controls.profile} onChange={e=>set({profile:e.target.value as TerrainProfileName})}>{TERRAIN_PROFILE_NAMES.map(name=><option key={name} value={name}>{PROFILE_LABELS[name]}</option>)}</select></label>
-  {SLIDERS.map(({key,label,hint,min})=><label key={key} title={hint}>{label} <span className="terrain-slider"><input type="range" aria-label={label} min={min} max={1} step={.01} value={controls[key]} onChange={e=>set({[key]:+e.target.value} as Partial<SimpleTerrainControls>)}/><output>{Math.round(controls[key]*100)}%</output></span></label>)}
+  {SLIDERS.map(({key,label,ends,hint,min})=><Slider key={key} label={label} min={min} max={1} step={.01} value={controls[key]} ends={ends} hint={hint} format={v=>`${Math.round(v*100)}%`} onChange={v=>set({[key]:v} as Partial<SimpleTerrainControls>)}/>)}
   {controls.weave>0&&<label>Weave angle ° <input type="number" aria-label="Weave angle" min={0} max={179} step={1} value={controls.weaveAngleDeg} onChange={e=>{const v=+e.target.value;if(Number.isFinite(v))set({weaveAngleDeg:v})}}/></label>}
-  <label>Seed <span className="terrain-seed"><input type="number" aria-label="Seed" min={0} step={1} value={controls.seed} onChange={e=>{const v=+e.target.value;if(Number.isFinite(v))set({seed:Math.trunc(v)})}}/><button type="button" onClick={shuffle}>Shuffle</button></span></label>
-  <small>Procedural Terrain is generated artwork shaped by the shoreline, not surveyed depth. Depth panels are cut at evenly spaced depths through the terrain; below 100% Max depth the deepest panels come out empty.</small>
+  <label>Seed <span className="search-row"><input type="number" aria-label="Seed" min={0} step={1} value={controls.seed} onChange={e=>{const v=+e.target.value;if(Number.isFinite(v))set({seed:Math.trunc(v)})}}/><button type="button" onClick={shuffle}>Shuffle</button></span></label>
+  <small className="notice">Procedural Terrain is generated artwork shaped by the shoreline, not surveyed depth. Depth panels are cut at evenly spaced depths through the terrain; below 100% Max depth the deepest panels come out empty.</small>
  </div>;
 }

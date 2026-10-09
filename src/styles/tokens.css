@@ -1,0 +1,252 @@
+/* Layered Map Studio — design tokens.
+   Custom properties only: nothing here styles an element, so defining them changes no screen. A
+   screen opts in to the design system by carrying the `studio` class (studio.css).
+
+   Direction (Ben): red, white and blue read as professional software rather than as a flag — deep
+   navy for ink and chrome, warm paper instead of white, and a muted brick red kept for the one
+   primary action on a screen and for emphasis. Saturated colour is not used broadly.
+
+   Two themes, designed together. Components use only the semantic roles (the second block), never
+   the raw scales, so each theme is one set of role values. Light is the default; dark is a set of
+   its own, not an inversion: navy-black surfaces stepping lighter as they come forward, warm cream
+   ink, and the same brick lifted a step so it keeps its contrast on a dark surface. The theme is
+   chosen by `data-theme` on <html> (src/theme/theme.ts), set before the first render. */
+
+@font-face{font-family:'LMS Display';src:url('/fonts/Cinzel-Regular.ttf') format('truetype');font-display:swap}
+
+:root{
+ /* Navy: ink, app chrome, selection. */
+ --lms-navy-950:#0E1A2B;
+ --lms-navy-900:#15243A;
+ --lms-navy-800:#1E324C;
+ --lms-navy-700:#2B4262;
+ --lms-navy-500:#566B87;
+ --lms-navy-300:#9AA8BB;
+ --lms-navy-100:#DCE2EA;
+ /* Night: the dark theme's surfaces, navy-black stepping lighter toward the viewer. */
+ --lms-night-950:#060A12;
+ --lms-night-900:#0A111C;
+ --lms-night-850:#0F1826;
+ --lms-night-800:#131E2F;
+ --lms-night-700:#1A2840;
+ --lms-night-600:#22334D;
+ --lms-night-500:#2A3B55;
+ --lms-night-400:#3E5474;
+ /* Mist: pale steel, the dark theme's selection and secondary ink. */
+ --lms-mist-400:#7F8FA6;
+ --lms-mist-300:#97A5B8;
+ --lms-mist-200:#B7C6D9;
+ --lms-mist-100:#C6D1DF;
+ /* Paper: warm off-whites — surfaces in light, ink in dark. */
+ --lms-paper-0:#FFFDF9;
+ --lms-paper-50:#FAF7F1;
+ --lms-paper-100:#F3EEE5;
+ --lms-paper-150:#EFE9DF;
+ --lms-paper-200:#E9E2D6;
+ --lms-paper-300:#D6CCBB;
+ /* Brick: the primary action, and emphasis. Used sparingly. 550–300 are its dark-theme lifts. */
+ --lms-brick-700:#7C2A1F;
+ --lms-brick-600:#983829;
+ --lms-brick-550:#A9432F;
+ --lms-brick-500:#AF4A37;
+ --lms-brick-450:#BA523D;
+ --lms-brick-300:#D06A52;
+ --lms-brick-50:#F7E8E3;
+ /* Status: muted, never neon. */
+ --lms-amber-700:#855814;
+ --lms-amber-50:#FAF0DC;
+ --lms-steel-700:#335B78;
+ --lms-steel-50:#E6EEF4;
+ --lms-green-700:#2E6644;
+ --lms-green-50:#E4F0E8;
+
+ /* Type: the bundled Cinzel only for the product wordmark (engraved capitals, the product's own
+    material); the platform UI face for everything else; tabular numerals for measurements. */
+ --lms-font-display:'LMS Display',Georgia,serif;
+ --lms-font-ui:'Segoe UI Variable Text','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif;
+ --lms-font-mono:ui-monospace,'Cascadia Mono','SF Mono',Consolas,monospace;
+ --lms-text-2xs:10.5px;
+ --lms-text-xs:11.5px;
+ --lms-text-sm:12.5px;
+ --lms-text-md:13.5px;
+ --lms-text-lg:15px;
+ --lms-text-xl:18px;
+ --lms-leading:1.45;
+
+ /* Space: a 4 px scale. */
+ --lms-space-1:4px;
+ --lms-space-2:8px;
+ --lms-space-3:12px;
+ --lms-space-4:16px;
+ --lms-space-5:24px;
+ --lms-space-6:32px;
+
+ --lms-radius-sm:4px;
+ --lms-radius-md:6px;
+ --lms-radius-lg:10px;
+ --lms-radius-pill:999px;
+
+ --lms-control-h:34px;
+
+ /* The slider: a large thumb on a ruled track. */
+ --lms-slider-thumb:22px;
+ --lms-slider-track:6px;
+ --lms-duration:120ms;
+}
+
+/* ---- Semantic roles: light (the default) ---- */
+:root,:root[data-theme=light]{
+ --lms-color-scheme:light;
+ --lms-surface-app:var(--lms-paper-200);
+ --lms-surface-panel:var(--lms-paper-100);
+ --lms-surface-raised:var(--lms-paper-0);
+ --lms-surface-sunken:var(--lms-paper-50);
+ --lms-surface-hover:var(--lms-paper-50);
+ /* The manufacturing preview's board: always light, in either theme, because it stands for the
+    material the black cut lines are drawn on. */
+ --lms-artboard:var(--lms-paper-0);
+
+ --lms-chrome:var(--lms-navy-900);
+ --lms-chrome-well:var(--lms-navy-950);
+ --lms-chrome-edge:var(--lms-navy-950);
+ --lms-chrome-ink:var(--lms-navy-100);
+ --lms-chrome-ink-muted:var(--lms-navy-300);
+ --lms-chrome-hover:rgba(255,253,249,.09);
+ --lms-chrome-tab:var(--lms-paper-100);
+ --lms-chrome-tab-ink:var(--lms-navy-900);
+
+ --lms-ink:var(--lms-navy-900);
+ --lms-ink-muted:var(--lms-navy-500);
+ --lms-ink-soft:var(--lms-navy-500);
+ --lms-heading:var(--lms-navy-900);
+ --lms-link:var(--lms-navy-700);
+ --lms-line:var(--lms-paper-300);
+ --lms-line-strong:var(--lms-navy-300);
+
+ --lms-accent:var(--lms-brick-600);
+ --lms-accent-hover:var(--lms-brick-700);
+ --lms-accent-ink:var(--lms-paper-0);
+ --lms-accent-line:var(--lms-brick-500);
+ --lms-accent-shadow:rgba(124,42,31,.3);
+
+ --lms-strong:var(--lms-navy-800);
+ --lms-strong-hover:var(--lms-navy-900);
+ --lms-strong-ink:var(--lms-paper-0);
+ --lms-selected:var(--lms-navy-800);
+ --lms-selected-ink:var(--lms-paper-0);
+ --lms-tint-hover:rgba(30,50,76,.07);
+ --lms-focus:var(--lms-navy-700);
+ --lms-focus-halo:rgba(43,66,98,.18);
+
+ --lms-slider-rest:var(--lms-paper-300);
+ --lms-slider-fill:var(--lms-navy-800);
+ --lms-slider-tick:var(--lms-navy-300);
+ --lms-slider-knob:var(--lms-paper-0);
+ --lms-slider-ring:var(--lms-navy-800);
+ --lms-slider-mark:var(--lms-brick-600);
+ --lms-slider-halo:rgba(30,50,76,.12);
+ --lms-slider-halo-active:rgba(30,50,76,.16);
+
+ --lms-info-bg:var(--lms-steel-50);
+ --lms-info-line:var(--lms-steel-700);
+ --lms-info-ink:var(--lms-steel-700);
+ --lms-warning-bg:var(--lms-amber-50);
+ --lms-warning-line:var(--lms-amber-700);
+ --lms-warning-ink:var(--lms-amber-700);
+ --lms-error-bg:var(--lms-brick-50);
+ --lms-error-line:var(--lms-brick-600);
+ --lms-error-ink:var(--lms-brick-700);
+ --lms-success-bg:var(--lms-green-50);
+ --lms-success-line:var(--lms-green-700);
+ --lms-success-ink:var(--lms-green-700);
+ --lms-success-edge:#BFD8C8;
+
+ --lms-scrim:rgba(14,26,43,.34);
+ --lms-crop-edge:rgba(255,253,249,.9);
+ --lms-select-chevron:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23566B87' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+ --lms-shadow-1:0 1px 2px rgba(14,26,43,.08),0 1px 1px rgba(14,26,43,.04);
+ --lms-shadow-2:0 6px 18px rgba(14,26,43,.14),0 1px 3px rgba(14,26,43,.08);
+ --lms-shadow-up:0 -6px 16px rgba(14,26,43,.08);
+ --lms-shadow-knob:0 1px 3px rgba(14,26,43,.35);
+}
+
+/* ---- Semantic roles: dark ---- */
+:root[data-theme=dark]{
+ --lms-color-scheme:dark;
+ --lms-surface-app:var(--lms-night-850);
+ --lms-surface-panel:var(--lms-night-800);
+ --lms-surface-raised:var(--lms-night-700);
+ --lms-surface-sunken:var(--lms-night-850);
+ --lms-surface-hover:var(--lms-night-600);
+ /* Paper, a shade down from white so the board does not glare against the dark workspace. */
+ --lms-artboard:var(--lms-paper-150);
+
+ --lms-chrome:var(--lms-night-900);
+ --lms-chrome-well:var(--lms-night-950);
+ --lms-chrome-edge:var(--lms-night-700);
+ --lms-chrome-ink:var(--lms-mist-100);
+ --lms-chrome-ink-muted:var(--lms-mist-400);
+ --lms-chrome-hover:rgba(243,238,229,.07);
+ --lms-chrome-tab:var(--lms-navy-700);
+ --lms-chrome-tab-ink:var(--lms-paper-100);
+
+ --lms-ink:var(--lms-paper-100);
+ --lms-ink-muted:var(--lms-mist-300);
+ --lms-ink-soft:var(--lms-mist-400);
+ --lms-heading:var(--lms-paper-50);
+ --lms-link:var(--lms-mist-200);
+ --lms-line:#26364E;
+ --lms-line-strong:var(--lms-night-400);
+
+ /* Brick one step lighter than in light mode: #A9432F under cream text is 5.9:1. */
+ --lms-accent:var(--lms-brick-550);
+ --lms-accent-hover:var(--lms-brick-450);
+ --lms-accent-ink:var(--lms-paper-0);
+ --lms-accent-line:var(--lms-brick-300);
+ --lms-accent-shadow:rgba(0,0,0,.35);
+
+ --lms-strong:var(--lms-navy-700);
+ --lms-strong-hover:#36507A;
+ --lms-strong-ink:var(--lms-paper-0);
+ /* Selection turns pale (cream-on-navy becomes navy-on-mist), so an "on" chip still reads as the
+    brightest thing in its row. */
+ --lms-selected:var(--lms-mist-100);
+ --lms-selected-ink:var(--lms-navy-950);
+ --lms-tint-hover:rgba(198,209,223,.08);
+ --lms-focus:#8FB0D6;
+ --lms-focus-halo:rgba(143,176,214,.25);
+
+ /* The same slider object in both themes: a paper knob with a dark ring and a brick index mark. */
+ --lms-slider-rest:var(--lms-night-500);
+ --lms-slider-fill:var(--lms-mist-100);
+ --lms-slider-tick:var(--lms-night-400);
+ --lms-slider-knob:var(--lms-paper-100);
+ --lms-slider-ring:var(--lms-navy-950);
+ --lms-slider-mark:var(--lms-brick-600);
+ --lms-slider-halo:rgba(198,209,223,.14);
+ --lms-slider-halo-active:rgba(198,209,223,.2);
+
+ --lms-info-bg:#14263A;
+ --lms-info-line:#5B87AB;
+ --lms-info-ink:#9CC0DD;
+ --lms-warning-bg:#2B2213;
+ --lms-warning-line:#B7862F;
+ --lms-warning-ink:#E3B766;
+ --lms-error-bg:#2D1714;
+ --lms-error-line:#C0563F;
+ --lms-error-ink:#E8917D;
+ --lms-success-bg:#13271C;
+ --lms-success-line:#4C9467;
+ --lms-success-ink:#83C79C;
+ --lms-success-edge:#2E5A40;
+
+ --lms-scrim:rgba(4,8,14,.5);
+ --lms-crop-edge:rgba(243,238,229,.85);
+ --lms-select-chevron:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%2397A5B8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+ --lms-shadow-1:0 1px 2px rgba(0,0,0,.35),0 1px 1px rgba(0,0,0,.2);
+ --lms-shadow-2:0 8px 22px rgba(0,0,0,.45),0 1px 3px rgba(0,0,0,.3);
+ --lms-shadow-up:0 -8px 18px rgba(0,0,0,.3);
+ --lms-shadow-knob:0 1px 3px rgba(0,0,0,.5);
+}

@@ -1,0 +1,250 @@
+/* Layered Map Studio — shared components, built on tokens.css.
+   Scoped to `.studio`: a screen opts in by carrying the class, so screens that have not been moved
+   over keep their old look untouched. Pilot: the lake depth tool (App.tsx). */
+
+.studio{font-family:var(--lms-font-ui);font-size:var(--lms-text-md);line-height:var(--lms-leading);color:var(--lms-ink);background:var(--lms-surface-app);-webkit-font-smoothing:antialiased;color-scheme:var(--lms-color-scheme)}
+.studio :focus-visible{outline:2px solid var(--lms-focus);outline-offset:2px}
+
+/* ---- Sidebar: brand, scrolling sections, a fixed action panel ---- */
+.studio aside{background:var(--lms-surface-panel);border-right:1px solid var(--lms-line);padding:0;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.studio .sidebar-scroll{flex:1 1 auto;min-height:0;overflow:auto;padding:0 var(--lms-space-4) var(--lms-space-4)}
+.studio .studio-brand{flex:none;padding:var(--lms-space-4) var(--lms-space-4) var(--lms-space-3);border-bottom:1px solid var(--lms-line)}
+.studio .studio-wordmark{display:block;margin:0;font-family:var(--lms-font-display);font-weight:400;font-size:18px;letter-spacing:.09em;line-height:1.2;color:var(--lms-heading)}
+.studio .studio-tool{display:flex;align-items:center;gap:var(--lms-space-2);margin:var(--lms-space-1) 0 0;font-size:var(--lms-text-2xs);font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--lms-ink-muted)}
+.studio .studio-tool::before{content:'';width:16px;height:2px;background:var(--lms-accent)}
+
+/* Sections: a disclosure with a chevron, the current setting summarised on the right. */
+.studio details{border:0;border-bottom:1px solid var(--lms-line);padding:0}
+.studio summary{list-style:none;display:flex;align-items:center;gap:var(--lms-space-2);margin:0;padding:var(--lms-space-3) 0;font-size:var(--lms-text-md);font-weight:600;color:var(--lms-ink);cursor:pointer;user-select:none}
+.studio summary::-webkit-details-marker{display:none}
+.studio summary::before{content:'';flex:none;width:6px;height:6px;margin:0 3px 0 1px;border-right:1.5px solid var(--lms-ink-soft);border-bottom:1.5px solid var(--lms-ink-soft);transform:rotate(-45deg);transition:transform var(--lms-duration)}
+.studio details[open]>summary::before{transform:rotate(45deg)}
+.studio summary:hover{color:var(--lms-link)}
+.studio .summary-meta{margin-left:auto;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--lms-text-xs);font-weight:400;color:var(--lms-ink-muted)}
+.studio .section-body{display:grid;gap:var(--lms-space-2);padding:0 0 var(--lms-space-4) 18px}
+.studio .group-label{margin:var(--lms-space-5) 0 0;padding-bottom:var(--lms-space-1);border-bottom:1px solid var(--lms-line);font-size:var(--lms-text-2xs);font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--lms-ink-muted)}
+.studio .section-muted>summary{font-weight:500;color:var(--lms-ink-muted);font-size:var(--lms-text-sm)}
+
+/* ---- Fields ---- */
+.studio label{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:var(--lms-space-3);margin:0;font-size:var(--lms-text-sm);color:var(--lms-ink)}
+.studio label.check{display:flex;justify-content:flex-start;gap:var(--lms-space-2);cursor:pointer}
+.studio small,.studio .hint{display:block;font-size:var(--lms-text-xs);line-height:1.45;color:var(--lms-ink-muted)}
+.studio input,.studio select,.studio textarea{font:inherit;font-size:var(--lms-text-sm);color:var(--lms-ink);background:var(--lms-surface-raised);border:1px solid var(--lms-line);border-radius:var(--lms-radius-md);min-height:var(--lms-control-h);padding:0 var(--lms-space-2);transition:border-color var(--lms-duration),box-shadow var(--lms-duration)}
+.studio input:hover,.studio select:hover,.studio textarea:hover{border-color:var(--lms-line-strong)}
+.studio input:focus,.studio select:focus,.studio textarea:focus{outline:none;border-color:var(--lms-focus);box-shadow:0 0 0 3px var(--lms-focus-halo)}
+.studio input[type=number]{width:92px;text-align:right;font-variant-numeric:tabular-nums}
+.studio input[type=text],.studio input:not([type]){width:100%}
+.studio select{appearance:none;-webkit-appearance:none;min-width:148px;padding-right:30px;cursor:pointer;background-image:var(--lms-select-chevron);background-repeat:no-repeat;background-position:right 10px center}
+.studio input[type=checkbox]{width:16px;height:16px;min-height:0;margin:0;padding:0;accent-color:var(--lms-selected);cursor:pointer}
+.studio input[type=file]{padding:6px var(--lms-space-2);font-size:var(--lms-text-xs);min-width:0;width:100%}
+.studio input[type=file]::file-selector-button{font:inherit;font-weight:600;margin-right:var(--lms-space-2);padding:4px 10px;border:1px solid var(--lms-line-strong);border-radius:var(--lms-radius-sm);background:var(--lms-surface-sunken);color:var(--lms-ink);cursor:pointer}
+.studio textarea{width:100%;padding:var(--lms-space-2);font-family:var(--lms-font-mono);font-size:var(--lms-text-xs)}
+.studio .field-stack{display:grid;gap:var(--lms-space-1);grid-template-columns:none}
+.studio .field-pair{display:grid;grid-template-columns:1fr 1fr;gap:var(--lms-space-2)}
+.studio .field-pair label{grid-template-columns:none;gap:var(--lms-space-1)}
+.studio .field-pair input[type=number]{width:100%}
+.studio .search-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--lms-space-2)}
+.studio .readout{font-size:var(--lms-text-xs);color:var(--lms-ink-muted);font-variant-numeric:tabular-nums}
+
+/* Toggle chips: a row of on/off choices (depth layers, place classes). A checkbox under the chip. */
+.studio .toggle-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px}
+.studio .toggle-chip{position:relative;display:flex;align-items:center;justify-content:center;min-height:30px;padding:0 var(--lms-space-2);border:1px solid var(--lms-line);border-radius:var(--lms-radius-md);background:var(--lms-surface-raised);font-size:var(--lms-text-xs);font-weight:600;color:var(--lms-ink-muted);cursor:pointer;transition:background var(--lms-duration),color var(--lms-duration),border-color var(--lms-duration)}
+.studio .toggle-chip input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.studio .toggle-chip:hover{border-color:var(--lms-line-strong);color:var(--lms-ink)}
+.studio .toggle-chip:has(input:checked){background:var(--lms-selected);border-color:var(--lms-selected);color:var(--lms-selected-ink)}
+.studio .toggle-chip:has(input:focus-visible){outline:2px solid var(--lms-focus);outline-offset:2px}
+
+/* Procedural Terrain block inside Depth data. */
+.studio .terrain-controls{display:grid;gap:var(--lms-space-3);margin:var(--lms-space-2) 0;padding:var(--lms-space-1) 0 var(--lms-space-1) var(--lms-space-3);border-left:2px solid var(--lms-line)}
+
+/* ---- Buttons: one primary (brick) per screen, strong (navy), secondary (paper), quiet (text) ---- */
+.studio button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:var(--lms-control-h);padding:0 var(--lms-space-3);font:inherit;font-size:var(--lms-text-sm);font-weight:600;line-height:1.2;color:var(--lms-ink);background:var(--lms-surface-raised);border:1px solid var(--lms-line-strong);border-radius:var(--lms-radius-md);box-shadow:var(--lms-shadow-1);cursor:pointer;transition:background var(--lms-duration),border-color var(--lms-duration),box-shadow var(--lms-duration),transform 60ms}
+.studio button:hover{background:var(--lms-surface-hover);border-color:var(--lms-ink-soft)}
+.studio button:active{transform:translateY(1px)}
+.studio button:disabled{opacity:.5;cursor:not-allowed;box-shadow:none;transform:none}
+.studio .btn-primary{color:var(--lms-accent-ink);background:var(--lms-accent);border-color:var(--lms-accent);box-shadow:0 1px 2px var(--lms-accent-shadow)}
+.studio .btn-primary:hover{background:var(--lms-accent-hover);border-color:var(--lms-accent-hover)}
+.studio .btn-strong,.studio .extract{color:var(--lms-strong-ink);background:var(--lms-strong);border-color:var(--lms-strong)}
+.studio .btn-strong:hover,.studio .extract:hover{background:var(--lms-strong-hover);border-color:var(--lms-strong-hover)}
+.studio .btn-quiet{color:var(--lms-link);background:transparent;border-color:transparent;box-shadow:none;font-weight:500}
+.studio .btn-quiet:hover{background:var(--lms-tint-hover);border-color:transparent}
+.studio .btn-block{width:100%}
+.studio .results{display:grid;gap:4px}
+.studio .results button{justify-content:flex-start;min-height:0;padding:6px var(--lms-space-2);text-align:left;font-size:var(--lms-text-xs);font-weight:400;box-shadow:none;border-color:var(--lms-line)}
+
+/* ---- The slider: a large thumb with an index mark, on a ruled track ---- */
+.studio .slider{display:grid;gap:0}
+.studio .slider-head{display:flex;align-items:center;justify-content:space-between;gap:var(--lms-space-2)}
+.studio .slider-head label{display:block;font-size:var(--lms-text-sm)}
+.studio .slider-value{min-width:50px;padding:1px var(--lms-space-2);text-align:center;font-size:var(--lms-text-xs);font-weight:600;font-variant-numeric:tabular-nums;color:var(--lms-ink);background:var(--lms-surface-raised);border:1px solid var(--lms-line);border-radius:var(--lms-radius-pill)}
+.studio .slider-entry{display:flex;align-items:center;gap:6px}
+.studio .slider-entry input[type=number]{width:78px;min-height:28px;padding:0 6px}
+.studio .slider-entry small{min-width:2ch}
+.studio .slider-ends{display:flex;justify-content:space-between;margin-top:2px;font-size:var(--lms-text-2xs);color:var(--lms-ink-muted)}
+.studio input[type=range]{--r:calc(var(--lms-slider-thumb) / 2);--fill:calc(var(--r) + (100% - 2 * var(--r)) * var(--p,0));-webkit-appearance:none;appearance:none;display:block;width:100%;height:34px;min-height:0;margin:0;padding:0;border:0;border-radius:0;box-shadow:none;cursor:pointer;touch-action:none;
+ /* The rule: eleven ticks, from the thumb's centre at the minimum to its centre at the maximum. */
+ background:repeating-linear-gradient(to right,var(--lms-slider-tick) 0 1px,transparent 1px calc((100% - 1px) / 10)) var(--r) 100% / calc(100% - 2 * var(--r)) 5px no-repeat}
+.studio input[type=range]:focus{outline:none;box-shadow:none}
+.studio input[type=range]::-webkit-slider-runnable-track{height:var(--lms-slider-track);border-radius:var(--lms-radius-pill);background:linear-gradient(to right,var(--lms-slider-fill) 0 var(--fill),var(--lms-slider-rest) var(--fill) 100%)}
+.studio input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:var(--lms-slider-thumb);height:var(--lms-slider-thumb);margin-top:calc((var(--lms-slider-track) - var(--lms-slider-thumb)) / 2);border:2px solid var(--lms-slider-ring);border-radius:50%;background:linear-gradient(var(--lms-slider-mark),var(--lms-slider-mark)) center / 2px 9px no-repeat,var(--lms-slider-knob);box-shadow:var(--lms-shadow-knob);cursor:grab;transition:transform var(--lms-duration),box-shadow var(--lms-duration)}
+.studio input[type=range]:hover::-webkit-slider-thumb{box-shadow:0 0 0 6px var(--lms-slider-halo),var(--lms-shadow-knob)}
+.studio input[type=range]:active::-webkit-slider-thumb{cursor:grabbing;transform:scale(1.1);box-shadow:0 0 0 8px var(--lms-slider-halo-active),var(--lms-shadow-knob)}
+.studio input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px var(--lms-surface-panel),0 0 0 5px var(--lms-focus)}
+.studio input[type=range]::-moz-range-track{height:var(--lms-slider-track);border-radius:var(--lms-radius-pill);background:var(--lms-slider-rest)}
+.studio input[type=range]::-moz-range-progress{height:var(--lms-slider-track);border-radius:var(--lms-radius-pill);background:var(--lms-slider-fill)}
+.studio input[type=range]::-moz-range-thumb{width:var(--lms-slider-thumb);height:var(--lms-slider-thumb);box-sizing:border-box;border:2px solid var(--lms-slider-ring);border-radius:50%;background:linear-gradient(var(--lms-slider-mark),var(--lms-slider-mark)) center / 2px 9px no-repeat,var(--lms-slider-knob);box-shadow:var(--lms-shadow-knob);cursor:grab}
+.studio input[type=range]:active::-moz-range-thumb{cursor:grabbing}
+.studio input[type=range]:focus-visible::-moz-range-thumb{box-shadow:0 0 0 3px var(--lms-surface-panel),0 0 0 5px var(--lms-focus)}
+.studio input[type=range]:disabled{opacity:.45;cursor:not-allowed}
+
+/* ---- Notices and badges: the ornament's issue pattern, shared. A severity label, a rule, a tint ---- */
+.studio .notice{display:grid;gap:2px;margin:0;padding:var(--lms-space-2) var(--lms-space-3);font-size:var(--lms-text-xs);line-height:1.45;color:var(--lms-ink);background:var(--lms-info-bg);border-left:3px solid var(--lms-info-line);border-radius:0 var(--lms-radius-sm) var(--lms-radius-sm) 0}
+.studio .notice[data-severity=warning]{background:var(--lms-warning-bg);border-left-color:var(--lms-warning-line)}
+.studio .notice[data-severity=error],.studio p.error{background:var(--lms-error-bg);border-left-color:var(--lms-error-line)}
+.studio .notice[data-severity=success]{background:var(--lms-success-bg);border-left-color:var(--lms-success-line)}
+.studio .notice-kind{font-size:var(--lms-text-2xs);font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--lms-info-ink)}
+.studio .notice[data-severity=warning] .notice-kind{color:var(--lms-warning-ink)}
+.studio .notice[data-severity=error] .notice-kind{color:var(--lms-error-ink)}
+.studio .notice[data-severity=success] .notice-kind{color:var(--lms-success-ink)}
+.studio .error{color:var(--lms-error-ink)}
+.studio p.error{margin:0;padding:var(--lms-space-2) var(--lms-space-3);font-size:var(--lms-text-xs);border-left:3px solid var(--lms-error-line);border-radius:0 var(--lms-radius-sm) var(--lms-radius-sm) 0}
+.studio .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;font-size:var(--lms-text-2xs);font-weight:700;letter-spacing:.08em;text-transform:uppercase;border-radius:var(--lms-radius-pill);background:var(--lms-info-bg);color:var(--lms-info-ink)}
+
+/* ---- Action panel: always visible at the foot of the sidebar ---- */
+.studio .action-panel{flex:none;display:grid;gap:var(--lms-space-2);padding:0 var(--lms-space-4) var(--lms-space-4);background:var(--lms-surface-raised);border-top:1px solid var(--lms-line);border-bottom:0;box-shadow:var(--lms-shadow-up)}
+.studio .action-panel>summary{cursor:default;padding-bottom:var(--lms-space-1);font-size:var(--lms-text-2xs);font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--lms-ink-muted)}
+.studio .action-panel>summary::before{display:none}
+.studio .action-panel>summary:hover{color:var(--lms-ink-muted)}
+.studio .action-panel label select{min-width:0;width:100%}
+.studio .action-row{display:grid;grid-template-columns:1fr 1.25fr;gap:var(--lms-space-2)}
+.studio .diagnostics{display:flex;flex-wrap:wrap;gap:2px var(--lms-space-3);margin:0;padding:var(--lms-space-2) 0 0;background:none;border-top:1px dashed var(--lms-line);font-size:var(--lms-text-2xs);color:var(--lms-ink-muted);font-variant-numeric:tabular-nums}
+.studio .diagnostics b{flex:1 0 100%;font-size:var(--lms-text-xs);font-weight:600;color:var(--lms-ink)}
+.studio .diagnostics b.error{color:var(--lms-error-ink)}
+
+/* ---- Workspace: a navy app bar over a paper canvas ---- */
+.studio .workspace{background:var(--lms-surface-app)}
+.studio .workspace nav{gap:var(--lms-space-2);padding:0 var(--lms-space-3);background:var(--lms-chrome);color:var(--lms-chrome-ink);border-bottom:1px solid var(--lms-chrome-edge)}
+.studio .workspace nav button{min-height:30px;padding:0 var(--lms-space-3);font-weight:500;color:var(--lms-chrome-ink);background:transparent;border-color:transparent;box-shadow:none}
+.studio .workspace nav button:hover{background:var(--lms-chrome-hover);border-color:transparent}
+.studio .nav-tabs{display:flex;gap:2px;padding:3px;background:var(--lms-chrome-well);border-radius:var(--lms-radius-md)}
+.studio .workspace nav .nav-tabs button{min-height:28px;border-radius:var(--lms-radius-sm)}
+.studio .workspace nav .nav-tabs button.active{color:var(--lms-chrome-tab-ink);background:var(--lms-chrome-tab);font-weight:600}
+.studio .nav-tools{display:flex;gap:2px;margin-left:auto}
+.studio .workspace nav .nav-tools button{font-size:var(--lms-text-xs);color:var(--lms-chrome-ink-muted)}
+.studio .workspace nav .nav-tools button:hover{color:var(--lms-chrome-ink)}
+.studio .nav-error{margin-left:var(--lms-space-2);padding:3px var(--lms-space-2);font-size:var(--lms-text-xs);color:var(--lms-accent-ink);background:var(--lms-accent);border-radius:var(--lms-radius-sm)}
+.studio .nav-error+.nav-tools{margin-left:auto}
+/* Theme toggle: an icon button at the far right of the app bar. */
+.studio .workspace nav .theme-toggle{width:32px;min-height:32px;padding:0;margin-left:var(--lms-space-1);color:var(--lms-chrome-ink-muted);border-radius:var(--lms-radius-pill)}
+.studio .workspace nav .theme-toggle:hover{color:var(--lms-chrome-ink)}
+.studio .workspace nav .theme-toggle svg{display:block}
+
+/* Map mode */
+.studio .crop-frame{border:2px solid var(--lms-accent-line);box-shadow:0 0 0 1px var(--lms-crop-edge),0 0 0 9999px var(--lms-scrim)}
+.studio .mode-badge{padding:4px 10px;font-size:var(--lms-text-2xs);font-weight:700;letter-spacing:.1em;color:var(--lms-ink);background:var(--lms-surface-raised);border:1px solid var(--lms-line);border-radius:var(--lms-radius-pill);box-shadow:var(--lms-shadow-1)}
+.studio .generated-badge{color:var(--lms-success-ink);background:var(--lms-success-bg);border-color:var(--lms-success-edge)}
+.studio .extract{bottom:20px;min-height:40px;padding:0 var(--lms-space-5);box-shadow:var(--lms-shadow-2)}
+.studio .map-error{padding:var(--lms-space-2) var(--lms-space-3);font-size:var(--lms-text-xs);color:var(--lms-ink);background:var(--lms-error-bg);border-left:3px solid var(--lms-error-line);border-radius:0 var(--lms-radius-sm) var(--lms-radius-sm) 0;box-shadow:var(--lms-shadow-1)}
+
+/* Generated map */
+.studio .generated{background:var(--lms-surface-app)}
+.studio .svg-preview svg{background:var(--lms-artboard);box-shadow:var(--lms-shadow-2)}
+.studio .preview-controls,.studio .editor-toolbar{gap:2px;padding:3px;background:var(--lms-surface-raised);border:1px solid var(--lms-line);border-radius:var(--lms-radius-md);box-shadow:var(--lms-shadow-1)}
+.studio .preview-controls button,.studio .editor-toolbar button{min-height:28px;padding:0 var(--lms-space-2);font-size:var(--lms-text-xs);font-weight:500;box-shadow:none;border-color:transparent;background:transparent}
+.studio .preview-controls button.active,.studio .editor-toolbar button.active{color:var(--lms-selected-ink);background:var(--lms-selected)}
+.studio .size-readout,.studio .zoom-readout{font-size:var(--lms-text-xs);font-variant-numeric:tabular-nums;color:var(--lms-ink-muted)}
+.studio .size-readout{padding:3px 10px;background:var(--lms-surface-raised);border:1px solid var(--lms-line);border-radius:var(--lms-radius-pill)}
+.studio .geometry-metrics,.studio .object-editor{color:var(--lms-ink);background:var(--lms-surface-raised);border:1px solid var(--lms-line);border-radius:var(--lms-radius-md);box-shadow:var(--lms-shadow-2)}
+.studio .object-editor small{color:var(--lms-ink-muted)}
+/* The metrics panels share one corner, side by side, instead of stacking on top of each other. */
+.studio .metrics-dock{position:absolute;right:15px;bottom:15px;display:flex;align-items:flex-end;gap:var(--lms-space-2);max-height:45%}
+.studio .metrics-dock:empty{display:none}
+.studio .metrics-dock .geometry-metrics{position:static;max-height:100%}
+.studio .edit-hint{color:var(--lms-info-ink);background:var(--lms-info-bg);border:0;border-left:3px solid var(--lms-info-line);border-radius:0 var(--lms-radius-sm) var(--lms-radius-sm) 0}
+.studio .empty{color:var(--lms-ink-muted)}
+
+
+/* ---- Ornament Studio and the Topographic Map Builder: their own pieces, on the same roles ---- */
+.studio .studio-back{min-height:26px;margin:var(--lms-space-2) 0 0 calc(-1 * var(--lms-space-2));padding:0 var(--lms-space-2);font-size:var(--lms-text-xs)}
+.studio .ornament-field{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:var(--lms-space-3);margin:0}
+.studio .ornament-field>label{font-size:var(--lms-text-sm)}
+.studio .ornament-field input[type=text],.studio .ornament-field select{min-width:148px}
+.studio .ornament-textline{display:grid;gap:var(--lms-space-2);margin:var(--lms-space-1) 0;padding:var(--lms-space-1) 0 var(--lms-space-1) var(--lms-space-3);border-left:2px solid var(--lms-line)}
+.studio .ornament-readout,.studio .ornament-attribution,.studio .ornament-result-meta,.studio .topo-note{margin:0;font-size:var(--lms-text-xs);color:var(--lms-ink-muted)}
+.studio .ornament-reset,.studio .topo-reset{width:100%;margin-top:var(--lms-space-3)}
+/* Place search, shared by both. The field labels stack over full-width inputs. */
+.studio .ornament-search{display:grid;gap:var(--lms-space-2)}
+.studio .ornament-search form{display:grid;gap:var(--lms-space-2)}
+.studio .ornament-search .ornament-field{grid-template-columns:none;gap:var(--lms-space-1)}
+.studio .ornament-search input[type=search],.studio .ornament-search .ornament-field select{width:100%;min-width:0}
+.studio .ornament-check{display:flex;justify-content:flex-start;gap:var(--lms-space-2);margin:0;font-size:var(--lms-text-xs)}
+.studio .ornament-results{list-style:none;margin:0;padding:0;display:grid;gap:var(--lms-space-1)}
+.studio .ornament-results button{width:100%;display:grid;justify-items:start;gap:2px;min-height:0;padding:6px var(--lms-space-2);text-align:left;font-weight:400;box-shadow:none;border-color:var(--lms-line)}
+.studio .ornament-result-label{font-size:var(--lms-text-xs);font-weight:600}
+.studio .ornament-retry{display:grid;gap:var(--lms-space-1);margin:0;font-size:var(--lms-text-xs)}
+.studio .ornament-retry p{margin:0}
+.studio p.ornament-status{margin:0;padding:0;background:none;font-size:var(--lms-text-xs);color:var(--lms-ink-muted)}
+/* The progress live region: quiet at rest, an info notice while busy. */
+.studio .ornament-progress{margin:var(--lms-space-3) 0 var(--lms-space-2);padding:6px 10px;font-size:var(--lms-text-xs);color:var(--lms-ink-muted);background:var(--lms-surface-sunken);border-left:3px solid var(--lms-line-strong);border-radius:0 var(--lms-radius-sm) var(--lms-radius-sm) 0}
+.studio .ornament-progress[aria-busy=true]{color:var(--lms-ink);background:var(--lms-info-bg);border-left-color:var(--lms-info-line)}
+/* The combined status badge, and the issue lists: the shared notice pattern. */
+.studio details.ornament-status{margin:0 0 var(--lms-space-2);padding:0 var(--lms-space-3);font-size:var(--lms-text-xs);color:var(--lms-ink);background:var(--lms-surface-raised);border:1px solid var(--lms-line);border-radius:var(--lms-radius-md)}
+.studio details.ornament-status>summary{margin:0;padding:var(--lms-space-2) 0;font-size:var(--lms-text-sm)}
+.studio details.ornament-status>summary.error{color:var(--lms-error-ink)}
+.studio .ornament-issues{list-style:none;margin:0 0 var(--lms-space-2);padding:0;display:grid;gap:var(--lms-space-1);font-size:var(--lms-text-xs)}
+.studio .ornament-issues li,.studio .topo-preflight li{padding:6px 10px;color:var(--lms-ink);background:var(--lms-warning-bg);border-left:3px solid var(--lms-warning-line);border-radius:0 var(--lms-radius-sm) var(--lms-radius-sm) 0}
+.studio .ornament-issues li.error,.studio .topo-preflight li.error{color:var(--lms-ink);background:var(--lms-error-bg);border-left-color:var(--lms-error-line)}
+.studio .ornament-issue-kind{font-size:var(--lms-text-2xs);font-weight:700;letter-spacing:.08em;color:var(--lms-warning-ink)}
+.studio .ornament-issues li.error .ornament-issue-kind{color:var(--lms-error-ink)}
+.studio .ornament-issues li:not(.error) .ornament-issue-kind{color:var(--lms-warning-ink)}
+.studio .topo-preflight{list-style:none;margin:0;padding:0;display:grid;gap:var(--lms-space-1);font-size:var(--lms-text-xs)}
+/* Segmented choices: a row of chips, the chosen one filled like a selected toggle. */
+.studio .ornament-segmented,.studio .topo-segmented{display:flex;flex-wrap:wrap;gap:var(--lms-space-1);margin:0;padding:0;border:0}
+.studio .ornament-segmented legend{padding:0 0 var(--lms-space-1);font-size:var(--lms-text-xs);color:var(--lms-ink-muted)}
+.studio .ornament-segmented button,.studio .topo-segmented button{flex:1 1 auto;min-height:30px;padding:0 var(--lms-space-2);font-size:var(--lms-text-xs);font-weight:500;box-shadow:none;border-color:var(--lms-line)}
+.studio .ornament-segmented button.active,.studio .topo-segmented button.active{color:var(--lms-selected-ink);background:var(--lms-selected);border-color:var(--lms-selected);font-weight:600}
+/* The stack diagram is interface, not manufacturing output, so it takes the theme. */
+.studio .stack-diagram{margin:0}
+.studio .stack-diagram rect{fill:var(--lms-surface-raised);stroke:var(--lms-line-strong)}
+.studio .stack-diagram text{fill:var(--lms-ink)}
+.studio .stack-diagram ul{margin:var(--lms-space-1) 0 0;font-size:var(--lms-text-2xs);color:var(--lms-ink-muted)}
+/* Topo fields. */
+.studio .topo-dimension{display:flex;align-items:center;gap:6px;font-size:var(--lms-text-xs);color:var(--lms-ink-muted)}
+.studio .topo-dimension input{width:92px}
+.studio label:has(>input[type=file]){grid-template-columns:none;gap:var(--lms-space-1)}
+.studio .topo-route-summary{display:grid;gap:var(--lms-space-2);margin:0;font-size:var(--lms-text-xs)}
+/* Action panels with more in them than the lake tool's: capped, scrolling on their own. */
+.studio .action-panel{max-height:50vh;overflow:auto}
+.studio .action-panel .action-row button{white-space:normal;line-height:1.2}
+.studio .action-panel details{border-bottom:0}
+.studio .action-panel details>summary{padding:var(--lms-space-1) 0;font-size:var(--lms-text-xs);font-weight:600}
+.studio .topo-export{margin-top:0}
+.studio .topo-export>button{width:100%}
+/* App bars. */
+.studio .mode-note{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--lms-text-xs);color:var(--lms-chrome-ink-muted)}
+.studio .topo-mode{font-size:var(--lms-text-2xs);font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--lms-chrome-ink-muted)}
+.studio .topo-attribution{margin-left:auto;font-size:var(--lms-text-2xs);color:var(--lms-chrome-ink-muted)}
+.studio .topo-progress{font-size:var(--lms-text-xs);color:var(--lms-chrome-ink)}
+.studio .workspace nav .btn-primary{color:var(--lms-accent-ink);background:var(--lms-accent);border-color:var(--lms-accent);font-weight:600}
+.studio .workspace nav .btn-primary:hover{background:var(--lms-accent-hover);border-color:var(--lms-accent-hover)}
+.studio .workspace nav>.error{padding:3px var(--lms-space-2);font-size:var(--lms-text-xs);color:var(--lms-accent-ink);background:var(--lms-accent);border-radius:var(--lms-radius-sm)}
+/* Topo edit mode. The terrain preview draws its own board, letterboxed in a full-width element, so
+   the element itself stays transparent: painting it would put a wide paper slab around the board. */
+.studio .topo-edit{gap:var(--lms-space-2);padding:var(--lms-space-3);background:var(--lms-surface-app)}
+.studio .topo-banner{margin:0;padding:var(--lms-space-2) var(--lms-space-3);font-size:var(--lms-text-xs);color:var(--lms-ink);background:var(--lms-info-bg);border:0;border-left:3px solid var(--lms-info-line);border-radius:0 var(--lms-radius-sm) var(--lms-radius-sm) 0}
+.studio .topo-banner.warning{color:var(--lms-ink);background:var(--lms-warning-bg);border-left-color:var(--lms-warning-line)}
+.studio .topo-banner.error{background:var(--lms-error-bg);border-left-color:var(--lms-error-line)}
+.studio .topo-banner button{margin-left:var(--lms-space-2);min-height:26px}
+.studio .topo-terrain-preview{background:none}
+.studio .topo-terrain-stats{font-size:var(--lms-text-2xs);color:var(--lms-ink-muted)}
+.studio .topo-terrain-stats dt{color:var(--lms-ink);font-weight:600}
+/* Ornament preview: the workspace canvas, with its floating panels raised on it. */
+.studio .ornament-preview{background:var(--lms-surface-app)}
+.studio .ornament-legend,.studio .ornament-metrics,.studio .ornament-map-credit{color:var(--lms-ink);background:var(--lms-surface-raised);border:1px solid var(--lms-line);border-radius:var(--lms-radius-md);box-shadow:var(--lms-shadow-1)}
+/* The swatches stand for colours on the board, so each sits on a chip of the board colour: a black
+   engrave swatch would otherwise vanish on the dark panel. */
+.studio .ornament-legend-swatch{box-shadow:0 0 0 2px var(--lms-artboard),0 0 0 3px var(--lms-line)}
+.studio .ornament-dirty{color:var(--lms-ink);background:var(--lms-warning-bg);border-left:3px solid var(--lms-warning-line);border-radius:0 var(--lms-radius-sm) var(--lms-radius-sm) 0;box-shadow:var(--lms-shadow-1)}
+.studio .ornament-map-error{color:var(--lms-ink);background:var(--lms-error-bg);border-left:3px solid var(--lms-error-line)}
+@media (prefers-reduced-motion:reduce){.studio *,.studio *::before,.studio *::after{transition:none!important}}
+@media (max-width:720px){.studio aside{overflow:visible}.studio .sidebar-scroll{overflow:visible}.studio .action-panel{position:sticky;bottom:0;z-index:5}}

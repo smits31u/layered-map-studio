@@ -16,6 +16,7 @@ import {fitTextScale,layoutOrnamentText} from '../text/ornamentText';
 import {createGeometryRunner,isCancelled,isTimeout,type GeometryRunner} from '../worker/geometryRunner';
 import {OrnamentControls} from './OrnamentControls';
 import {OrnamentPreview} from './OrnamentPreview';
+import {ThemeToggle} from '../../components/ui/ThemeToggle';
 
 export type CaptureOutcome={ok:true;result:CaptureResult}|{ok:false;message:string};
 
@@ -224,7 +225,7 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
  },[]);
  const onStatus=useCallback((message:string)=>setStatus(message),[]);
 
- return <main>
+ return <main className="studio ornament-page">
   <OrnamentControls
    project={project}
    dispatch={dispatch}
@@ -268,6 +269,7 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
    <nav>
     <button type="button" onClick={onExit}>← Lake map studio</button>
     <span className="mode-note" role="status" aria-live="polite">{status||(project.viewport.selectedPlaceLabel??'Ornament template · search for a place to begin')}</span>
+    <ThemeToggle/>
    </nav>
    <OrnamentPreview
     project={project}

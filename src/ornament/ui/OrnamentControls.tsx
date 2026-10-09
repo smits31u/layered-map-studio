@@ -1,4 +1,5 @@
-import {useEffect,useId,useRef,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
+import {Slider} from '../../components/ui/Slider';
 import {FONT_REGISTRY} from '../../text/fontRegistry';
 import {mmToInches} from '../../utils/units';
 import type {GeocodeCandidate} from '../../server/geocode/types';
@@ -45,17 +46,9 @@ const displayNumber=(mm:number,unit:OrnamentProject['displayUnit'])=>Number((uni
 // in sync. The visible label is bound to the number input by id and the slider carries its own
 // accessible name, so each control is individually addressable rather than sharing one ambiguous
 // label (plan §Accessibility: "Real labels for all text and range inputs", "Numeric values
-// adjacent to sliders and editable directly").
+// adjacent to sliders and editable directly"). It is the shared Slider with its number-entry readout.
 function NumberField({label,value,limit,onChange,suffix}:{label:string;value:number;limit:NumericLimit;onChange:(n:number)=>void;suffix?:string}){
- const id=useId();
- return <div className="ornament-field">
-  <label htmlFor={id}>{label}</label>
-  <span className="ornament-number">
-   <input type="range" aria-label={`${label} slider`} min={limit.min} max={limit.max} step={limit.step} value={value} onChange={e=>onChange(Number(e.target.value))}/>
-   <input id={id} type="number" min={limit.min} max={limit.max} step={limit.step} value={value} onChange={e=>onChange(Number(e.target.value))}/>
-   {suffix?<small>{suffix}</small>:null}
-  </span>
- </div>;
+ return <Slider entry label={label} ariaLabel={`${label} slider`} suffix={suffix} value={value} min={limit.min} max={limit.max} step={limit.step} onChange={onChange}/>;
 }
 
 // A segmented control is a group of buttons, and the plan requires it to be keyboard-operable
@@ -191,8 +184,12 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,readiness
  const [preflightOpen,setPreflightOpen]=useState(false);
  useEffect(()=>{if(preflight?.blocked)setPreflightOpen(true)},[preflight?.blocked]);
 
+ // The design system's sidebar (styles/studio.css), as in the lake tool: the product wordmark over
+ // this tool's name, the settings scrolling beneath, and capture/export pinned to the foot so the one
+ // primary button — Export SVG — is never scrolled out of reach.
  return <aside>
-  <h1>Ornament Studio</h1>
+  <header className="studio-brand"><div className="studio-wordmark">Layered Map Studio</div><h1 className="studio-tool">Ornament Studio</h1></header>
+  <div className="sidebar-scroll">
 
   {/* Progress, as a polite live region (plan §Accessibility: "Status/progress announced through a
       polite live region"). It is a region of its own rather than text inside the capture button,
@@ -219,19 +216,24 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,readiness
 
   <details open>
    <summary>Place</summary>
+   <div className="section-body">
    <PlaceSearch selectedLabel={project.viewport.selectedPlaceLabel} onSelect={onSelectPlace}/>
+   </div>
   </details>
 
   <details open>
    <summary>Map</summary>
+   <div className="section-body">
    <NumberField label="Zoom" value={project.viewport.zoom} limit={ORNAMENT_LIMITS.zoom} onChange={n=>dispatch({type:'setViewport',patch:{zoom:n}})}/>
    <Segmented<RoadDetail> label="Road detail" value={project.roads.detail} options={[{value:'low',label:'Low'},{value:'medium',label:'Medium'},{value:'high',label:'High'}]} onChange={v=>dispatch({type:'setRoads',patch:{detail:v}})}/>
    <NumberField label="Road width scale" value={project.roads.widthScale} limit={ORNAMENT_LIMITS.roadWidthScale} onChange={n=>dispatch({type:'setRoads',patch:{widthScale:n}})}/>
    <p className="ornament-readout">Centre {coordinate(project.viewport.center)} · bearing and tilt are fixed at 0 for this release.</p>
+   </div>
   </details>
 
   <details open>
    <summary>Ornament</summary>
+   <div className="section-body">
    <label className="ornament-field">
     <span>Units</span>
     <select aria-label="Units" value={unit} onChange={e=>dispatch({type:'setDisplayUnit',value:e.target.value as OrnamentProject['displayUnit']})}>
@@ -243,36 +245,44 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,readiness
    <NumberField label="Rim width" suffix="mm" value={project.ornament.rimWidthMm} limit={ORNAMENT_LIMITS.rimWidthMm} onChange={n=>dispatch({type:'setOrnament',patch:{rimWidthMm:n}})}/>
    <NumberField label="Map/text boundary" suffix="mm" value={project.ornament.mapToTextBoundaryMm} limit={ORNAMENT_LIMITS.mapToTextBoundaryMm} onChange={n=>dispatch({type:'setOrnament',patch:{mapToTextBoundaryMm:n}})}/>
    <p className="ornament-readout">Text band {geometry.textBandHeightMm.toFixed(1)}mm tall · map window {geometry.mapOpeningHeightMm.toFixed(1)}mm</p>
+   </div>
   </details>
 
   <details open>
    <summary>Hanging loop</summary>
+   <div className="section-body">
    <NumberField label="Loop outer diameter" suffix="mm" value={project.ornament.hangingLoop.outerDiameterMm} limit={ORNAMENT_LIMITS.loopOuterDiameterMm} onChange={n=>dispatch({type:'setHangingLoop',patch:{outerDiameterMm:n}})}/>
    <NumberField label="Loop inner diameter" suffix="mm" value={project.ornament.hangingLoop.innerDiameterMm} limit={ORNAMENT_LIMITS.loopInnerDiameterMm} onChange={n=>dispatch({type:'setHangingLoop',patch:{innerDiameterMm:n}})}/>
    <NumberField label="Loop overlap" suffix="mm" value={project.ornament.hangingLoop.overlapMm} limit={ORNAMENT_LIMITS.loopOverlapMm} onChange={n=>dispatch({type:'setHangingLoop',patch:{overlapMm:n}})}/>
    <NumberField label="Minimum neck width" suffix="mm" value={project.ornament.hangingLoop.minNeckWidthMm} limit={ORNAMENT_LIMITS.loopMinNeckWidthMm} onChange={n=>dispatch({type:'setHangingLoop',patch:{minNeckWidthMm:n}})}/>
    <p className="ornament-readout">Joins body over {geometry.loop.junctionWidthMm.toFixed(2)}mm · loop material {geometry.loop.annulusWidthMm.toFixed(2)}mm</p>
+   </div>
   </details>
 
   <details open>
    <summary>Personalisation</summary>
+   <div className="section-body">
    <TextLineFields keyName="subtitle" line={project.text.subtitle} dispatch={dispatch}/>
    <NumberField label="Gap subtitle to title" suffix="mm" value={project.text.gap12Mm} limit={ORNAMENT_LIMITS.lineGapMm} onChange={n=>dispatch({type:'setTextGap',key:'gap12Mm',value:n})}/>
    <TextLineFields keyName="title" line={project.text.title} dispatch={dispatch}/>
    <NumberField label="Gap title to date" suffix="mm" value={project.text.gap23Mm} limit={ORNAMENT_LIMITS.lineGapMm} onChange={n=>dispatch({type:'setTextGap',key:'gap23Mm',value:n})}/>
    <TextLineFields keyName="date" line={project.text.date} dispatch={dispatch}/>
    <button type="button" onClick={onFitText}>Fit text to band</button>
+   </div>
   </details>
 
   <details open>
    <summary>Build mode</summary>
+   <div className="section-body">
    <Segmented<BuildMode> label="Fabrication stack" value={project.buildMode} options={[{value:'classic-2-piece',label:'Classic (2 piece)'},{value:'water-cutout-3-piece',label:'Water cutout (3 piece)'}]} onChange={v=>dispatch({type:'setBuildMode',value:v})}/>
    <StackDiagram mode={project.buildMode}/>
    <Segmented<ExportPreset> label="Export preset" value={project.exportPreset} options={[{value:'semantic',label:'Semantic'},{value:'lightburn-colors',label:'LightBurn'}]} onChange={v=>dispatch({type:'setExportPreset',value:v})}/>
+   </div>
   </details>
 
   <details open={project.buildMode==='water-cutout-3-piece'}>
    <summary>Loose land pieces</summary>
+   <div className="section-body">
    {/* The plan's §Water requires this to be the user's decision, in these three words: "Offer three
        explicit policies: keep as separate pieces, bridge automatically using user-visible tabs, or
        omit below a size threshold. Default to warning, never silently discard meaningful islands."
@@ -294,14 +304,24 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,readiness
       :'Capture the map geometry to find out whether this framing leaves loose land.'
      :'Only applies in water-cutout mode, where water is cut away rather than engraved.'}
    </p>
+   </div>
   </details>
 
-  <details open>
-   <summary>Export</summary>
+  <button type="button" className="ornament-reset btn-quiet" onClick={onReset}>Reset to defaults</button>
+  </div>
+
+  {/* Pinned to the foot of the sidebar and always open: the summary only titles it. */}
+  <details open className="action-panel">
+   <summary onClick={e=>e.preventDefault()}>Capture and export</summary>
    {/* Capturing records which viewport the geometry belongs to. Feature extraction itself is
        Phase 3; what exists now is the guard that stops an export claiming geography the user has
        since panned away from. */}
-   <button type="button" disabled={building} onClick={onCaptureGeometry}>{building?'Working…':snapshot?'Re-capture map geometry':'Capture map geometry'}</button>
+   <div className="action-row">
+    <button type="button" disabled={building} onClick={onCaptureGeometry}>{building?'Working…':snapshot?'Re-capture map geometry':'Capture map geometry'}</button>
+    <button type="button" className="btn-primary" disabled={!readiness.ready||exporting} onClick={onExport} aria-describedby="ornament-export-blocked">
+     {exporting?'Running preflight…':'Export SVG'}
+    </button>
+   </div>
    <p className="ornament-readout">
     {snapshot
      ?readiness.dirty?'The map has moved since the last capture.':`Captured ${snapshot.featureCount??0} feature(s) at zoom ${snapshot.fingerprint.zoom} · ${snapshot.fingerprint.detail} detail.`
@@ -313,9 +333,6 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,readiness
    </p>:null}
    {/* Capture warnings are folded into the combined status badge at the top of the pane rather than
        listed again here — this used to be its own always-expanded block. */}
-   <button type="button" disabled={!readiness.ready||exporting} onClick={onExport} aria-describedby="ornament-export-blocked">
-    {exporting?'Running preflight…':'Export SVG'}
-   </button>
    {/* Preflight findings live here rather than in the combined badge, because they are the specific
        answer to "why did nothing download" and belong next to the button that triggered them. A
        blocked export produces no file at all (see exportOrnament.ts), so this is the only account of
@@ -334,7 +351,5 @@ export function OrnamentControls({project,dispatch,geometry,textLayout,readiness
     </ul>
    </details>
   </details>
-
-  <button type="button" className="ornament-reset" onClick={onReset}>Reset to defaults</button>
  </aside>;
 }
