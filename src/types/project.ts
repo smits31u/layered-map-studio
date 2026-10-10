@@ -8,7 +8,9 @@ export type RoadMode = 'all'|'main'|'off';
 export type ExportLayout = 'production'|'registered'|'individual';
 export type GeoLine = { id:string; coordinates:LngLat[]; class:RoadClass; name?:string };
 export type GeoPolygon = { id:string; rings:LngLat[][] };
-export type BathymetrySourceMetadata={provider:'wisconsin-dnr'|'noaa-ncei'|'usgs'|'user';datasetId:string;title:string;sourceDate?:string;retrievedAt?:string;sourceUrl?:string;quality?:string;notForNavigation:true};
+// attribution/license: who must be credited and on what terms, carried with the dataset so the
+// provenance survives into the project and scene (required for Michigan DNR / IFR data).
+export type BathymetrySourceMetadata={provider:'wisconsin-dnr'|'michigan-dnr'|'noaa-ncei'|'usgs'|'user';datasetId:string;title:string;sourceDate?:string;retrievedAt?:string;sourceUrl?:string;quality?:string;attribution?:string;license?:string;notForNavigation:true};
 export type BathymetryContour={depthMeters:number;geometry:GeoPolygon[]};
 export type BathymetryDataset={source:BathymetrySourceMetadata;depthUnit:'meters';minDepthMeters:number;maxDepthMeters:number;contours:BathymetryContour[]};
 export type GeoPlace = { id:string; coordinate:LngLat; name:string; class:'city'|'town'|'village'|'hamlet' };

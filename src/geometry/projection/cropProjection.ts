@@ -13,5 +13,11 @@ export class CropProjection {
   for(let i=0;i<12;i++){const z=bilinear(this.corners[0],this.corners[1],this.corners[2],this.corners[3],u,v);const e=1e-6;const zu=bilinear(this.corners[0],this.corners[1],this.corners[2],this.corners[3],u+e,v);const zv=bilinear(this.corners[0],this.corners[1],this.corners[2],this.corners[3],u,v+e);const ax=(zu.x-z.x)/e,ay=(zu.y-z.y)/e,bx=(zv.x-z.x)/e,by=(zv.y-z.y)/e,dx=q.x-z.x,dy=q.y-z.y,det=ax*by-ay*bx;if(Math.abs(det)<1e-15)break;u+=(dx*by-dy*bx)/det;v+=(dy*ax-dx*ay)/det}
   return{x:u*this.widthMm,y:v*this.heightMm};
  }
+ // Millimetres back to lng/lat. The forward direction of the same bilinear map, so it needs no
+ // iteration; used to hand the selected water body to geographic depth providers.
+ unproject(p:PointMm):LngLat{
+  const q=bilinear(this.corners[0],this.corners[1],this.corners[2],this.corners[3],p.x/this.widthMm,p.y/this.heightMm);
+  return{lng:q.x*360-180,lat:Math.atan(Math.sinh(Math.PI*(1-2*q.y)))*180/Math.PI};
+ }
 }
 export function cropFromCorners(nw:LngLat,ne:LngLat,se:LngLat,sw:LngLat):CropGeography{const pts=[nw,ne,se,sw];return{nw,ne,se,sw,bbox:[Math.min(...pts.map(p=>p.lng)),Math.min(...pts.map(p=>p.lat)),Math.max(...pts.map(p=>p.lng)),Math.max(...pts.map(p=>p.lat))]}}
