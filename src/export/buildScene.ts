@@ -50,6 +50,9 @@ export type GeometryLayers={
 
 export function buildGeometryLayers(project:MapProject,features:ExtractedFeatures):GeometryLayers{
  if(!project.map.crop)throw new Error('Select a geographic crop before generation');
+ // Nothing captured at all is a capture problem (map still loading, crop off the map), not a
+ // finding about the geography — saying "no water" there sent the user looking for a lake bug.
+ if(!features.water.length&&!features.roads.length&&!features.places.length)throw new Error('No features captured in the selected crop. Wait for the map to finish loading, then Generate again.');
  if(!features.water.length)throw new Error('No water features found in the selected crop');
  const {widthMm:w,heightMm:h}=project.dimensions,projection=new CropProjection(project.map.crop,w,h),layers:PhysicalLayer[]=[],manufacturingWarnings:string[]=[];
  const model=buildWaterModel(features.water,projection,w,h,{mode:project.shoreline.waterMode,minAreaMm2:project.shoreline.minWaterAreaMm2,focus:{lng:project.map.longitude,lat:project.map.latitude}});
