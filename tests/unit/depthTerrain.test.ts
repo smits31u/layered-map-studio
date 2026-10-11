@@ -22,6 +22,16 @@ function star(cx:number,cy:number,spikes:number,inner:number,outer:number,seed:n
  return ring;
 }
 const bytes=(array:Float64Array|Int32Array|Uint8Array)=>new Uint8Array(array.buffer,array.byteOffset,array.byteLength);
+// Byte identity, compared directly. expect(bytes(a)).toEqual(bytes(b)) walks a ~200 KB view
+// element by element through Vitest's deep equality: ~1.7 s of the determinism test, whose terrain
+// generation takes ~40 ms, enough to time it out on a loaded machine. Same check, and a failure
+// still names the first byte that differs.
+function expectSameBytes(actual:Float64Array|Int32Array|Uint8Array,expected:Float64Array|Int32Array|Uint8Array){
+ const a=Buffer.from(bytes(actual)),b=Buffer.from(bytes(expected));
+ if(a.equals(b))return;
+ let i=0;while(i<a.length&&i<b.length&&a[i]===b[i])i++;
+ expect.fail(`bytes differ: lengths ${a.length}/${b.length}, first difference at byte ${i}`);
+}
 const sha256=(array:Float64Array|Int32Array|Uint8Array)=>createHash('sha256').update(bytes(array)).digest('hex');
 const realLakeWater=(fixture:typeof caldronFixture)=>{const {widthMm,heightMm}=fixture.dimensions;return buildWaterModel(fixture.water,new CropProjection(fixture.crop,widthMm,heightMm),widthMm,heightMm,{mode:'primary',minAreaMm2:1}).water};
 const deepFreeze=<T>(value:T):T=>{if(value&&typeof value==='object'){for(const v of Object.values(value))deepFreeze(v);Object.freeze(value)}return value};
@@ -76,9 +86,9 @@ describe('depth terrain determinism',()=>{
    generateDepthTerrain([[star(10,10,5,3,8,99)]],{seed:k,noiseAmplitude:1,warpStrength:2});
   }
   for(const run of runs.slice(1)){
-   expect(bytes(run.depth)).toEqual(bytes(runs[0].depth));
-   expect(bytes(run.distanceCells)).toEqual(bytes(runs[0].distanceCells));
-   expect(bytes(run.bodyId)).toEqual(bytes(runs[0].bodyId));
+   expectSameBytes(run.depth,runs[0].depth);
+   expectSameBytes(run.distanceCells,runs[0].distanceCells);
+   expectSameBytes(run.bodyId,runs[0].bodyId);
    expect(run.inside).toEqual(runs[0].inside);
    expect(run.bodies).toEqual(runs[0].bodies);
    expect(run.grid).toEqual(runs[0].grid);
@@ -130,7 +140,7 @@ describe('depth terrain determinism',()=>{
  it('gives the same terrain for the same lake at another product size (scaled cell size)',()=>{
   const scaled:MultiPolygonMm=lake.map(polygon=>polygon.map(ring=>ring.map(([x,y])=>[x*2,y*2] as [number,number])));
   const a=generateDepthTerrain(lake,everythingOn),b=generateDepthTerrain(scaled,{...everythingOn,resolution:{cellMm:1.5}});
-  expect(bytes(b.depth)).toEqual(bytes(a.depth));
+  expectSameBytes(b.depth,a.depth);
  });
 });
 
@@ -139,8 +149,8 @@ describe('seed isolation',()=>{
   const a=generateDepthTerrain(lake,everythingOn),b=generateDepthTerrain(lake,{...everythingOn,seed:everythingOn.seed!+1});
   expect(b.grid).toEqual(a.grid);
   expect(b.inside).toEqual(a.inside);
-  expect(bytes(b.bodyId)).toEqual(bytes(a.bodyId));
-  expect(bytes(b.distanceCells)).toEqual(bytes(a.distanceCells));
+  expectSameBytes(b.bodyId,a.bodyId);
+  expectSameBytes(b.distanceCells,a.distanceCells);
   expect(b.bodies).toEqual(a.bodies);
   expect({...b.params,seed:0}).toEqual({...a.params,seed:0});
   let differing=0,insideCells=0;
@@ -160,7 +170,7 @@ describe('seed isolation',()=>{
 
  it('has no effect at all when noise is off',()=>{
   const off={...everythingOn,noiseAmplitude:0};
-  expect(bytes(generateDepthTerrain(lake,{...off,seed:9}).depth)).toEqual(bytes(generateDepthTerrain(lake,{...off,seed:10}).depth));
+  expectSameBytes(generateDepthTerrain(lake,{...off,seed:9}).depth,generateDepthTerrain(lake,{...off,seed:10}).depth);
  });
 
  it('without noise depth is a function of shore distance alone (concentric), with noise it is not',()=>{
@@ -351,7 +361,7 @@ describe('terracing at shared global benches (normalize first)',()=>{
   for(const [name,shape] of [['multi-body',lake],['Caldron Falls',realLakeWater(caldronFixture)]] as const){
    for(const strength of [.4,1]){
     const on=generateDepthTerrain(shape,{...base,terraceStrength:strength}),off=generateDepthTerrain(shape,{...base,terraceStrength:0});
-    expect(bytes(on.distanceCells)).toEqual(bytes(off.distanceCells));
+    expectSameBytes(on.distanceCells,off.distanceCells);
     // Plain comparisons: an expect() per cell of a 512-wide real lake grid is most of the runtime.
     let mismatches=0;
     for(let i=0;i<on.depth.length;i++){
