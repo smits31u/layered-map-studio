@@ -103,7 +103,9 @@ export function createTerrainRunner(factory:TerrainWorkerFactory|undefined=defau
    result.then(clear,clear);
    return {result,cancel(){clear();if(activeJobId===jobId)cancelActive()}};
   },
-  dispose(){settle=undefined;activeJobId=0;discard()},
+  // Rejects an in-flight job as cancelled, like cancel() and like the inline runner's dispose,
+  // rather than leaving its promise unsettled for good.
+  dispose(){const pending=settle;settle=undefined;activeJobId=0;discard();pending?.reject(new TerrainCancelledError())},
  };
 }
 

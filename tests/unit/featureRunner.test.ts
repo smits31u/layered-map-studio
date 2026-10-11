@@ -142,11 +142,12 @@ describe('feature runner (worker path)',()=>{
   await expect(handle.result).resolves.toBe(ROAD_RESULT);
  });
 
- it('dispose() drops the pending settle and terminates the worker',async()=>{
+ it('dispose() rejects the in-flight job as cancelled and terminates the worker',async()=>{
   const {workers,runner}=setup();
-  runner.run(ROAD_JOB);
+  const handle=runner.run(ROAD_JOB);
   runner.dispose();
   expect(workers[0].terminated).toBe(true);
+  await expect(handle.result).rejects.toBeInstanceOf(FeatureJobCancelledError);
  });
 });
 

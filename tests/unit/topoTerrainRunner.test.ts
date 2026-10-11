@@ -88,6 +88,13 @@ describe('terrain runner (worker path)',()=>{
   runner.run(JOB);
   expect(workers).toHaveLength(2);
  });
+ it('dispose() rejects the in-flight job as cancelled and terminates the worker',async()=>{
+  const {workers,runner}=setup();
+  const handle=runner.run(JOB);
+  runner.dispose();
+  expect(workers[0].terminated).toBe(true);
+  await expect(handle.result).rejects.toBeInstanceOf(TerrainCancelledError);
+ });
 });
 
 describe('terrain runner (inline fallback)',()=>{
