@@ -61,6 +61,9 @@ export interface InstalledFakeMapLibre{
  setFeatures(features:CaptureMapFeature[]):void;
  // Lets a capture held by `deferIdle` finish. No-op when the fake was not installed with it.
  releaseIdle():void;
+ // Fires a map event (with an optional payload) on the most recently created map, e.g. a source
+ // 'error' or 'remove', which the fake never raises on its own.
+ emit(event:string,payload?:unknown):void;
  uninstall():void;
 }
 
@@ -93,6 +96,7 @@ export function installFakeMapLibre(options:FakeMapLibreOptions={}):InstalledFak
   return null;
  } as typeof originalGetContext;
 
+ let lastMap:FakeMap|undefined;
  class FakeMap{
   private handlers=new Map<string,Set<(event?:unknown)=>void>>();
   dragRotate={disable(){}};
@@ -103,9 +107,10 @@ export function installFakeMapLibre(options:FakeMapLibreOptions={}):InstalledFak
    state.zoom=config.zoom as number;
    // MapLibre fires `load` asynchronously; so does this, so a test that asserts on the pre-load
    // render still sees it.
+   lastMap=this;
    setTimeout(()=>this.fire('load'),0);
   }
-  private fire(event:string){for(const handler of this.handlers.get(event)??[])handler()}
+  fire(event:string,payload?:unknown){for(const handler of [...(this.handlers.get(event)??[])])handler(payload)}
   on(event:string,handler:(event?:unknown)=>void){(this.handlers.get(event)??this.handlers.set(event,new Set()).get(event)!).add(handler)}
   off(event:string,handler:(event?:unknown)=>void){this.handlers.get(event)?.delete(handler)}
   once(event:string,handler:()=>void){
@@ -177,6 +182,7 @@ export function installFakeMapLibre(options:FakeMapLibreOptions={}):InstalledFak
  return {
   state,
   setFeatures(next){features=next},
+  emit(event,payload){lastMap?.fire(event,payload)},
   releaseIdle(){
    idleHeld=false;
    const waiters=[...heldIdleWaiters];

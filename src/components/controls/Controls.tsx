@@ -98,7 +98,7 @@ export function Controls({project,setProject,onSelect,onGenerate,onExport,status
    </div></details>
 
    <details><summary>Place labels<span className="summary-meta">{placeClassCount?`${placeClassCount} of 4 kinds`:'Hidden'}</span></summary><div className="section-body">
-    <div className="toggle-grid" role="group" aria-label="Places to label">{(['city','town','village','hamlet'] as const).map(cls=><label key={cls} className="toggle-chip"><input type="checkbox" checked={project.placeLabels.classes[cls]} onChange={e=>patch({placeLabels:{...project.placeLabels,classes:{...project.placeLabels.classes,[cls]:e.target.checked}}})}/>{cls[0].toUpperCase()+cls.slice(1)}{cls==='city'?'ies':'s'}</label>)}</div>
+    <div className="toggle-grid" role="group" aria-label="Places to label">{(['city','town','village','hamlet'] as const).map(cls=><label key={cls} className="toggle-chip"><input type="checkbox" checked={project.placeLabels.classes[cls]} onChange={e=>patch({placeLabels:{...project.placeLabels,classes:{...project.placeLabels.classes,[cls]:e.target.checked}}})}/>{cls==='city'?'Cities':`${cls[0].toUpperCase()+cls.slice(1)}s`}</label>)}</div>
     <label>Font <select value={project.placeLabels.font} onChange={e=>patch({placeLabels:{...project.placeLabels,font:e.target.value as any}})}>{fontOptions}</select></label>
     <label>Size mm <input type="number" min="0.5" step="0.1" value={project.placeLabels.sizeMm} onChange={e=>patch({placeLabels:{...project.placeLabels,sizeMm:+e.target.value}})}/></label>
    </div></details>
