@@ -1,6 +1,12 @@
 import type {BathymetryContour,BathymetryDataset,BathymetrySourceMetadata,GeoPolygon} from '../types/project';
-export type BathymetryQuery={longitude:number;latitude:number;waterbodyName?:string;waterbodyId?:string};
-export type BathymetryProviderResult={provider:BathymetrySourceMetadata['provider'];status:'available'|'unavailable'|'unsupported';message:string;dataset?:BathymetryDataset;sourceUrl?:string;waterbodyId?:string};
+// [lng,lat] positions, polygon-clipping's MultiPolygon layout.
+export type GeoMultiPolygon=[number,number][][][];
+// water: the selected water body (the shoreline the panels are cut from), in lng/lat. Providers
+// match surveyed lakes against it spatially and route by the state it lies in; longitude/latitude
+// is a point inside it when it is known.
+export type BathymetryQuery={longitude:number;latitude:number;waterbodyName?:string;waterbodyId?:string;water?:GeoMultiPolygon};
+// provider 'none': no agency was asked (e.g. the lake is outside every supported state).
+export type BathymetryProviderResult={provider:BathymetrySourceMetadata['provider']|'none';status:'available'|'unavailable'|'unsupported';message:string;dataset?:BathymetryDataset;sourceUrl?:string;waterbodyId?:string};
 export interface BathymetryProvider{id:string;label:string;resolve(query:BathymetryQuery):Promise<BathymetryProviderResult>}
 export interface BathymetryCache{get(key:string):Promise<BathymetryProviderResult|undefined>;set(key:string,value:BathymetryProviderResult):Promise<void>}
 export const feetToMeters=(feet:number)=>feet*0.3048;

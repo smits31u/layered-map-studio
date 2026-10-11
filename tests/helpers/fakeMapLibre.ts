@@ -151,7 +151,12 @@ export function installFakeMapLibre(options:FakeMapLibreOptions={}):InstalledFak
     y:size/2+(mercatorY(lngLat[1])-mercatorY(state.center.lat))*worldSize,
    };
   }
-  unproject(){return {...state.center}}
+  // The inverse of project(), so the lake tool's crop frame maps to a real geographic crop.
+  unproject(point:[number,number]){
+   const worldSize=MAPLIBRE_TILE_SIZE*Math.pow(2,state.zoom);
+   const x=(state.center.lng+180)/360+(point[0]-size/2)/worldSize,y=mercatorY(state.center.lat)+(point[1]-size/2)/worldSize;
+   return {lng:x*360-180,lat:Math.atan(Math.sinh(Math.PI*(1-2*y)))*180/Math.PI};
+  }
   setLayoutProperty(layerId:string,name:string,value:unknown){if(name==='visibility')state.layerVisibility[layerId]=String(value)}
   getLayer(layerId:string){return {id:layerId}}
   getSource(){return {vectorLayerIds:['water','transportation']}}
