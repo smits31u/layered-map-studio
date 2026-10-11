@@ -20,29 +20,62 @@ const pending=new Map<FontId,Promise<opentype.Font>>();
 // loading — wait a moment and try again", never as the actionable error it actually is.
 const failed=new Map<FontId,Error>();
 
-export function loadFont(id:FontId):Promise<opentype.Font>{
+// A fetch that never settles (a stalled connection, a proxy holding the request) used to leave a
+// font "still loading" forever, with nothing for the user to act on. After this long the attempt is
+// aborted and recorded as a failure, which the UI shows with a Retry. The fonts are ~100–300 KB
+// served from this app's own origin, so 20s is generous even on a poor connection.
+export const FONT_LOAD_TIMEOUT_MS=20_000;
+
+// Font state changes (loading → ready / failed, and a retry back to loading) for the UI's notice and
+// for tools that rebuild once a font arrives.
+const listeners=new Set<()=>void>();
+let version=0;
+const notify=()=>{version++;for(const listener of [...listeners])listener()};
+export function subscribeFonts(listener:()=>void):()=>void{listeners.add(listener);return()=>{listeners.delete(listener)}}
+// Changes whenever any font's state does — a cheap snapshot for useSyncExternalStore.
+export const fontStateVersion=()=>version;
+
+export type FontStatus='ready'|'loading'|'failed'|'idle';
+export const fontStatus=(id:FontId):FontStatus=>resolved.has(id)?'ready':pending.has(id)?'loading':failed.has(id)?'failed':'idle';
+export const failedFonts=():{id:FontId;label:string;error:Error}[]=>FONT_REGISTRY.filter(f=>!resolved.has(f.id)&&failed.has(f.id)).map(f=>({id:f.id,label:f.label,error:failed.get(f.id)!}));
+export const fontLabel=(id:FontId)=>FONT_REGISTRY.find(f=>f.id===id)?.label??id;
+
+export function loadFont(id:FontId,options:{timeoutMs?:number}={}):Promise<opentype.Font>{
  const cached=resolved.get(id);
  if(cached)return Promise.resolve(cached);
  const inFlight=pending.get(id);
  if(inFlight)return inFlight;
  const definition=FONT_REGISTRY.find(f=>f.id===id);
- if(!definition){const error=new Error(`Unknown font "${id}"`);failed.set(id,error);return Promise.reject(error)}
+ if(!definition){const error=new Error(`Unknown font "${id}"`);failed.set(id,error);notify();return Promise.reject(error)}
  // A fresh attempt clears any earlier failure, so a retry (the caller calling loadFont again,
  // e.g. after the network recovers) can turn a failed state back into loading, then resolved.
  failed.delete(id);
- const promise=fetch(definition.url)
+ const timeoutMs=options.timeoutMs??FONT_LOAD_TIMEOUT_MS,controller=typeof AbortController==='undefined'?undefined:new AbortController();
+ let timedOut=false,timer:ReturnType<typeof setTimeout>|undefined;
+ const deadline=new Promise<never>((_,reject)=>{timer=setTimeout(()=>{timedOut=true;controller?.abort();reject(new Error(`did not finish loading within ${Math.round(timeoutMs/1000)} seconds`))},timeoutMs)});
+ const attempt=fetch(definition.url,controller?{signal:controller.signal}:undefined)
   .then(response=>{if(!response.ok)throw new Error(`HTTP ${response.status}`);return response.arrayBuffer()})
-  .then(buffer=>opentype.parse(buffer))
-  .then(font=>{resolved.set(id,font);pending.delete(id);failed.delete(id);return font})
+  .then(buffer=>opentype.parse(buffer));
+ const promise=Promise.race([attempt,deadline])
+  .then(font=>{clearTimeout(timer);resolved.set(id,font);pending.delete(id);failed.delete(id);notify();return font})
   .catch(error=>{
+   clearTimeout(timer);
    pending.delete(id);
-   const wrapped=new Error(`Font "${definition.label}" failed to load: ${(error as Error).message}`);
+   const reason=timedOut?`did not finish loading within ${Math.round(timeoutMs/1000)} seconds`:(error as Error).message;
+   const wrapped=new Error(`Font "${definition.label}" failed to load: ${reason}`);
    failed.set(id,wrapped);
+   notify();
    throw wrapped;
   });
+ // The race's loser must not surface as an unhandled rejection.
+ attempt.catch(()=>{});
  pending.set(id,promise);
+ notify();
  return promise;
 }
+
+// The UI's Retry: a new attempt for a font whose last one failed. Resolves to whether it loaded.
+export const retryFont=(id:FontId)=>loadFont(id).then(()=>true,()=>false);
 
 // Synchronous accessor for the manufacturing pipeline, which is not async. Returns undefined until
 // loadFont(id) has resolved at least once — buildScene surfaces this as a clear "still loading"
@@ -68,11 +101,13 @@ export function preloadAllFonts():Promise<void>{
 export function registerFontForTesting(id:FontId,font:opentype.Font):void{
  resolved.set(id,font);
  failed.delete(id);
+ notify();
 }
 
 // Test-only: simulate a genuinely failed load without going through fetch, and clear it again.
 export function setFontLoadErrorForTesting(id:FontId,error:Error|undefined):void{
  if(error)failed.set(id,error);else failed.delete(id);
+ notify();
 }
 
 // Test-only: remove a font's cached resolution, returning whatever was cached so the caller can
@@ -85,5 +120,6 @@ export function setFontLoadErrorForTesting(id:FontId,error:Error|undefined):void
 export function forgetFontForTesting(id:FontId):opentype.Font|undefined{
  const font=resolved.get(id);
  resolved.delete(id);
+ notify();
  return font;
 }

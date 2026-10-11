@@ -197,7 +197,10 @@ export function runTopoPreflight(input:TopoPreflightInput):TopoPreflightReport{
  // design: what building the features reported.
  if(!input.captured)findings.push(finding('design','warning','no-capture','No water, roads or labels were captured for this board, so any sea or lake bed is layered as land. Go back to the map and generate again with the map loaded.'));
  for(const w of terrain.warnings)findings.push(finding('design','warning',w.code,w.message));
- for(const w of board.warnings)if(!w.code.startsWith('bridge-tab-narrow'))findings.push(finding('design','warning',w.code,w.message));
+ // A font that failed or never arrived means text (the title, the labels) would be missing from
+ // the cut file, so it blocks rather than warns: an export never goes out with text silently dropped.
+ const fontMissing=(code:string)=>code==='font-load-failed'||code==='font-loading';
+ for(const w of board.warnings)if(!w.code.startsWith('bridge-tab-narrow'))findings.push(fontMissing(w.code)?finding('design','error',w.code,`${w.message} The board can't be exported without its text; retry the font first.`):finding('design','warning',w.code,w.message));
  if(project.compass.position!=='off')findings.push(finding('design','warning','compass-not-built','A compass is set in this project, but the builder does not draw one yet; engrave/compass is empty.'));
 
  return {blocked:findings.some(f=>f.severity==='error'),findings,checksRun:[...TOPO_PREFLIGHT_CHECKS]};

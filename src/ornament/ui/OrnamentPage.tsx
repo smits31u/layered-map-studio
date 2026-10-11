@@ -1,3 +1,4 @@
+import {FontLoadNotice} from '../../components/ui/FontLoadNotice';
 import {useCallback,useEffect,useMemo,useReducer,useRef,useState} from 'react';
 import {preloadAllFonts} from '../../text/fontRegistry';
 import type {CaptureResult,CaptureWarning} from '../capture/mapCapture';
@@ -226,6 +227,7 @@ export function OrnamentPage({onExit}:{onExit:()=>void}){
  const onStatus=useCallback((message:string)=>setStatus(message),[]);
 
  return <main className="studio ornament-page">
+  <FontLoadNotice/>
   <OrnamentControls
    project={project}
    dispatch={dispatch}

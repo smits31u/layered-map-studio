@@ -278,10 +278,11 @@ export function buildOrnamentPieces(input:PieceSetInput):OrnamentPieceSet{
  if(!labels.length&&pieces.length){
   // A genuine load failure (bad URL, corrupt file, network error) is a different, actionable
   // state from the font simply not having arrived yet -- previously both looked identical here.
+  // Either way it is an error, not a warning: an export never goes out with text silently missing.
   const loadError=getFontLoadError('inter');
   warnings.push(loadError
-   ?issue('labels-unavailable','warning',`The label font failed to load (${loadError.message}), so the non-production labels were left out of the export.`)
-   :issue('labels-unavailable','warning','The label font is still loading, so the non-production labels were left out of the export.'));
+   ?issue('labels-unavailable','error',`${loadError.message}. The piece labels can't be engraved without it; retry the font before exporting.`)
+   :issue('labels-unavailable','error','The label font (Inter) has not loaded yet, so the piece labels cannot be engraved. Wait for it, or retry it, before exporting.'));
  }
 
  const groups:ExportGroup[]=[
