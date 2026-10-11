@@ -87,7 +87,10 @@ const oriented=(ring:RingMm,positive:boolean)=>(localSignedArea(ring)>0)===posit
 
 // The container shrunk by NESTING_MARGIN_UNITS. ClipperOffset reads direction from winding, so each
 // ring is first wound as Clipper expects for its role (outer or hole), as offsetWater does.
-export function erode(container:MultiPolygonMm):ClipperPath[]{
+export const erode=(container:MultiPolygonMm):ClipperPath[]=>offsetContainer(container,-NESTING_MARGIN_UNITS);
+const dilate=(container:MultiPolygonMm):ClipperPath[]=>offsetContainer(container,NESTING_MARGIN_UNITS);
+// by: negative erodes (the clip container), positive dilates (the check's tolerance band).
+function offsetContainer(container:MultiPolygonMm,by:number):ClipperPath[]{
  const offset=new ClipperLib.ClipperOffset(2,.25),out:ClipperPath[]=[];
  for(const polygon of container)polygon.forEach((ring,index)=>{
   const path=toPath(ring);
@@ -95,7 +98,7 @@ export function erode(container:MultiPolygonMm):ClipperPath[]{
   if(ClipperLib.Clipper.Orientation(path)!==(index===0))path.reverse();
   offset.AddPath(path,ClipperLib.JoinType.jtMiter,ClipperLib.EndType.etClosedPolygon);
  });
- offset.Execute(out,-NESTING_MARGIN_UNITS);
+ offset.Execute(out,by);
  return out;
 }
 
@@ -174,13 +177,52 @@ export function nestedBandLevel(raw:RingMm[],container:MultiPolygonMm,options:Co
 // so a real nesting violation, which starts at a full grid cell, is never masked by it.
 export const NESTING_AREA_TOLERANCE_MM2=1e-3;
 
+// Above the noise floor, area outside the parent is real geometry, and what happens to it depends on
+// whether it matters physically. Up to NESTING_SLIVER_TOLERANCE_MM2 it is a sliver: about a 0.1 mm
+// square, under one 0.15 mm laser kerf, so the cut cannot reproduce it and the layers still stack.
+// It is clipped off and reported as a non-blocking warning instead of stopping generation. Anything
+// larger would really cut a deeper layer outside a shallower one, so it blocks, with the layer and
+// the position in the error.
+export const NESTING_SLIVER_TOLERANCE_MM2=.01;
+
+export interface NestingSliver{label:string;outerLabel:string;areaMm2:number;atMm:[number,number]}
+export const nestingSliverWarning=(s:NestingSliver)=>`${s.label} poked ${s.areaMm2.toFixed(4)} mm² outside ${s.outerLabel} near x=${s.atMm[0].toFixed(1)} mm, y=${s.atMm[1].toFixed(1)} mm; that sliver (under the ${NESTING_SLIVER_TOLERANCE_MM2} mm² tolerance, smaller than a laser kerf) was trimmed.`;
+
+// Where a violation is: the area-weighted centre of the largest piece outside, in product mm from
+// the top-left corner.
+function largestPieceCentre(pieces:MultiPolygonMm):[number,number]{
+ let best=pieces[0],bestArea=-1;
+ for(const piece of pieces){const a=polygonAreaMm2(piece);if(a>bestArea){bestArea=a;best=piece}}
+ const ring=best[0];let a=0,cx=0,cy=0;
+ for(let i=0;i<ring.length-1;i++){const [x0,y0]=ring[i],[x1,y1]=ring[i+1],f=x0*y1-x1*y0;a+=f;cx+=(x0+x1)*f;cy+=(y0+y1)*f}
+ return a?[cx/(3*a),cy/(3*a)]:[ring[0][0],ring[0][1]];
+}
+
+// One level against its parent. The levels are already clipped to their parents when they are
+// built, so this measures what that clip left. Returns the level unchanged when the outside area is
+// noise, the level with the sliver trimmed (recorded in `slivers`) when it is under the sliver
+// tolerance, and throws, naming the layer and where, when it is more.
+export function enforceNesting(level:MultiPolygonMm,outer:MultiPolygonMm,label:string,outerLabel:string,slivers:NestingSliver[],context='Depth contours'):MultiPolygonMm{
+ if(!level.length)return level;
+ // Measured against the parent grown by NESTING_MARGIN_UNITS (0.003 mm): a vertex a clip placed on the
+ // parent's edge can round that far outside it, along every shared stretch of shoreline. Only
+ // material beyond that band counts.
+ const outsidePieces=clip(ClipperLib.ClipType.ctDifference,level,dilate(outer),ClipperLib.PolyFillType.pftNonZero,label,context),outside=areaMm2(outsidePieces);
+ if(outside<=NESTING_AREA_TOLERANCE_MM2)return level;
+ const atMm=largestPieceCentre(outsidePieces);
+ if(outside>NESTING_SLIVER_TOLERANCE_MM2)throw new Error(`${context}: ${label} extends ${outside.toFixed(4)} mm² outside ${outerLabel}, near x=${atMm[0].toFixed(1)} mm, y=${atMm[1].toFixed(1)} mm from the top-left of the product. That is more than the ${NESTING_SLIVER_TOLERANCE_MM2} mm² sliver tolerance, so it would cut a deeper layer outside a shallower one.`);
+ slivers.push({label,outerLabel,areaMm2:outside,atMm});
+ return clip(ClipperLib.ClipType.ctIntersection,level,toPaths(outer),ClipperLib.PolyFillType.pftEvenOdd,label,context);
+}
+
 // Independent check of a chain of levels before it is returned: every coordinate finite, every ring
-// closed, the first level inside the container, and every level inside the one before it, with
-// zero area outside (up to NESTING_AREA_TOLERANCE_MM2 of floating-point noise). Throws rather than
-// returning something that would cut a deeper layer outside a shallower one.
-export function assertLevelChain(levels:readonly {threshold:number;geometry:MultiPolygonMm}[],container:MultiPolygonMm,containerLabel:string,labelOf:(threshold:number)=>string,context='Depth contours'):void{
+// closed, the first level inside the container, and every level inside the one before it
+// (enforceNesting: noise passes, slivers are trimmed in place, real violations throw). Returns the
+// trimmed slivers so the caller can warn about them.
+export function assertLevelChain(levels:readonly {threshold:number;geometry:MultiPolygonMm;areaMm2?:number;vertexCount?:number}[],container:MultiPolygonMm,containerLabel:string,labelOf:(threshold:number)=>string,context='Depth contours'):NestingSliver[]{
  let outer=container,outerLabel=containerLabel;
- for(const level of levels){
+ const slivers:NestingSliver[]=[];
+ for(const level of levels as {threshold:number;geometry:MultiPolygonMm;areaMm2?:number;vertexCount?:number}[]){
   const label=labelOf(level.threshold);
   for(const polygon of level.geometry)for(const ring of polygon){
    if(ring.length<4)throw new Error(`${context}: ${label} has a degenerate ring.`);
@@ -188,12 +230,15 @@ export function assertLevelChain(levels:readonly {threshold:number;geometry:Mult
    if(first[0]!==last[0]||first[1]!==last[1])throw new Error(`${context}: ${label} has an open ring.`);
    for(const [x,y] of ring)if(!Number.isFinite(x)||!Number.isFinite(y))throw new Error(`${context}: ${label} has a non-finite coordinate.`);
   }
-  if(level.geometry.length){
-   const outside=areaMm2(clip(ClipperLib.ClipType.ctDifference,level.geometry,toPaths(outer),ClipperLib.PolyFillType.pftEvenOdd,label,context));
-   if(outside>NESTING_AREA_TOLERANCE_MM2)throw new Error(`${context}: ${label} extends ${outside}mm² outside ${outerLabel}.`);
+  const before=slivers.length,geometry=enforceNesting(level.geometry,outer,label,outerLabel,slivers,context);
+  if(slivers.length>before){
+   level.geometry=geometry;
+   if(level.areaMm2!==undefined)level.areaMm2=areaMm2(geometry);
+   if(level.vertexCount!==undefined)level.vertexCount=vertexCount(geometry);
   }
   outer=level.geometry;outerLabel=`the ${level.threshold} level`;
  }
+ return slivers;
 }
 
 // ---- The generic entry point ----
@@ -204,7 +249,8 @@ export function assertLevelChain(levels:readonly {threshold:number;geometry:Mult
 export interface SampleGrid{values:ArrayLike<number>;columns:number;rows:number;originXMm:number;originYMm:number;cellWidthMm:number;cellHeightMm:number}
 
 export interface BandLevel{threshold:number;geometry:MultiPolygonMm;areaMm2:number;vertexCount:number;rawRingCount:number}
-export interface NestedBands{thresholds:number[];options:ContourOptions;levels:BandLevel[];stats:ContourStats}
+// nestingSlivers: slivers the final check trimmed (see enforceNesting), for the caller to warn about.
+export interface NestedBands{thresholds:number[];options:ContourOptions;levels:BandLevel[];stats:ContourStats;nestingSlivers:NestingSliver[]}
 
 export const gridPointToMm=(grid:SampleGrid,[x,y]:[number,number]):[number,number]=>[grid.originXMm+(x+.5)*grid.cellWidthMm,grid.originYMm+(y+.5)*grid.cellHeightMm];
 
@@ -226,6 +272,6 @@ export function extractNestedBands(grid:SampleGrid,thresholds:readonly number[],
   levels.push({threshold,geometry,areaMm2:areaMm2(geometry),vertexCount:vertexCount(geometry),rawRingCount:raw.length});
   previous=geometry;
  }
- assertLevelChain(levels,container,'the container',threshold=>`level ${threshold}`,context);
- return {thresholds:sorted,options,levels,stats};
+ const nestingSlivers=assertLevelChain(levels,container,'the container',threshold=>`level ${threshold}`,context);
+ return {thresholds:sorted,options,levels,stats,nestingSlivers};
 }
