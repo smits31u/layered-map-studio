@@ -1,0 +1,36 @@
+/* Estimate panel and settings dialog. Built from the studio's design tokens so it follows the theme. */
+.estimate-panel{display:grid;gap:var(--lms-space-2,8px);font-size:var(--lms-text-xs,11.5px)}
+.estimate-headline{display:grid;grid-template-columns:1fr 1fr;gap:var(--lms-space-2,8px)}
+.estimate-headline>div{display:grid;gap:2px;padding:var(--lms-space-2,8px);background:var(--lms-surface-raised,#222c36);border:1px solid var(--lms-line,#35414e);border-radius:var(--lms-radius-md,6px)}
+.estimate-headline b{font-size:var(--lms-text-lg,15px);font-variant-numeric:tabular-nums}
+.estimate-key{font-size:var(--lms-text-2xs,10.5px);text-transform:uppercase;letter-spacing:.06em;color:var(--lms-ink-muted,#9facb8)}
+.estimate-table{width:100%;border-collapse:collapse;font-size:var(--lms-text-2xs,10.5px)}
+.estimate-table th,.estimate-table td{padding:3px 4px;border-bottom:1px solid var(--lms-line,#35414e);text-align:left;vertical-align:top}
+.estimate-table th{font-weight:600;color:var(--lms-ink-muted,#9facb8)}
+.estimate-table .n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.estimate-table tr.estimate-flag td{color:var(--lms-warning-ink,#ffbf47);background:var(--lms-warning-bg,transparent)}
+.estimate-totals{display:grid;grid-template-columns:1fr auto;gap:2px 8px;margin:0}
+.estimate-totals dt{color:var(--lms-ink-muted,#9facb8)}
+.estimate-totals dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}
+.estimate-warnings{margin:0;padding:0;list-style:none;display:grid;gap:4px}
+.estimate-warnings li{padding:5px 7px;border-left:3px solid var(--lms-warning-line,#ffbf47);background:var(--lms-warning-bg,#10161c);color:var(--lms-ink,inherit)}
+.estimate-actions{display:flex;flex-wrap:wrap;gap:6px}
+.estimate-actions button{flex:1 1 auto}
+.estimate-placeholder{display:inline-block;padding:1px 6px;border-radius:var(--lms-radius-pill,999px);background:var(--lms-warning-bg,#3b3116);color:var(--lms-warning-ink,#ffbf47);font-size:var(--lms-text-2xs,10.5px);font-weight:700;letter-spacing:.04em}
+.estimate-num{display:inline-flex;align-items:center;gap:4px}
+.estimate-num input{width:84px}
+.estimate-dialog-backdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:16px;background:rgba(6,10,18,.55)}
+.estimate-dialog{display:grid;grid-template-rows:auto auto 1fr auto;width:min(760px,100%);max-height:min(860px,calc(100vh - 32px));color:var(--lms-ink,#e8edf2);background:var(--lms-surface-panel,#171e26);border:1px solid var(--lms-line,#35414e);border-radius:var(--lms-radius-lg,10px);box-shadow:var(--lms-shadow-2,0 8px 30px rgba(0,0,0,.4));outline:none}
+.estimate-dialog header,.estimate-dialog footer{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px}
+.estimate-dialog header{border-bottom:1px solid var(--lms-line,#35414e)}
+.estimate-dialog footer{border-top:1px solid var(--lms-line,#35414e)}
+.estimate-dialog h2{margin:0;font-size:var(--lms-text-lg,15px)}
+.estimate-dialog h3{margin:12px 0 4px;font-size:var(--lms-text-sm,12.5px)}
+.estimate-tabs{display:flex;flex-wrap:wrap;gap:4px;padding:8px 14px 0}
+.estimate-dialog-body{overflow:auto;padding:8px 14px 14px;display:grid;gap:6px;align-content:start}
+.estimate-fieldset{border:1px solid var(--lms-line,#35414e);border-radius:var(--lms-radius-md,6px);padding:6px 10px 10px;margin:4px 0;display:grid;gap:4px}
+.estimate-fieldset legend{font-weight:600;padding:0 4px;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.estimate-slot{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.estimate-slot input[type=number]{width:64px}
+.estimate-slot small{flex-basis:100%}
+@media(max-width:720px){.estimate-dialog{max-height:calc(100vh - 16px)}.estimate-num input{width:72px}}

@@ -15,4 +15,8 @@ import type {WaterMetrics} from '../geometry/shoreline/polygonEngine';
 import type {BathymetrySourceMetadata} from '../types/project';
 export type LabelMetrics={placeLabels:number;roadLabels:number;rejectedRoadLabels:number};
 export type ManufacturingScene={widthMm:number;heightMm:number;layers:PhysicalLayer[];objects:Shape[];manufacturingWarnings?:string[];geometryMetrics?:WaterMetrics;labelMetrics?:LabelMetrics;depthMode?:'true-bathymetry'|'decorative-offsets'|'procedural-terrain';bathymetrySource?:BathymetrySourceMetadata};
+// Every shape the laser runs on one physical layer: the layer's own panels plus, on Land / Top only,
+// the scene objects (labels, title, compass, markers). exportSvg.ts writes exactly this set, and the
+// estimate and 3D preview read it through the same function so they can never disagree with the file.
+export const layerExportShapes=(scene:ManufacturingScene,layer:PhysicalLayer):Shape[]=>layer.id==='layer-land'?[...layer.shapes,...scene.objects]:layer.shapes;
 export function assertManufacturingSceneUsable(scene:ManufacturingScene){if(scene.manufacturingWarnings?.length)throw new Error(scene.manufacturingWarnings.join(' '))}

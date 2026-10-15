@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useState,type ReactNode} from 'react';
 import type {GeocoderResult} from '../../map/geocoding/GeocoderService';
 import {ProxyGeocoder} from '../../map/geocoding/GeocoderService';
 import type {MapProject} from '../../types/project';
@@ -18,7 +18,7 @@ import type {MapMarker} from '../../types/project';
 import {MarkerCard} from './MarkerCard';
 import {TerrainControls} from './TerrainControls';
 const fontOptions=FONT_REGISTRY.map(f=><option key={f.id} value={f.id}>{f.label}</option>);
-export function Controls({project,setProject,onSelect,onGenerate,onExport,status,generateError,counts,selectedWater}:{project:MapProject;setProject:(p:MapProject)=>void;onSelect:(r:GeocoderResult)=>void;onGenerate:()=>void;onExport:()=>void;status:string;generateError?:string;counts:{water:number;roads:number;namedRoads:number;places:number};selectedWater?:()=>Promise<GeoMultiPolygon>}){const[q,setQ]=useState('Caldron Falls, Wisconsin'),[results,setResults]=useState<GeocoderResult[]>([]),[error,setError]=useState(''),[searching,setSearching]=useState(false),[checkingDepth,setCheckingDepth]=useState(false),[cropJsonText,setCropJsonText]=useState(''),[cropStatus,setCropStatus]=useState('');const patch=(x:Partial<MapProject>)=>setProject({...project,...x});const search=async()=>{setSearching(true);setError('');try{const r=await new ProxyGeocoder('photon').search(q);setResults(r);if(!r.length)setError('No search results found')}catch(e){setError((e as Error).message)}finally{setSearching(false)}};
+export function Controls({project,setProject,onSelect,onGenerate,onExport,status,generateError,counts,selectedWater,estimate}:{project:MapProject;setProject:(p:MapProject)=>void;onSelect:(r:GeocoderResult)=>void;onGenerate:()=>void;onExport:()=>void;status:string;generateError?:string;counts:{water:number;roads:number;namedRoads:number;places:number};selectedWater?:()=>Promise<GeoMultiPolygon>;estimate?:{summary:string;panel:ReactNode}}){const[q,setQ]=useState('Caldron Falls, Wisconsin'),[results,setResults]=useState<GeocoderResult[]>([]),[error,setError]=useState(''),[searching,setSearching]=useState(false),[checkingDepth,setCheckingDepth]=useState(false),[cropJsonText,setCropJsonText]=useState(''),[cropStatus,setCropStatus]=useState('');const patch=(x:Partial<MapProject>)=>setProject({...project,...x});const search=async()=>{setSearching(true);setError('');try{const r=await new ProxyGeocoder('photon').search(q);setResults(r);if(!r.length)setError('No search results found')}catch(e){setError((e as Error).message)}finally{setSearching(false)}};
  const cropHash=project.map.crop?hashCropSnapshot(serializeCropSnapshot(project)):undefined;
  const copyCropJson=async()=>{try{const json=JSON.stringify(serializeCropSnapshot(project),null,2);setCropJsonText(json);if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(json);setCropStatus('Crop JSON copied to clipboard.')}else{setCropStatus('Clipboard unavailable — copy the JSON below manually.')}}catch(e){setCropStatus((e as Error).message)}};
  const applyCropJson=()=>{try{setProject(applyCropSnapshot(project,JSON.parse(cropJsonText) as CropSnapshot));setCropStatus('Crop applied from JSON. Reload visible vector features to match the restored framing.')}catch(e){setCropStatus(`Apply failed: ${(e as Error).message}`)}};
@@ -136,6 +136,9 @@ export function Controls({project,setProject,onSelect,onGenerate,onExport,status
     <label className="check"><input type="checkbox" checked={project.subtitle.visible} onChange={e=>patch({subtitle:{...project.subtitle,visible:e.target.checked}})}/> Show subtitle</label>
     <small>Drag title/subtitle directly in the Generated Map preview for custom placement; manual placement is preserved until Reset.</small>
    </div></details>
+
+   {estimate&&<><p className="group-label">Production</p>
+   <details open><summary>Estimate<span className="summary-meta">{estimate.summary}</span></summary><div className="section-body">{estimate.panel}</div></details></>}
 
    <details className="section-muted"><summary>Developer: crop reproducibility</summary><div className="section-body">
     <small>{cropHash?`Crop ID: ${cropHash}`:'No crop selected yet — load visible vector features first.'}</small>
