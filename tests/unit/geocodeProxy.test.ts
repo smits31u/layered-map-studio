@@ -100,6 +100,14 @@ describe('provider adapters',()=>{
   expect(buildUserAgent('0.1.0','   ')).toMatch(/GEOCODER_CONTACT/);
  });
 
+ it('is always a header value fetch accepts, with or without a contact (the unset fallback used to hold an em dash)',()=>{
+  for(const agent of [buildUserAgent('0.1.0'),buildUserAgent('0.1.0','Bén — ops@example.test')]){
+   expect(agent).toMatch(/^[\x20-\x7e]+$/);
+   expect(()=>new Headers({'User-Agent':agent})).not.toThrow();
+  }
+  expect(buildUserAgent('0.1.0','Bén — ops@example.test')).toContain('ops@example.test');
+ });
+
  it('normalizes Photon features, reordering its extent',()=>{
   const [result]=createPhotonAdapter().parse({features:[{geometry:{coordinates:[-88.004,45.2352]},properties:{osm_id:7,osm_type:'N',name:'Crivitz',state:'Wisconsin',country:'United States',osm_value:'village',extent:[-88.02,45.25,-87.99,45.22]}}]},MAX_RESULTS);
   expect(result.coordinates).toEqual([-88.004,45.2352]);

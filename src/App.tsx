@@ -1,4 +1,4 @@
-import {Suspense,lazy,useCallback,useEffect,useRef,useState} from 'react';
+import {Suspense,lazy,useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {Controls} from './components/controls/Controls';
 import {GeneratedPreview} from './components/preview/GeneratedPreview';
 import {MapViewer,type MapCapture} from './map/mapViewer/MapViewer';
@@ -13,12 +13,18 @@ import {individualSvgsZip,individualZipName,sceneToSvg} from './export/svg/expor
 import {preloadAllFonts,subscribeFonts} from './text/fontRegistry';
 import {FontLoadNotice} from './components/ui/FontLoadNotice';
 import {ThemeToggle} from './components/ui/ThemeToggle';
+import {lakeSceneToJob} from './production/adapters/lakeScene';
+import {EstimatePanel} from './production/estimate/ui/EstimatePanel';
+import {useEstimateConfig} from './production/estimate/ui/useEstimateConfig';
 // Bundle splitting (Phase 0 backlog item 5): the ornament and topo tools are separate manufacturing
 // targets from the lake map (see the `tool` state comment below) and are only ever rendered once the
 // user actually switches to them. Loading them lazily keeps their code — including each tool's own
 // worker bundles and UI — out of the initial chunk instead of shipping all three tools up front.
 const OrnamentPage=lazy(()=>import('./ornament/ui/OrnamentPage').then(m=>({default:m.OrnamentPage})));
 const TopoPage=lazy(()=>import('./topo/ui/TopoPage').then(m=>({default:m.TopoPage})));
+// The stacked 3D preview brings three.js; it loads the first time its tab is opened, never with the
+// lake tool itself.
+const Preview3D=lazy(()=>import('./production/preview3d/ui/Preview3D'));
 const empty:ExtractedFeatures={water:[],roads:[],places:[]};
 const cropKey=(crop?:CropGeography)=>crop&&JSON.stringify([crop.nw,crop.ne,crop.se,crop.sw]);
 // Generated Map mode unmounts the map; Generate switches back and waits for it to register.
@@ -28,13 +34,16 @@ const download=(name:string,data:string|Uint8Array,type='image/svg+xml')=>{const
 // lightly debounced so rapid typing/clicking coalesces into one rebuild instead of one per
 // keystroke, while still feeling live — see docs/v1-milestones.md.
 const LIVE_DEBOUNCE_MS=120;
+const APP_VERSION=typeof __APP_VERSION__==='string'?__APP_VERSION__:'0.0.0-dev';
+const sizeLabel=(job:{widthMm:number;heightMm:number})=>`${+(job.widthMm/25.4).toFixed(2)} x ${+(job.heightMm/25.4).toFixed(2)} in`;
 
 export default function App(){
- const[project,setProjectState]=useState<MapProject>(defaultProject),[features,setFeatures]=useState(empty),[scene,setScene]=useState<ManufacturingScene>(),[status,setStatus]=useState('Ready'),[mode,setMode]=useState<'map'|'generated'>('map'),[fly,setFly]=useState<{lng:number;lat:number;zoom?:number}>(),[error,setError]=useState('');
+ const[project,setProjectState]=useState<MapProject>(defaultProject),[features,setFeatures]=useState(empty),[scene,setScene]=useState<ManufacturingScene>(),[status,setStatus]=useState('Ready'),[mode,setMode]=useState<'map'|'generated'|'3d'>('map'),[fly,setFly]=useState<{lng:number;lat:number;zoom?:number}>(),[error,setError]=useState('');
  // Which product is being designed. The ornament is a separate manufacturing target that shares this
  // repo's text/geometry/SVG code but none of its project state, so it owns its own store rather than
  // adding an unused branch to MapProject.
  const[tool,setTool]=useState<'lake-map'|'ornament'|'topo'>('lake-map');
+ const[estimateConfig,setEstimateConfig]=useEstimateConfig();
  // GEOMETRY CHANGE tier cache (M-LIVE): the expensive polygon-boolean shoreline/depth work,
  // reused across presentation-only rebuilds. featuresRef lets the debounced callback below always
  // read the latest extracted geography without becoming stale across re-renders.
@@ -122,10 +131,15 @@ export default function App(){
   rebuildScene(next);
  };
  const loaded=features.water.length+features.roads.length+features.places.length>0;
+ // Production planning reads the scene on screen: it is rebuilt live for every layer, size and
+ // setting change, and the estimate settings never feed back into it, so editing a price or a
+ // speed recomputes the estimate without regenerating any geometry.
+ const job=useMemo(()=>scene?lakeSceneToJob(scene):undefined,[scene]);
+ const estimate={summary:scene?`${scene.layers.length} layers`:'Generate first',panel:<EstimatePanel job={job} title={project.title.text} product="Lake depth map" config={estimateConfig} setConfig={setEstimateConfig} appVersion={APP_VERSION}/>};
  // Every hook above has already run, so this early return is stable across renders. The Suspense
  // fallback only ever shows for the moment it takes to fetch that tool's chunk on first visit —
  // once loaded, React caches the lazy component so switching tools again is instant.
  if(tool==='ornament')return <Suspense fallback={<div className="tool-loading">Loading Ornament Studio…</div>}><OrnamentPage onExit={()=>setTool('lake-map')}/></Suspense>;
  if(tool==='topo')return <Suspense fallback={<div className="tool-loading">Loading Topo Map Builder…</div>}><TopoPage onExit={()=>setTool('lake-map')}/></Suspense>;
- return <main className="studio"><Controls project={project} setProject={setProjectLive} onSelect={select} onGenerate={generate} onExport={exportIt} status={status} generateError={error} counts={{water:features.water.length,roads:features.roads.length,namedRoads:features.roads.filter(r=>r.name).length,places:features.places.length}} selectedWater={selectedWater}/><section className="workspace"><nav><div className="nav-tabs" role="group" aria-label="View"><button className={mode==='map'?'active':''} onClick={()=>setMode('map')}>Map Mode</button><button className={mode==='generated'?'active':''} onClick={()=>setMode('generated')}>Generated Map</button></div>{error&&<span className="nav-error error" role="alert" title={error}>{error}</span>}<div className="nav-tools"><button onClick={()=>setTool('ornament')}>Ornament Studio →</button><button onClick={()=>setTool('topo')}>Topo Map Builder →</button></div><ThemeToggle/></nav><FontLoadNotice/>{mode==='map'?<MapViewer project={project} flyTo={fly} onView={m=>setProjectState(p=>({...p,map:m}))} onCrop={crop=>setProjectState(p=>({...p,map:{...p.map,crop}}))} onStatus={setStatus} captureRef={captureRef} onFeatures={f=>{applyFeatures(f,projectRef.current.map.crop);const total=f.water.length+f.roads.length+f.places.length;setStatus(total?`Loaded ${f.water.length} water, ${f.roads.length} roads, ${f.places.length} places`:'No vector features found in the selected crop.')}}/>:<GeneratedPreview scene={scene} featuresLoaded={loaded} project={project} error={error} onCommitOverride={commitOverride}/>}</section></main>;
+ return <main className="studio"><Controls project={project} setProject={setProjectLive} onSelect={select} onGenerate={generate} onExport={exportIt} status={status} generateError={error} counts={{water:features.water.length,roads:features.roads.length,namedRoads:features.roads.filter(r=>r.name).length,places:features.places.length}} selectedWater={selectedWater} estimate={estimate}/><section className="workspace"><nav><div className="nav-tabs" role="group" aria-label="View"><button className={mode==='map'?'active':''} onClick={()=>setMode('map')}>Map Mode</button><button className={mode==='generated'?'active':''} onClick={()=>setMode('generated')}>Generated Map</button><button className={mode==='3d'?'active':''} onClick={()=>setMode('3d')}>3D Preview</button></div>{error&&<span className="nav-error error" role="alert" title={error}>{error}</span>}<div className="nav-tools"><button onClick={()=>setTool('ornament')}>Ornament Studio →</button><button onClick={()=>setTool('topo')}>Topo Map Builder →</button></div><ThemeToggle/></nav><FontLoadNotice/>{mode==='map'?<MapViewer project={project} flyTo={fly} onView={m=>setProjectState(p=>({...p,map:m}))} onCrop={crop=>setProjectState(p=>({...p,map:{...p.map,crop}}))} onStatus={setStatus} captureRef={captureRef} onFeatures={f=>{applyFeatures(f,projectRef.current.map.crop);const total=f.water.length+f.roads.length+f.places.length;setStatus(total?`Loaded ${f.water.length} water, ${f.roads.length} roads, ${f.places.length} places`:'No vector features found in the selected crop.')}}/>:mode==='3d'?(job?<Suspense fallback={<div className="empty">Loading 3D preview…</div>}><Preview3D job={job} config={estimateConfig} title={project.title.text} sizeLabel={sizeLabel(job)} appVersion={APP_VERSION}/></Suspense>:<div className="empty">Generate the scene to see it as a stacked 3D object.</div>):<GeneratedPreview scene={scene} featuresLoaded={loaded} project={project} error={error} onCommitOverride={commitOverride}/>}</section></main>;
 }
