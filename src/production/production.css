@@ -34,3 +34,4 @@
 .estimate-slot input[type=number]{width:64px}
 .estimate-slot small{flex-basis:100%}
 @media(max-width:720px){.estimate-dialog{max-height:calc(100vh - 16px)}.estimate-num input{width:72px}}
+
