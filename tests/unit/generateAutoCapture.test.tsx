@@ -25,7 +25,7 @@ beforeEach(()=>{
  fake=installFakeMapLibre();
  // jsdom lays nothing out; give the crop frame an on-screen box inside the 400 px fake canvas.
  rect=vi.spyOn(Element.prototype,'getBoundingClientRect').mockImplementation(function(this:Element){
-  const r=this.classList.contains('crop-frame')?{left:80,top:100,right:320,bottom:300}:{left:0,top:0,right:400,bottom:400};
+  const r=this.classList.contains('crop-frame')?{left:60,top:90,right:340,bottom:310}:{left:0,top:0,right:400,bottom:400};
   return {...r,x:r.left,y:r.top,width:r.right-r.left,height:r.bottom-r.top,toJSON(){}} as DOMRect;
  });
 });
