@@ -1,10 +1,11 @@
 /* Estimate panel and settings dialog. Built from the studio's design tokens so it follows the theme. */
-.estimate-panel{display:grid;gap:var(--lms-space-2,8px);font-size:var(--lms-text-xs,11.5px)}
+.estimate-panel{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--lms-space-2,8px);min-width:0;font-size:var(--lms-text-xs,11.5px)}
 .estimate-headline{display:grid;grid-template-columns:1fr 1fr;gap:var(--lms-space-2,8px)}
 .estimate-headline>div{display:grid;gap:2px;padding:var(--lms-space-2,8px);background:var(--lms-surface-raised,#222c36);border:1px solid var(--lms-line,#35414e);border-radius:var(--lms-radius-md,6px)}
 .estimate-headline b{font-size:var(--lms-text-lg,15px);font-variant-numeric:tabular-nums}
 .estimate-key{font-size:var(--lms-text-2xs,10.5px);text-transform:uppercase;letter-spacing:.06em;color:var(--lms-ink-muted,#9facb8)}
-.estimate-table{width:100%;border-collapse:collapse;font-size:var(--lms-text-2xs,10.5px)}
+.estimate-table{width:100%;max-width:100%;border-collapse:collapse;font-size:var(--lms-text-2xs,10.5px)}
+.estimate-table td small{font-size:inherit;color:var(--lms-ink-muted,#9facb8)}
 .estimate-table th,.estimate-table td{padding:3px 4px;border-bottom:1px solid var(--lms-line,#35414e);text-align:left;vertical-align:top}
 .estimate-table th{font-weight:600;color:var(--lms-ink-muted,#9facb8)}
 .estimate-table .n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}

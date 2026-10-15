@@ -145,6 +145,18 @@ export function Preview3D({job,config,title,sizeLabel,appVersion}:{job:Productio
   t.controls.target.copy(center);
   t.camera.position.copy(center).addScaledVector(direction,distance);
   t.camera.near=Math.max(.5,distance/200);t.camera.far=distance*20;t.camera.updateProjectionMatrix();
+  // A sphere is a loose fit for a flat board. Pull in until the box's projected corners fill about
+  // 90% of the frame; a few rounds converge because the projection is nearly linear in 1/distance.
+  const corners=[0,1,2,3,4,5,6,7].map(i=>new Vector3(i&1?box.max.x:box.min.x,i&2?box.max.y:box.min.y,i&4?box.max.z:box.min.z));
+  let d=distance;
+  for(let round=0;round<4;round++){
+   t.camera.updateMatrixWorld();t.camera.lookAt(center);t.camera.updateMatrixWorld();
+   const extent=Math.max(...corners.map(c=>{const p=c.clone().project(t.camera);return Math.max(Math.abs(p.x),Math.abs(p.y))}));
+   if(!Number.isFinite(extent)||extent<=0)break;
+   d*=extent/.9;
+   t.camera.position.copy(center).addScaledVector(direction,d);
+  }
+  t.camera.near=Math.max(.5,d/200);t.camera.far=d*20;t.camera.updateProjectionMatrix();
   t.controls.update();t.render();
  },[]);
 
@@ -166,7 +178,7 @@ export function Preview3D({job,config,title,sizeLabel,appVersion}:{job:Productio
    meshesRef.current.set(id,mesh);t.stack.add(mesh);
    built++;setBuild({state:'building',built,message:''});
   });
-  handle.done.then(({durationMs})=>{setBuild({state:'ready',built,message:`Built ${built} layers in ${(durationMs/1000).toFixed(1)} s${runner.offMainThread?' off the main thread':''}.`})},error=>{if(!isMeshBuildCancelled(error))setBuild({state:'error',built,message:(error as Error).message})});
+  handle.done.then(({durationMs})=>{setBuild({state:'ready',built,message:`Built ${built} layers in ${durationMs<1000?`${Math.max(1,Math.round(durationMs))} ms`:`${(durationMs/1000).toFixed(1)} s`}${runner.offMainThread?' off the main thread':''}.`})},error=>{if(!isMeshBuildCancelled(error))setBuild({state:'error',built,message:(error as Error).message})});
   return ()=>{handle.cancel();runner.dispose()};
   // layerKey, not layers: a config edit that changes neither the pieces nor their thicknesses (a
   // price, a recipe's material) must not throw away and rebuild every solid.
@@ -251,7 +263,7 @@ export function Preview3D({job,config,title,sizeLabel,appVersion}:{job:Productio
   <aside className="preview3d-panel" aria-label="3D preview settings">
    <p className="preview3d-status" role="status" data-testid="preview3d-status">{build.state==='building'?`Building layers ${build.built}/${layers.length}…`:build.state==='error'?`3D preview failed: ${build.message}`:build.message}</p>
    <details open><summary>Layers</summary>
-    {[...layers].reverse().map(l=><label key={l.id} className="preview3d-layer"><input type="color" value={colorOf(l.id)} onChange={e=>setColors({...colors,[l.id]:e.target.value})} aria-label={`Colour of ${l.name}`}/><span>{l.name}</span><small>{l.thicknessMm} mm</small></label>)}
+    {[...layers].reverse().map(l=><div key={l.id} className="preview3d-layer"><input type="color" value={colorOf(l.id)} onChange={e=>setColors({...colors,[l.id]:e.target.value})} aria-label={`Colour of ${l.name}`}/><span>{l.name}</span><span className="preview3d-thickness">{l.thicknessMm} mm</span></div>)}
     <button className="btn-quiet" onClick={()=>setColors({})}>Default colours</button>
     <small>Thickness comes from each layer's material in the estimate settings.</small>
    </details>

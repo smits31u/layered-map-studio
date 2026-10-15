@@ -40,13 +40,14 @@ export function EstimatePanel({job,title,product,config,setConfig,appVersion}:{j
     <div><span className="estimate-key">Machine time</span><b data-testid="estimate-time">{formatMachineTime(e.totals.machineMin,e.timeConfidence)}</b></div>
    </div>
    <small className="notice" data-severity={e.timeConfidence==='calibrated'?'success':'warning'} data-testid="estimate-confidence">{confidenceLabel(e.timeConfidence)}. Recipe: {e.recipe?.label??'none for this size'}.</small>
+   {/* Sized for the 330px sidebar: material and sheet share the piece cell, engrave is in mm². */}
    <table className="estimate-table" aria-label="Estimate per layer">
-    <thead><tr><th>Piece</th><th>Material</th><th className="n">Sheet</th><th className="n">Cut</th><th className="n">Score</th><th className="n">Engrave</th><th className="n">Time</th></tr></thead>
-    <tbody>{e.pieces.map(p=><tr key={p.id} className={p.fitsStock&&p.fitsBed?undefined:'estimate-flag'}><td title={`${(p.widthMm/MM_PER_IN).toFixed(2)} x ${(p.heightMm/MM_PER_IN).toFixed(2)} in`}>{p.name}</td><td>{p.materialName}</td><td className="n">{p.fitsStock?p.sheetFraction.toFixed(2):'no fit'}</td><td className="n">{length(p.cutLengthMm)}</td><td className="n">{length(p.scoreLengthMm)}</td><td className="n">{Math.round(p.engraveAreaMm2).toLocaleString('en-US')} mm²</td><td className="n">{formatMachineTime(p.minutes.total,e.timeConfidence)}</td></tr>)}</tbody>
+    <thead><tr><th>Piece</th><th className="n">Cut</th><th className="n">Score</th><th className="n">Engr. mm²</th><th className="n">Time</th></tr></thead>
+    <tbody>{e.pieces.map(p=><tr key={p.id} className={p.fitsStock&&p.fitsBed?undefined:'estimate-flag'}><td title={`${(p.widthMm/MM_PER_IN).toFixed(2)} x ${(p.heightMm/MM_PER_IN).toFixed(2)} in`}>{p.name}<small>{p.materialName} · {p.fitsStock?`${p.sheetFraction.toFixed(2)} sheet`:'no sheet fits'}</small></td><td className="n">{length(p.cutLengthMm)}</td><td className="n">{length(p.scoreLengthMm)}</td><td className="n">{Math.round(p.engraveAreaMm2).toLocaleString('en-US')}</td><td className="n">{formatMachineTime(p.minutes.total,e.timeConfidence)}</td></tr>)}</tbody>
    </table>
    <table className="estimate-table" aria-label="Sheets by material">
-    <thead><tr><th>Material</th><th>Stock</th><th className="n">Sheets</th><th className="n">Cost</th></tr></thead>
-    <tbody>{e.materials.map(m=><tr key={m.materialId} className={m.unplaced?'estimate-flag':undefined}><td>{m.materialName}</td><td>{m.stockName??'no stock fits'}{m.piecesPerSheet>1?` (${m.piecesPerSheet}/sheet)`:''}</td><td className="n">{+m.sheets.toFixed(2)}</td><td className="n">{money(m.cost)}</td></tr>)}</tbody>
+    <thead><tr><th>Material and stock</th><th className="n">Sheets</th><th className="n">Cost</th></tr></thead>
+    <tbody>{e.materials.map(m=><tr key={m.materialId} className={m.unplaced?'estimate-flag':undefined}><td>{m.materialName}<small>{m.stockName??'no stock fits'}{m.piecesPerSheet>1?` (${m.piecesPerSheet}/sheet)`:''}</small></td><td className="n">{+m.sheets.toFixed(2)}</td><td className="n">{money(m.cost)}</td></tr>)}</tbody>
    </table>
    <dl className="estimate-totals">
     <dt>Material</dt><dd>{money(e.totals.materialCost)}</dd>

@@ -30,7 +30,7 @@ describe('EstimatePanel',()=>{
   render(<Harness job={lakeSceneToJob(scene)}/>);
   const rows=within(screen.getByRole('table',{name:'Estimate per layer'})).getAllByRole('row').slice(1);
   // Default scene: Land, three depth panels, Base, plus the 11x14 recipe's TruFlat border.
-  expect(rows.map(r=>r.querySelector('td')!.textContent)).toEqual(['Border','Land / Top','Artistic Depth 1','Artistic Depth 2','Artistic Depth 3','Base / Backer']);
+  expect(rows.map(r=>r.querySelector('td')!.firstChild!.textContent)).toEqual(['Border','Land / Top','Artistic Depth 1','Artistic Depth 2','Artistic Depth 3','Base / Backer']);
   expect(screen.getByTestId('estimate-confidence').textContent).toMatch(/PLACEHOLDER speeds - not a real time\. Recipe: 11x14/);
   expect(screen.getByTestId('estimate-time').textContent).toMatch(/^~/);
   expect(screen.getByTestId('estimate-total').textContent).toMatch(/^\$\d+\.\d\d$/);
