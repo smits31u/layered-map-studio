@@ -155,7 +155,12 @@ describe('saved lake projects',()=>{
   await waitFor(()=>expect(name()).toBe('Plain Lake 14x11'));
   await settle();
   expect(status()).toMatch(/^Saved/);
-  // Moving the camera reports a new view and crop, and that is a change.
+  // MapLibre answers a layout resize with another moveend; nobody touched the map, so still saved.
+  act(()=>fake.emit('moveend'));
+  await settle();
+  expect(status()).toMatch(/^Saved/);
+  // The user drags the map: the camera moves, and that is a change.
+  fireEvent.pointerDown(document.querySelector('.workspace')!);
   act(()=>{fake.state.center={lng:fake.state.center.lng+.01,lat:fake.state.center.lat};fake.emit('moveend')});
   await waitFor(()=>expect(status()).toBe('Unsaved changes'));
  },20000);
