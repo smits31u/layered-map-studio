@@ -29,9 +29,11 @@ describe('EstimatePanel',()=>{
  it('shows a row per piece (border included), sheets by material and an unverified time',()=>{
   render(<Harness job={lakeSceneToJob(scene)}/>);
   const rows=within(screen.getByRole('table',{name:'Estimate per layer'})).getAllByRole('row').slice(1);
-  // Default scene: Land, three depth panels, Base, plus the 11x14 recipe's TruFlat border.
-  expect(rows.map(r=>r.querySelector('td')!.firstChild!.textContent)).toEqual(['Border','Land / Top','Artistic Depth 1','Artistic Depth 2','Artistic Depth 3','Base / Backer']);
-  expect(screen.getByTestId('estimate-confidence').textContent).toMatch(/PLACEHOLDER speeds - not a real time\. Recipe: 11x14/);
+  // Default scene: Land, three depth panels, Base, plus the 11x14 recipe's hand-made TruFlat border.
+  expect(rows.map(r=>r.querySelector('td')!.firstChild!.textContent)).toEqual(['Border (by hand)','Land / Top','Artistic Depth 1','Artistic Depth 2','Artistic Depth 3','Base / Backer']);
+  expect(rows[0].textContent).toContain('by hand');
+  // The title, compass and roads are engraved on the TruFlat top, and the line interval is not known yet.
+  expect(screen.getByTestId('estimate-confidence').textContent).toBe('PLACEHOLDER inputs - not a real time. Not entered yet: line interval (TruFlat premium top (maple/cherry)). Recipe: 11x14. Machine: xTool P2S 55W CO2 (Home).');
   expect(screen.getByTestId('estimate-time').textContent).toMatch(/^~/);
   expect(screen.getByTestId('estimate-total').textContent).toMatch(/^\$\d+\.\d\d$/);
  });
@@ -43,20 +45,43 @@ describe('EstimatePanel',()=>{
   fireEvent.click(screen.getByRole('button',{name:'Estimate settings…'}));
   fireEvent.click(screen.getByRole('tab',{name:'Rates & fit'}));
   fireEvent.change(screen.getByLabelText(/^Design\$/),{target:{value:'40'}});
-  fireEvent.change(screen.getByLabelText(/^Design time/),{target:{value:'1'}});
+  fireEvent.change(screen.getByLabelText(/^Default design time/),{target:{value:'1'}});
   expect(screen.getByTestId('estimate-total').textContent).not.toBe(before);
   const toNumber=(s:string|null)=>Number(s!.replace('$',''));
   expect(toNumber(screen.getByTestId('estimate-total').textContent)).toBeCloseTo(toNumber(before)+40,2);
  });
 
- it('editing a speed clears that material\'s PLACEHOLDER label',()=>{
+ it('only unentered fields carry the PLACEHOLDER label; entering the line interval clears it and the warning',()=>{
   render(<Harness job={lakeSceneToJob(scene)}/>);
   fireEvent.click(screen.getByRole('button',{name:'Estimate settings…'}));
-  expect(screen.getByTestId('placeholder-mdf-1-8').textContent).toBe('PLACEHOLDER - calibrate');
-  const mdf=screen.getByTestId('placeholder-mdf-1-8').closest('fieldset')!;
-  fireEvent.change(within(mdf).getByLabelText(/^Cut speed/),{target:{value:'18'}});
-  expect(screen.queryByTestId('placeholder-mdf-1-8')).toBeNull();
-  expect(screen.getByTestId('placeholder-truflat')).toBeTruthy();
+  const label=(id:string)=>screen.getByTestId(id).closest('label')!;
+  expect(label('xtool-p2s-55w-truflat-cutSpeedMmS').textContent).not.toContain('PLACEHOLDER');
+  expect(label('xtool-p2s-55w-truflat-lineIntervalMm').textContent).toContain('PLACEHOLDER - calibrate');
+  fireEvent.change(screen.getByTestId('xtool-p2s-55w-truflat-lineIntervalMm'),{target:{value:'0.08'}});
+  expect(label('xtool-p2s-55w-truflat-lineIntervalMm').textContent).not.toContain('PLACEHOLDER');
+  expect(screen.getByTestId('estimate-confidence').textContent).toMatch(/^Uncalibrated/);
+  expect(screen.getByTestId('estimate-time').textContent).toMatch(/^~/);
+ });
+
+ it('the Sterlings machines are listed and each recipe names its machine',()=>{
+  render(<Harness job={lakeSceneToJob(scene)}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Estimate settings…'}));
+  expect(within(screen.getByRole('group',{name:'Machine'})).getAllByRole('button').map(b=>b.textContent)).toEqual(['xTool P2S 55W CO2 (Home)','OMTech (Sterlings)','Thunder (Sterlings)','+ Machine']);
+  fireEvent.click(screen.getByRole('tab',{name:'Layer recipes'}));
+  expect((screen.getByLabelText('Machine for 18x24') as HTMLSelectElement).value).toBe('omtech-sterlings');
+  expect((screen.getByLabelText('Machine for 24x36') as HTMLSelectElement).value).toBe('thunder-sterlings');
+ });
+
+ it('timed design work is billed instead of the default design hours',()=>{
+  localStorage.setItem('layered-map-studio.design-timer.v1',JSON.stringify({running:false,accumulatedMs:30*60000,lastActivity:null}));
+  try{
+   render(<Harness job={lakeSceneToJob(scene)}/>);
+   expect(screen.getByTestId('design-timer').textContent).toBe('0:30:00');
+   expect(screen.getByTestId('estimate-design').textContent).toBe('$12.50');
+   fireEvent.click(screen.getByRole('button',{name:'Reset'}));
+   expect(screen.getByTestId('estimate-design').textContent).toBe('$0.00');
+   expect(screen.getByRole('button',{name:'Start'})).toBeTruthy();
+  }finally{localStorage.removeItem('layered-map-studio.design-timer.v1')}
  });
 
  it('records an actual job time and offers the multiplier it implies',()=>{
@@ -69,7 +94,8 @@ describe('EstimatePanel',()=>{
   const table=screen.getByRole('table',{name:'Estimate versus actual'});
   expect(within(table).getByText('95.0')).toBeTruthy();
   fireEvent.click(screen.getByRole('button',{name:/^Use multiplier x/}));
-  expect(configs.at(-1)!.machine.travelMultiplier).not.toBe(1.3);
+  expect(configs.at(-1)!.machines.find(m=>m.id==='xtool-p2s-55w')!.travelMultiplier).not.toBe(1.3);
+  expect(configs.at(-1)!.calibration[0].machineId).toBe('xtool-p2s-55w');
  });
 
  it('exports the estimate JSON as a download',()=>{

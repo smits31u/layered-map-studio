@@ -28,15 +28,17 @@ export type JobPiece={id:string;name:string;role:'layer'|'border';widthMm:number
 
 export type ProductionJob={product:string;widthMm:number;heightMm:number;pieces:JobPiece[]};
 
-export type PieceMetrics={cutLengthMm:number;scoreLengthMm:number;engraveAreaMm2:number};
+// scoreAreaMm2 is the area the stroked lines cover (length x stroke width), for a shop that engraves
+// them rather than scoring them.
+export type PieceMetrics={cutLengthMm:number;scoreLengthMm:number;scoreAreaMm2:number;engraveAreaMm2:number};
 
 // Lengths and areas are invariant under the translate/rotate transforms scene objects carry;
 // transformScale covers the scale() none of them use today.
 export function shapeMetrics(shape:JobShape):PieceMetrics{
  const subpaths=parsePathData(shape.d),scale=transformScale(shape.transform);
- if(shape.operation==='cut')return{cutLengthMm:pathLength(subpaths)*scale,scoreLengthMm:0,engraveAreaMm2:0};
- if(shape.operation==='score')return{cutLengthMm:0,scoreLengthMm:pathLength(subpaths)*scale,engraveAreaMm2:0};
- return{cutLengthMm:0,scoreLengthMm:0,engraveAreaMm2:evenOddArea(subpaths)*scale*scale};
+ if(shape.operation==='cut')return{cutLengthMm:pathLength(subpaths)*scale,scoreLengthMm:0,scoreAreaMm2:0,engraveAreaMm2:0};
+ if(shape.operation==='score'){const length=pathLength(subpaths)*scale;return{cutLengthMm:0,scoreLengthMm:length,scoreAreaMm2:length*(shape.strokeWidthMm??0)*scale,engraveAreaMm2:0}}
+ return{cutLengthMm:0,scoreLengthMm:0,scoreAreaMm2:0,engraveAreaMm2:evenOddArea(subpaths)*scale*scale};
 }
 
 // Parsing a lake panel is the expensive part (a shoreline is tens of thousands of points), and a
@@ -46,8 +48,8 @@ const metricsCache=new WeakMap<JobPiece,PieceMetrics>();
 export function pieceMetrics(piece:JobPiece):PieceMetrics{
  const cached=metricsCache.get(piece);
  if(cached)return cached;
- const total={cutLengthMm:0,scoreLengthMm:0,engraveAreaMm2:0};
- for(const shape of piece.shapes){const m=shapeMetrics(shape);total.cutLengthMm+=m.cutLengthMm;total.scoreLengthMm+=m.scoreLengthMm;total.engraveAreaMm2+=m.engraveAreaMm2}
+ const total={cutLengthMm:0,scoreLengthMm:0,scoreAreaMm2:0,engraveAreaMm2:0};
+ for(const shape of piece.shapes){const m=shapeMetrics(shape);total.cutLengthMm+=m.cutLengthMm;total.scoreLengthMm+=m.scoreLengthMm;total.scoreAreaMm2+=m.scoreAreaMm2;total.engraveAreaMm2+=m.engraveAreaMm2}
  metricsCache.set(piece,total);
  return total;
 }
