@@ -44,7 +44,7 @@ const settingsRow=(o:Record<string,unknown>):MaterialSettings|undefined=>typeof 
  materialId:o.materialId,
  cutSpeedMmS:num(o.cutSpeedMmS,50,.1,2000),cutPowerPct:num(o.cutPowerPct,70,0,100),cutPasses:Math.round(num(o.cutPasses,1,1,20)),
  scoreSpeedMmS:num(o.scoreSpeedMmS,100,.1,2000),scorePowerPct:num(o.scorePowerPct,20,0,100),
- engraveSpeedMmS:num(o.engraveSpeedMmS,400,.1,5000),engravePowerPct:num(o.engravePowerPct,30,0,100),lineIntervalMm:num(o.lineIntervalMm,.1,.005,5),
+ engraveSpeedMmS:num(o.engraveSpeedMmS,400,.1,5000),engravePowerPct:num(o.engravePowerPct,30,0,100),lineIntervalMm:num(o.lineIntervalMm,.1,.001,5),
  placeholder:placeholderFields(o.placeholder),
 }:undefined;
 
@@ -103,6 +103,7 @@ export function clampEstimateConfig(raw:unknown):EstimateConfig{
   chargeWholeSheets:bool(o.chargeWholeSheets,base.chargeWholeSheets),
   borderWidthMm:num(o.borderWidthMm,base.borderWidthMm,1,500),
   calibration:[],
+  lineIntervalUnit:o.lineIntervalUnit==='lpi'||o.lineIntervalUnit==='mm'||o.lineIntervalUnit==='lpcm'?o.lineIntervalUnit:base.lineIntervalUnit,
  };
  config.calibration=list(o.calibration,e=>calibrationEntry(e,config.defaultMachineId))??[];
  // Every material needs a settings row on every machine for the time estimate; a missing one gets

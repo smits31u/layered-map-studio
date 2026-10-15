@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
-import {PLACEHOLDER_LABEL,createDefaultEstimateConfig,type EstimateConfig,type LayerRecipe,type MachineProfile,type MaterialSettings,type RecipeSlot,type SettingField,type StockItem} from '../config';
+import {LINE_INTERVAL_UNITS,PLACEHOLDER_LABEL,createDefaultEstimateConfig,lineIntervalFromUnit,lineIntervalToUnit,type LineIntervalUnit,type EstimateConfig,type LayerRecipe,type MachineProfile,type MaterialSettings,type RecipeSlot,type SettingField,type StockItem} from '../config';
 
 type Tab='machines'|'materials'|'recipes'|'rates';
 
@@ -34,6 +34,10 @@ export function EstimateSettings({config,setConfig,onClose}:{config:EstimateConf
  const reset=()=>{if(window.confirm('Reset every estimate setting to the defaults? Calibration entries are kept.'))setConfig({...createDefaultEstimateConfig(),calibration:config.calibration})};
  const field=(s:MaterialSettings,key:SettingField,label:string,suffix:string,min:number,step:number,round=false)=><Num label={label} suffix={suffix} value={s[key]} min={min} step={step} unverified={s.placeholder.includes(key)} testId={`${machine.id}-${s.materialId}-${key}`} onChange={v=>v!==null&&patchSettings(s.materialId,key,round?Math.round(v):v)}/>;
 
+ // Shown and typed in the chosen unit (xTool Studio's lines/cm by default), stored in mm.
+ const unit=config.lineIntervalUnit;
+ const lineInterval=(s:MaterialSettings)=><Num label="Line interval" suffix={LINE_INTERVAL_UNITS[unit]} value={Number(lineIntervalToUnit(s.lineIntervalMm,unit).toFixed(unit==='mm'?4:1))} min={unit==='mm'?.001:1} step={unit==='mm'?.005:10} unverified={s.placeholder.includes('lineIntervalMm')} testId={`${machine.id}-${s.materialId}-lineIntervalMm`} onChange={v=>v!==null&&v>0&&patchSettings(s.materialId,'lineIntervalMm',lineIntervalFromUnit(v,unit))}/>;
+
  return <div className="estimate-dialog-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
   <div className="estimate-dialog" role="dialog" aria-modal="true" aria-label="Estimate settings" tabIndex={-1} ref={ref}>
    <header><h2>Estimate settings</h2><button className="btn-quiet" onClick={onClose} aria-label="Close settings">Close</button></header>
@@ -44,13 +48,13 @@ export function EstimateSettings({config,setConfig,onClose}:{config:EstimateConf
      <div className="field-pair"><label>Name <input value={machine.name} onChange={e=>patchMachine({name:e.target.value})}/></label><label>Location <input value={machine.location} onChange={e=>patchMachine({location:e.target.value})}/></label></div>
      <div className="field-pair"><Num label="Bed width" suffix="mm" value={machine.bedWidthMm} min={10} step={1} unverified={machine.bedPlaceholder} onChange={v=>v!==null&&patchMachine({bedWidthMm:v,bedPlaceholder:false})}/><Num label="Bed height" suffix="mm" value={machine.bedHeightMm} min={10} step={1} unverified={machine.bedPlaceholder} onChange={v=>v!==null&&patchMachine({bedHeightMm:v,bedPlaceholder:false})}/></div>
      <div className="field-pair"><Num label="Laser rate" suffix="$/h" value={machine.hourlyRate} step={1} onChange={v=>v!==null&&patchMachine({hourlyRate:v})}/><Num label="Overhead per piece" suffix="min" value={machine.perPieceOverheadMin} step={.5} onChange={v=>v!==null&&patchMachine({perPieceOverheadMin:v})}/></div>
-     <Num label="Travel multiplier" suffix="x" value={machine.travelMultiplier} min={.1} step={.05} onChange={v=>v!==null&&patchMachine({travelMultiplier:v})}/>
+     <div className="field-pair"><Num label="Travel multiplier" suffix="x" value={machine.travelMultiplier} min={.1} step={.05} onChange={v=>v!==null&&patchMachine({travelMultiplier:v})}/><label>Line interval in <select aria-label="Line interval unit" value={unit} onChange={e=>setConfig({...config,lineIntervalUnit:e.target.value as LineIntervalUnit})}>{(Object.keys(LINE_INTERVAL_UNITS) as LineIntervalUnit[]).map(u=><option key={u} value={u}>{LINE_INTERVAL_UNITS[u]}</option>)}</select></label></div>
      <label className="check"><input type="checkbox" checked={config.defaultMachineId===machine.id} onChange={e=>e.target.checked&&setConfig({...config,defaultMachineId:machine.id})}/> Default machine (sizes with no recipe and no bed that fits)</label>
      <small>Time per piece = (cut length x passes / cut speed + score length / score speed + engrave area / (engrave speed x line interval)) x travel multiplier + overhead. Power does not change the time; it is kept here as your reference.</small>
      {machine.settings.map(s=><fieldset key={s.materialId} className="estimate-fieldset"><legend>{materialName(s.materialId)}{s.placeholder.length===0?<span className="estimate-entered">all entered</span>:<button className="btn-quiet" onClick={()=>markPlaceholder(s.materialId)} title="Label every value in this row as unverified again">Mark all unverified</button>}</legend>
       <div className="field-pair">{field(s,'cutSpeedMmS','Cut speed','mm/s',.1,1)}{field(s,'cutPowerPct','Cut power','%',0,1)}</div>
       <div className="field-pair">{field(s,'cutPasses','Cut passes','',1,1,true)}{field(s,'engraveSpeedMmS','Engrave speed','mm/s',.1,10)}</div>
-      <div className="field-pair">{field(s,'engravePowerPct','Engrave power','%',0,1)}{field(s,'lineIntervalMm','Line interval','mm',.005,.01)}</div>
+      <div className="field-pair">{field(s,'engravePowerPct','Engrave power','%',0,1)}{lineInterval(s)}</div>
       <div className="field-pair">{field(s,'scoreSpeedMmS','Score speed','mm/s',.1,1)}{field(s,'scorePowerPct','Score power','%',0,1)}</div>
      </fieldset>)}
      <button className="btn-quiet" onClick={removeMachine} disabled={config.machines.length<2}>Remove this machine</button>

@@ -96,7 +96,8 @@ describe('machine time',()=>{
   expect(base.minutes.cut).toBeCloseTo(1905/50/60,6);
   expect(base.minutes.total).toBeCloseTo(1905/50/60*1.3+3,6);
   const top=e.pieces.find(p=>p.id==='layer-land')!;
-  expect(top.minutes.engrave).toBeCloseTo(20/(400*.1)/60,9);
+  // Line interval 300 lines/cm = 1/30 mm.
+  expect(top.minutes.engrave).toBeCloseTo(20/(400/30)/60,9);
  });
 
  it('says which unverified inputs the time depends on, and only those',()=>{
@@ -104,13 +105,17 @@ describe('machine time',()=>{
   const cutOnly=estimateJob(job(14,11,5),testConfig());
   expect(cutOnly.placeholderInputs).toEqual([]);
   expect(cutOnly.timeConfidence).toBe('uncalibrated');
-  // Engraving the top needs the line interval, which is not known yet.
-  const engraved=estimateJob(job(14,11,5,[glyph]),testConfig());
-  expect(engraved.timeConfidence).toBe('placeholder');
-  expect(engraved.placeholderInputs).toEqual(['line interval (TruFlat premium top (maple/cherry))']);
-  // The OMTech's settings are all copied from the P2S and unverified.
-  const omtech=estimateJob(job(24,18,5),testConfig());
-  expect(omtech.placeholderInputs).toEqual(['cut speed (Birch ply)','cut passes (Birch ply)','cut speed (1/8" MDF)','cut passes (1/8" MDF)']);
+  // Engraving the top (glyphs and engraved roads): speed and line interval are Ben's too.
+  const engraved=estimateJob(job(14,11,5,[glyph,road]),testConfig());
+  expect(engraved.placeholderInputs).toEqual([]);
+  expect(engraved.timeConfidence).toBe('uncalibrated');
+  // Scoring the roads instead needs the score speed, which is not known.
+  const scored=estimateJob(job(14,11,5,[glyph,road]),testConfig({strokedLines:'score'}));
+  expect(scored.timeConfidence).toBe('placeholder');
+  expect(scored.placeholderInputs).toEqual(['score speed (TruFlat premium top (maple/cherry))']);
+  // The Sterlings machines run Ben's settings.
+  expect(estimateJob(job(24,18,5),testConfig()).placeholderInputs).toEqual([]);
+  expect(estimateJob(job(36,24,6),testConfig()).placeholderInputs).toEqual([]);
  });
 
  it('is never shown more precisely than its confidence allows',()=>{
@@ -216,6 +221,10 @@ describe('cost',()=>{
 
  it('says the Sterlings machines\' beds are not verified',()=>{
   expect(estimateJob(job(24,18,5),testConfig()).warnings.join(' ')).toMatch(/OMTech \(Sterlings\): bed size not verified/);
+  // The Thunder's 3 x 5 ft bed is known, and a 24x36 fits it exactly along 36 in.
+  const thunder=estimateJob(job(36,24,6),testConfig());
+  expect(thunder.machine.id).toBe('thunder-sterlings');
+  expect(thunder.warnings.join(' ')).not.toMatch(/bed/);
  });
 
  it('adds the frame and design time; timed design replaces the default',()=>{
@@ -258,10 +267,10 @@ describe('calibration',()=>{
 describe('exports',()=>{
  const meta={product:'Lake depth map',title:'Mary Lake <MI>',generatedAt:'2026-10-14T12:00:00.000Z',appVersion:'0.1.0'};
  it('the JSON carries the schema, machine, totals, per-piece numbers and confidence',()=>{
-  const config=testConfig(),e=estimateJob(job(14,11,5,[glyph]),config),json=estimateJson(e,config,meta);
+  const config=testConfig({strokedLines:'score'}),e=estimateJob(job(14,11,5,[glyph,road]),config),json=estimateJson(e,config,meta);
   expect(json.schema).toBe('layered-map-studio.estimate/1');
   expect(json.timeConfidence).toBe('placeholder');
-  expect(json.placeholderInputs).toEqual(['line interval (TruFlat premium top (maple/cherry))']);
+  expect(json.placeholderInputs).toEqual(['score speed (TruFlat premium top (maple/cherry))']);
   expect(json.machine).toMatchObject({id:'xtool-p2s-55w',hourlyRate:25});
   expect(json.pieces).toHaveLength(6);
   expect(json.pieces[0]).toMatchObject({role:'border',manual:true});
@@ -269,12 +278,13 @@ describe('exports',()=>{
   expect(JSON.parse(JSON.stringify(json))).toEqual(json);
  });
  it('the quote sheet is a self-contained page that escapes text and flags unverified times',()=>{
-  const config=testConfig(),html=quoteSheetHtml(estimateJob(job(14,11,5,[glyph]),config),config,meta);
+  const config=testConfig({strokedLines:'score'}),html=quoteSheetHtml(estimateJob(job(14,11,5,[glyph,road]),config),config,meta);
   expect(html.startsWith('<!doctype html>')).toBe(true);
   expect(html).toContain('Mary Lake &lt;MI&gt;');
   expect(html).not.toContain('<MI>');
   expect(html).toContain('PLACEHOLDER inputs - not a real time');
-  expect(html).toContain('Unverified: line interval');
+  expect(html).toContain('Unverified: score speed');
+  expect(html).toContain('Roads scored');
   expect(html).toContain('xTool P2S 55W CO2 (Home)');
   expect(html).toContain('made by hand');
   expect(html).toContain('not customer-facing');

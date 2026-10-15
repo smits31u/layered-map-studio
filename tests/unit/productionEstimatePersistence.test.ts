@@ -1,5 +1,5 @@
 import {describe,expect,it} from 'vitest';
-import {createDefaultEstimateConfig,PLACEHOLDER_LABEL,SETTING_FIELDS} from '../../src/production/estimate/config';
+import {createDefaultEstimateConfig,lineIntervalFromUnit,lineIntervalToUnit,PLACEHOLDER_LABEL,SETTING_FIELDS} from '../../src/production/estimate/config';
 import {clampEstimateConfig,ESTIMATE_STORAGE_KEY,loadEstimateConfig,saveEstimateConfig} from '../../src/production/estimate/persistence';
 import {DESIGN_TIMER_KEY,IDLE_LIMIT_MS,emptyTimer,formatTimer,loadTimer,noteActivity,pauseTimer,saveTimer,startTimer,timerElapsedMs,timerIdle} from '../../src/production/estimate/designTimer';
 
@@ -26,16 +26,24 @@ describe('estimate config defaults',()=>{
   expect(c.materials.find(m=>m.id==='mdf-1-8')!.thicknessMm).toBe(3.175);
  });
 
- it('three machines: the P2S with Ben\'s cut and engrave settings entered, the Sterlings lasers unverified',()=>{
+ it('three machines, all on Ben\'s settings; the Thunder\'s 3 x 5 ft bed known, the others not',()=>{
   expect(c.machines.map(m=>`${m.name} (${m.location}) $${m.hourlyRate}/h`)).toEqual(['xTool P2S 55W CO2 (Home) $25/h','OMTech (Sterlings) $25/h','Thunder (Sterlings) $25/h']);
-  const p2s=c.machines[0];
-  for(const s of p2s.settings){
+  for(const m of c.machines)for(const s of m.settings){
    expect(s).toMatchObject({cutSpeedMmS:50,cutPowerPct:70,cutPasses:1,engraveSpeedMmS:400});
-   expect([...s.placeholder].sort()).toEqual(['engravePowerPct','lineIntervalMm','scorePowerPct','scoreSpeedMmS']);
+   expect(s.lineIntervalMm).toBeCloseTo(10/300,12);
+   expect([...s.placeholder].sort()).toEqual(['engravePowerPct','scorePowerPct','scoreSpeedMmS']);
   }
-  for(const m of c.machines.slice(1))for(const s of m.settings)expect(s.placeholder).toEqual([...SETTING_FIELDS]);
-  expect(c.machines.every(m=>m.bedPlaceholder)).toBe(true);
+  expect(c.machines.map(m=>[m.bedWidthMm,m.bedHeightMm,m.bedPlaceholder])).toEqual([[600,308,true],[711,508,true],[1524,914.4,false]]);
+  expect(c.lineIntervalUnit).toBe('lpcm');
   expect(PLACEHOLDER_LABEL).toBe('PLACEHOLDER - calibrate');
+ });
+
+ it('line interval converts between xTool\'s lines/cm, DPI and mm',()=>{
+  expect(lineIntervalToUnit(10/300,'lpcm')).toBeCloseTo(300,9);
+  expect(lineIntervalToUnit(10/300,'lpi')).toBeCloseTo(762,9);
+  expect(lineIntervalToUnit(.1,'mm')).toBe(.1);
+  expect(lineIntervalFromUnit(254,'lpi')).toBeCloseTo(.1,12);
+  expect(lineIntervalFromUnit(100,'lpcm')).toBeCloseTo(.1,12);
  });
 
  it('recipes: hand-made TruFlat border, TruFlat top, MDF; 12x18 has six MDF; birch tops on the big sizes',()=>{

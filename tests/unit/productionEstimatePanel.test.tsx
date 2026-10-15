@@ -32,8 +32,8 @@ describe('EstimatePanel',()=>{
   // Default scene: Land, three depth panels, Base, plus the 11x14 recipe's hand-made TruFlat border.
   expect(rows.map(r=>r.querySelector('td')!.firstChild!.textContent)).toEqual(['Border (by hand)','Land / Top','Artistic Depth 1','Artistic Depth 2','Artistic Depth 3','Base / Backer']);
   expect(rows[0].textContent).toContain('by hand');
-  // The title, compass and roads are engraved on the TruFlat top, and the line interval is not known yet.
-  expect(screen.getByTestId('estimate-confidence').textContent).toBe('PLACEHOLDER inputs - not a real time. Not entered yet: line interval (TruFlat premium top (maple/cherry)). Recipe: 11x14. Machine: xTool P2S 55W CO2 (Home).');
+  // Every input the time depends on is Ben's; it is not calibrated against a real job yet.
+  expect(screen.getByTestId('estimate-confidence').textContent).toBe('Uncalibrated - record a real job to check it. Recipe: 11x14. Machine: xTool P2S 55W CO2 (Home).');
   expect(screen.getByTestId('estimate-time').textContent).toMatch(/^~/);
   expect(screen.getByTestId('estimate-total').textContent).toMatch(/^\$\d+\.\d\d$/);
  });
@@ -51,16 +51,31 @@ describe('EstimatePanel',()=>{
   expect(toNumber(screen.getByTestId('estimate-total').textContent)).toBeCloseTo(toNumber(before)+40,2);
  });
 
- it('only unentered fields carry the PLACEHOLDER label; entering the line interval clears it and the warning',()=>{
+ it('line interval shows as 300 lines/cm and converts when the unit changes',()=>{
+  render(<Harness job={lakeSceneToJob(scene)}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Estimate settings…'}));
+  const input=()=>screen.getByTestId('xtool-p2s-55w-truflat-lineIntervalMm') as HTMLInputElement;
+  expect(input().value).toBe('300');
+  expect(input().closest('label')!.textContent).toContain('lines/cm');
+  fireEvent.change(screen.getByLabelText('Line interval unit'),{target:{value:'mm'}});
+  expect(input().value).toBe('0.0333');
+  fireEvent.change(screen.getByLabelText('Line interval unit'),{target:{value:'lpi'}});
+  expect(input().value).toBe('762');
+ });
+
+ it('only unentered fields carry the PLACEHOLDER label; scoring roads needs the score speed until it is entered',()=>{
   render(<Harness job={lakeSceneToJob(scene)}/>);
   fireEvent.click(screen.getByRole('button',{name:'Estimate settings…'}));
   const label=(id:string)=>screen.getByTestId(id).closest('label')!;
-  expect(label('xtool-p2s-55w-truflat-cutSpeedMmS').textContent).not.toContain('PLACEHOLDER');
-  expect(label('xtool-p2s-55w-truflat-lineIntervalMm').textContent).toContain('PLACEHOLDER - calibrate');
-  fireEvent.change(screen.getByTestId('xtool-p2s-55w-truflat-lineIntervalMm'),{target:{value:'0.08'}});
   expect(label('xtool-p2s-55w-truflat-lineIntervalMm').textContent).not.toContain('PLACEHOLDER');
+  expect(label('xtool-p2s-55w-truflat-scoreSpeedMmS').textContent).toContain('PLACEHOLDER - calibrate');
+  fireEvent.click(screen.getByRole('tab',{name:'Rates & fit'}));
+  fireEvent.change(screen.getByLabelText(/^Roads/),{target:{value:'score'}});
+  expect(screen.getByTestId('estimate-confidence').textContent).toMatch(/^PLACEHOLDER inputs .* Not entered yet: score speed \(TruFlat/);
+  fireEvent.click(screen.getByRole('tab',{name:'Machines'}));
+  fireEvent.change(screen.getByTestId('xtool-p2s-55w-truflat-scoreSpeedMmS'),{target:{value:'150'}});
+  expect(label('xtool-p2s-55w-truflat-scoreSpeedMmS').textContent).not.toContain('PLACEHOLDER');
   expect(screen.getByTestId('estimate-confidence').textContent).toMatch(/^Uncalibrated/);
-  expect(screen.getByTestId('estimate-time').textContent).toMatch(/^~/);
  });
 
  it('the Sterlings machines are listed and each recipe names its machine',()=>{

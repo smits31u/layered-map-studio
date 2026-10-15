@@ -77,19 +77,30 @@ export type EstimateConfig={
  // Width of a laser-cut border piece's frame, for its cut length. Unused while borders are made by hand.
  borderWidthMm:number;
  calibration:CalibrationEntry[];
+ // How the line interval is shown and typed. Stored in mm either way.
+ lineIntervalUnit:LineIntervalUnit;
 };
+
+// xTool Studio shows engrave density as lines per cm; LightBurn-style software uses an interval in
+// mm or lines per inch (DPI). The config stores mm; these convert for display and entry.
+export type LineIntervalUnit='lpcm'|'lpi'|'mm';
+export const LINE_INTERVAL_UNITS:Record<LineIntervalUnit,string>={lpcm:'lines/cm',lpi:'lines/in (DPI)',mm:'mm'};
+export const lineIntervalToUnit=(mm:number,unit:LineIntervalUnit)=>unit==='mm'?mm:unit==='lpcm'?10/mm:MM_PER_IN/mm;
+export const lineIntervalFromUnit=(value:number,unit:LineIntervalUnit)=>unit==='mm'?value:unit==='lpcm'?10/value:MM_PER_IN/value;
 
 export const BENS_NOTES='from Ben\'s notes, verify';
 export const PLACEHOLDER_LABEL='PLACEHOLDER - calibrate';
 
-const ALL_FIELDS=[...SETTING_FIELDS];
-const settings=(materialId:string,placeholder:SettingField[]):MaterialSettings=>({materialId,cutSpeedMmS:50,cutPowerPct:70,cutPasses:1,scoreSpeedMmS:100,scorePowerPct:20,engraveSpeedMmS:400,engravePowerPct:30,lineIntervalMm:.1,placeholder:[...placeholder]});
+// Ben, 2026-10-15: line interval "300", read as xTool Studio's lines per cm: 10/300 mm.
+export const BEN_LINE_INTERVAL_MM=10/300;
+const settings=(materialId:string,placeholder:SettingField[]):MaterialSettings=>({materialId,cutSpeedMmS:50,cutPowerPct:70,cutPasses:1,scoreSpeedMmS:100,scorePowerPct:20,engraveSpeedMmS:400,engravePowerPct:30,lineIntervalMm:BEN_LINE_INTERVAL_MM,placeholder:[...placeholder]});
 const MATERIAL_IDS=['mdf-1-8','birch','truflat'];
 // Ben, 2026-10-15: "for the cutting I always use 50mm/s at 70% power; for engraving (top layer) I use
-// 400mm/s". Entered on the P2S. Engrave power, line interval and scoring are still unknown.
-const P2S_UNKNOWN:SettingField[]=['scoreSpeedMmS','scorePowerPct','engravePowerPct','lineIntervalMm'];
+// 400mm/s", line interval 300 (lines/cm), and the Sterlings machines run the same settings for now.
+// Engrave power and scoring are still unknown; neither changes the time of a job that engraves roads.
+const UNKNOWN:SettingField[]=['scoreSpeedMmS','scorePowerPct','engravePowerPct'];
 
-const machine=(id:string,name:string,location:string,bedWidthMm:number,bedHeightMm:number,placeholder:SettingField[]):MachineProfile=>({id,name,location,bedWidthMm,bedHeightMm,bedPlaceholder:true,hourlyRate:25,perPieceOverheadMin:3,travelMultiplier:1.3,settings:MATERIAL_IDS.map(m=>settings(m,placeholder))});
+const machine=(id:string,name:string,location:string,bedWidthMm:number,bedHeightMm:number,bedPlaceholder:boolean,placeholder:SettingField[]):MachineProfile=>({id,name,location,bedWidthMm,bedHeightMm,bedPlaceholder,hourlyRate:25,perPieceOverheadMin:3,travelMultiplier:1.3,settings:MATERIAL_IDS.map(m=>settings(m,placeholder))});
 
 const recipe=(id:string,widthIn:number,heightIn:number,machineId:string,slots:RecipeSlot[]):LayerRecipe=>({id,label:`${widthIn}x${heightIn}`,widthIn,heightIn,slots,frameCost:null,machineId});
 const smallSlots=(mdf:number):RecipeSlot[]=>[
@@ -103,11 +114,11 @@ export function createDefaultEstimateConfig():EstimateConfig{
   schemaVersion:1,
   machines:[
    // P2S work area as published by xTool, not measured here.
-   machine('xtool-p2s-55w','xTool P2S 55W CO2','Home',600,308,P2S_UNKNOWN),
-   // The two Sterlings machines: model and bed not known yet. The beds below are only large enough
-   // for the sizes Ben runs on them, and the speeds are the P2S's, copied and unverified.
-   machine('omtech-sterlings','OMTech','Sterlings',711,508,ALL_FIELDS),
-   machine('thunder-sterlings','Thunder','Sterlings',1300,900,ALL_FIELDS),
+   machine('xtool-p2s-55w','xTool P2S 55W CO2','Home',600,308,true,UNKNOWN),
+   // OMTech model not known: the bed is a stand-in just large enough for the 18x24 boards it runs.
+   machine('omtech-sterlings','OMTech','Sterlings',711,508,true,UNKNOWN),
+   // Thunder bed: 3 ft x 5 ft (Ben, 2026-10-15).
+   machine('thunder-sterlings','Thunder','Sterlings',1524,914.4,false,UNKNOWN),
   ],
   defaultMachineId:'xtool-p2s-55w',
   materials:[
@@ -132,8 +143,7 @@ export function createDefaultEstimateConfig():EstimateConfig{
    recipe('11x14',11,14,'xtool-p2s-55w',smallSlots(4)),
    recipe('12x18',12,18,'xtool-p2s-55w',smallSlots(6)),
    recipe('18x24',18,24,'omtech-sterlings',[{kind:'layer',materialId:'birch',count:1,note:'top'},{kind:'layer',materialId:'mdf-1-8',count:7,upTo:true}]),
-   // Ben confirmed birch on top for 18x24; 24x36 is assumed to match.
-   recipe('24x36',24,36,'thunder-sterlings',[{kind:'layer',materialId:'birch',count:1,note:'top (assumed, as 18x24)'},{kind:'layer',materialId:'mdf-1-8',count:5}]),
+   recipe('24x36',24,36,'thunder-sterlings',[{kind:'layer',materialId:'birch',count:1,note:'top'},{kind:'layer',materialId:'mdf-1-8',count:5}]),
   ],
   rates:{designPerHour:25,designHours:0,suppliesPct:10},
   strokedLines:'engrave',
@@ -144,5 +154,6 @@ export function createDefaultEstimateConfig():EstimateConfig{
   chargeWholeSheets:true,
   borderWidthMm:25.4,
   calibration:[],
+  lineIntervalUnit:'lpcm',
  };
 }
