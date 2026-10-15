@@ -16,6 +16,9 @@ import {ThemeToggle} from './components/ui/ThemeToggle';
 import {lakeSceneToJob} from './production/adapters/lakeScene';
 import {EstimatePanel} from './production/estimate/ui/EstimatePanel';
 import {useEstimateConfig} from './production/estimate/ui/useEstimateConfig';
+import {fileSlug} from './production/download';
+import {ProjectPanel} from './components/projects/ProjectPanel';
+import {useProjectSession,type SessionApply} from './state/projects/useProjectSession';
 // Bundle splitting (Phase 0 backlog item 5): the ornament and topo tools are separate manufacturing
 // targets from the lake map (see the `tool` state comment below) and are only ever rendered once the
 // user actually switches to them. Loading them lazily keeps their code — including each tool's own
@@ -35,6 +38,9 @@ const download=(name:string,data:string|Uint8Array,type='image/svg+xml')=>{const
 // keystroke, while still feeling live — see docs/v1-milestones.md.
 const LIVE_DEBOUNCE_MS=120;
 const APP_VERSION=typeof __APP_VERSION__==='string'?__APP_VERSION__:'0.0.0-dev';
+// Identifies a crop together with the board size it was framed for. An opened project's crop stays
+// pinned only while both are unchanged; resizing the board or moving the map lets the map re-measure.
+const pinKey=(p:MapProject)=>p.map.crop?JSON.stringify([cropKey(p.map.crop),p.dimensions.widthMm,p.dimensions.heightMm]):undefined;
 const sizeLabel=(job:{widthMm:number;heightMm:number})=>`${+(job.widthMm/25.4).toFixed(2)} x ${+(job.heightMm/25.4).toFixed(2)} in`;
 
 export default function App(){
@@ -58,6 +64,11 @@ export default function App(){
  const captureRef=useRef<MapCapture|undefined>(undefined);
  const capturedCropRef=useRef<string|undefined>(undefined);
  const debounceRef=useRef<number|undefined>(undefined);
+ // Set when a saved project is opened or the session restored: the map keeps that crop (see
+ // MapViewer's keepCrop) so the saved geography still matches it. mapKey remounts the map so it
+ // starts at the opened project's view.
+ const[pinnedCrop,setPinnedCrop]=useState<string>();
+ const[mapKey,setMapKey]=useState(0);
 
  useEffect(()=>{preloadAllFonts()},[]);
  // When a font arrives (a retry after a failure, or a slow first load) after a build that needed
@@ -131,6 +142,25 @@ export default function App(){
   rebuildScene(next);
  };
  const loaded=features.water.length+features.roads.length+features.places.length>0;
+ // Opening a saved project, restoring the last session, or starting a new one: the project and its
+ // saved geography replace what is on screen, and the scene is rebuilt from that geography (once the
+ // fonts are in), without touching the map. That is what makes a reopened project identical to the
+ // one that was saved, even if the map data has changed since.
+ const applyProject:SessionApply=(next,savedFeatures,how)=>{
+  if(debounceRef.current){window.clearTimeout(debounceRef.current);debounceRef.current=undefined}
+  projectRef.current=next;
+  setProjectState(next);
+  applyFeatures(savedFeatures??empty,savedFeatures?next.map.crop:undefined);
+  if(!savedFeatures)capturedCropRef.current=undefined;
+  setError('');
+  setPinnedCrop(savedFeatures?pinKey(next):undefined);
+  setMapKey(k=>k+1);
+  if(how==='new'||!savedFeatures||!next.map.crop){setMode('map');setStatus(how==='new'?'Ready':'Opened: search or move the map, then Generate.');return}
+  setStatus('Rebuilding the saved project…');
+  preloadAllFonts().then(()=>{if(projectRef.current!==next)return;rebuildScene(next);setMode(m=>m==='3d'?m:'generated')});
+ };
+ const session=useProjectSession({project,features,defaultProject,apply:applyProject,appVersion:APP_VERSION});
+ const projectPanel=<ProjectPanel session={session} suggestedName={(project.title.text.trim()||'Lake map')+' '+(+(project.dimensions.widthMm/25.4).toFixed(2))+'x'+(+(project.dimensions.heightMm/25.4).toFixed(2))} onDownload={(name,json)=>download(fileSlug(name,'lake-project')+'.lmsproject.json',json,'application/json')}/>;
  // Production planning reads the scene on screen: it is rebuilt live for every layer, size and
  // setting change, and the estimate settings never feed back into it, so editing a price or a
  // speed recomputes the estimate without regenerating any geometry.
@@ -141,5 +171,5 @@ export default function App(){
  // once loaded, React caches the lazy component so switching tools again is instant.
  if(tool==='ornament')return <Suspense fallback={<div className="tool-loading">Loading Ornament Studio…</div>}><OrnamentPage onExit={()=>setTool('lake-map')}/></Suspense>;
  if(tool==='topo')return <Suspense fallback={<div className="tool-loading">Loading Topo Map Builder…</div>}><TopoPage onExit={()=>setTool('lake-map')}/></Suspense>;
- return <main className="studio"><Controls project={project} setProject={setProjectLive} onSelect={select} onGenerate={generate} onExport={exportIt} status={status} generateError={error} counts={{water:features.water.length,roads:features.roads.length,namedRoads:features.roads.filter(r=>r.name).length,places:features.places.length}} selectedWater={selectedWater} estimate={estimate}/><section className="workspace"><nav><div className="nav-tabs" role="group" aria-label="View"><button className={mode==='map'?'active':''} onClick={()=>setMode('map')}>Map Mode</button><button className={mode==='generated'?'active':''} onClick={()=>setMode('generated')}>Generated Map</button><button className={mode==='3d'?'active':''} onClick={()=>setMode('3d')}>3D Preview</button></div>{error&&<span className="nav-error error" role="alert" title={error}>{error}</span>}<div className="nav-tools"><button onClick={()=>setTool('ornament')}>Ornament Studio →</button><button onClick={()=>setTool('topo')}>Topo Map Builder →</button></div><ThemeToggle/></nav><FontLoadNotice/>{mode==='map'?<MapViewer project={project} flyTo={fly} onView={m=>setProjectState(p=>({...p,map:m}))} onCrop={crop=>setProjectState(p=>({...p,map:{...p.map,crop}}))} onStatus={setStatus} captureRef={captureRef} onFeatures={f=>{applyFeatures(f,projectRef.current.map.crop);const total=f.water.length+f.roads.length+f.places.length;setStatus(total?`Loaded ${f.water.length} water, ${f.roads.length} roads, ${f.places.length} places`:'No vector features found in the selected crop.')}}/>:mode==='3d'?(job?<Suspense fallback={<div className="empty">Loading 3D preview…</div>}><Preview3D job={job} config={estimateConfig} title={project.title.text} sizeLabel={sizeLabel(job)} appVersion={APP_VERSION}/></Suspense>:<div className="empty">Generate the scene to see it as a stacked 3D object.</div>):<GeneratedPreview scene={scene} featuresLoaded={loaded} project={project} error={error} onCommitOverride={commitOverride}/>}</section></main>;
+ return <main className="studio"><Controls project={project} setProject={setProjectLive} onSelect={select} onGenerate={generate} onExport={exportIt} status={status} generateError={error} counts={{water:features.water.length,roads:features.roads.length,namedRoads:features.roads.filter(r=>r.name).length,places:features.places.length}} selectedWater={selectedWater} estimate={estimate} projects={projectPanel}/><section className="workspace"><nav><div className="nav-tabs" role="group" aria-label="View"><button className={mode==='map'?'active':''} onClick={()=>setMode('map')}>Map Mode</button><button className={mode==='generated'?'active':''} onClick={()=>setMode('generated')}>Generated Map</button><button className={mode==='3d'?'active':''} onClick={()=>setMode('3d')}>3D Preview</button></div>{error&&<span className="nav-error error" role="alert" title={error}>{error}</span>}<div className="nav-tools"><button onClick={()=>setTool('ornament')}>Ornament Studio →</button><button onClick={()=>setTool('topo')}>Topo Map Builder →</button></div><ThemeToggle/></nav><FontLoadNotice/>{mode==='map'?<MapViewer key={mapKey} keepCrop={pinnedCrop!==undefined&&pinnedCrop===pinKey(project)} project={project} flyTo={fly} onView={m=>setProjectState(p=>({...p,map:m}))} onCrop={crop=>setProjectState(p=>({...p,map:{...p.map,crop}}))} onStatus={setStatus} captureRef={captureRef} onFeatures={f=>{applyFeatures(f,projectRef.current.map.crop);const total=f.water.length+f.roads.length+f.places.length;setStatus(total?`Loaded ${f.water.length} water, ${f.roads.length} roads, ${f.places.length} places`:'No vector features found in the selected crop.')}}/>:mode==='3d'?(job?<Suspense fallback={<div className="empty">Loading 3D preview…</div>}><Preview3D job={job} config={estimateConfig} title={project.title.text} sizeLabel={sizeLabel(job)} appVersion={APP_VERSION}/></Suspense>:<div className="empty">Generate the scene to see it as a stacked 3D object.</div>):<GeneratedPreview scene={scene} featuresLoaded={loaded} project={project} error={error} onCommitOverride={commitOverride}/>}</section></main>;
 }

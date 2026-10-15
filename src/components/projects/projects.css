@@ -1,0 +1,25 @@
+/* Project section and saved-projects dialog. Built from the studio's design tokens. */
+.project-panel{display:grid;gap:var(--lms-space-2,8px)}
+.project-current{display:grid;gap:2px}
+.project-current b{font-size:var(--lms-text-md,13.5px);overflow-wrap:anywhere}
+.project-current small[data-dirty=true]{color:var(--lms-warning-ink,#ffbf47)}
+.project-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.project-naming{display:grid;gap:6px}
+.project-dialog-backdrop{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:16px;background:rgba(6,10,18,.55)}
+.project-dialog{display:grid;grid-template-rows:auto auto 1fr auto;width:min(760px,100%);max-height:min(820px,calc(100vh - 32px));color:var(--lms-ink,#e8edf2);background:var(--lms-surface-panel,#171e26);border:1px solid var(--lms-line,#35414e);border-radius:var(--lms-radius-lg,10px);box-shadow:var(--lms-shadow-2,0 8px 30px rgba(0,0,0,.4));outline:none}
+.project-dialog header,.project-dialog footer{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px}
+.project-dialog header{border-bottom:1px solid var(--lms-line,#35414e)}
+.project-dialog footer{border-top:1px solid var(--lms-line,#35414e)}
+.project-dialog h2{margin:0;font-size:var(--lms-text-lg,15px)}
+.project-dialog-tools{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px 0}
+.project-dialog-tools input[type=search]{flex:1 1 220px}
+.project-import{display:inline-flex!important;align-items:center;gap:6px}
+.project-dialog-body{overflow:auto;padding:8px 14px 14px}
+.project-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.project-list li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 10px;background:var(--lms-surface-raised,#222c36);border:1px solid var(--lms-line,#35414e);border-radius:var(--lms-radius-md,6px)}
+.project-list li.project-open{border-color:var(--lms-accent-line,#d06a52)}
+.project-row-main{display:grid;gap:2px;min-width:0}
+.project-row-main form{display:flex;gap:6px;flex-wrap:wrap}
+.project-row-actions{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end}
+.project-open-tag{font-size:var(--lms-text-2xs,10.5px);font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--lms-accent-line,#d06a52)}
+@media(max-width:720px){.project-list li{grid-template-columns:1fr}.project-row-actions{justify-content:flex-start}}
