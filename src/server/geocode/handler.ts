@@ -16,8 +16,12 @@ export const MAX_QUERY_LENGTH=200;
 // requires the application to identify itself and to be contactable. `GEOCODER_CONTACT` is how the
 // operator supplies that contact; when it is unset the header says so in plain words rather than
 // impersonating a browser or inventing an address nobody reads.
+//
+// The header must be plain ASCII: fetch refuses any header value with a character above 0xFF, and the
+// old fallback's em dash did exactly that, so with GEOCODER_CONTACT unset every search failed with
+// "Cannot convert argument to a ByteString". A contact with non-ASCII characters is reduced the same way.
 export function buildUserAgent(version:string,contact?:string):string{
- const who=contact&&contact.trim()?contact.trim():'contact not configured — set GEOCODER_CONTACT';
+ const who=contact&&contact.trim()?contact.trim().replace(/[^\x20-\x7e]/g,'?'):'contact not configured - set GEOCODER_CONTACT';
  return `LayeredMapStudio-Ornament/${version} (self-hosted localhost map ornament generator; ${who})`;
 }
 
