@@ -34,8 +34,20 @@ export type MachineProfile={
  // Multiplies the pure motion time (cut + score + engrave) for travel moves, acceleration and the
  // like. 1 means "the laser only moves while it burns", which no laser does.
  travelMultiplier:number;
+ // Which of the two values above are still the studio's guesses. A field leaves the list when it is
+ // typed, kept as is, or (the multiplier) applied from calibration.
+ guessed:MachineGuessField[];
+ // When the travel multiplier was last set; only jobs recorded after that can confirm it.
+ multiplierSetAt?:string;
  settings:MaterialSettings[];
 };
+
+// Machine values the studio guessed rather than Ben entering them. Calibration never tunes the
+// overhead (the laser software's job time leaves out the setup between pieces), so it stays a guess
+// until it is entered.
+export const MACHINE_GUESS_FIELDS=['travelMultiplier','perPieceOverheadMin'] as const;
+export type MachineGuessField=typeof MACHINE_GUESS_FIELDS[number];
+export const MACHINE_GUESS_LABELS:Record<MachineGuessField,string>={travelMultiplier:'travel multiplier',perPieceOverheadMin:'overhead per piece'};
 
 // One run of pieces in a layer recipe, listed top of the finished stack first. 'layer' slots are
 // filled from the generated scene's layers in order; a 'border' slot is an extra piece the scene
@@ -51,7 +63,9 @@ export type LayerRecipe={id:string;label:string;widthIn:number;heightIn:number;s
 export type Rates={designPerHour:number;designHours:number;suppliesPct:number};
 
 // A finished job whose real machine time is known (the time the laser software reported), recorded
-// next to what this estimate said for it at the time, on the machine it ran on.
+// next to what this estimate said for it at the time, on the machine it ran on. The software's time
+// is the laser's own run without the setup between pieces, so it is compared with motion x
+// multiplier; estimatedOverheadMin is kept for the record only.
 export type CalibrationEntry={id:string;recordedAt:string;label:string;machineId:string;estimatedMotionMin:number;estimatedOverheadMin:number;multiplierAtTime:number;actualMin:number};
 
 // How stroked lines (the lake tool's roads) are run: engraved (rastered as an area of length x
@@ -100,7 +114,7 @@ const MATERIAL_IDS=['mdf-1-8','birch','truflat'];
 // Engrave power and scoring are still unknown; neither changes the time of a job that engraves roads.
 const UNKNOWN:SettingField[]=['scoreSpeedMmS','scorePowerPct','engravePowerPct'];
 
-const machine=(id:string,name:string,location:string,bedWidthMm:number,bedHeightMm:number,bedPlaceholder:boolean,placeholder:SettingField[]):MachineProfile=>({id,name,location,bedWidthMm,bedHeightMm,bedPlaceholder,hourlyRate:25,perPieceOverheadMin:3,travelMultiplier:1.3,settings:MATERIAL_IDS.map(m=>settings(m,placeholder))});
+const machine=(id:string,name:string,location:string,bedWidthMm:number,bedHeightMm:number,bedPlaceholder:boolean,placeholder:SettingField[]):MachineProfile=>({id,name,location,bedWidthMm,bedHeightMm,bedPlaceholder,hourlyRate:25,perPieceOverheadMin:3,travelMultiplier:1.3,guessed:[...MACHINE_GUESS_FIELDS],settings:MATERIAL_IDS.map(m=>settings(m,placeholder))});
 
 const recipe=(id:string,widthIn:number,heightIn:number,machineId:string,slots:RecipeSlot[]):LayerRecipe=>({id,label:`${widthIn}x${heightIn}`,widthIn,heightIn,slots,frameCost:null,machineId});
 const smallSlots=(mdf:number):RecipeSlot[]=>[

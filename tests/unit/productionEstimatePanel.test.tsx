@@ -1,5 +1,5 @@
 import {useState} from 'react';
-import {cleanup,fireEvent,render,screen,within} from '@testing-library/react';
+import {act,cleanup,fireEvent,render,screen,within} from '@testing-library/react';
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {buildScene} from '../../src/export/buildScene';
 import {lakeSceneToJob} from '../../src/production/adapters/lakeScene';
@@ -32,8 +32,8 @@ describe('EstimatePanel',()=>{
   // Default scene: Land, three depth panels, Base, plus the 11x14 recipe's hand-made TruFlat border.
   expect(rows.map(r=>r.querySelector('td')!.firstChild!.textContent)).toEqual(['Border (by hand)','Land / Top','Artistic Depth 1','Artistic Depth 2','Artistic Depth 3','Base / Backer']);
   expect(rows[0].textContent).toContain('by hand');
-  // Every input the time depends on is Ben's; it is not calibrated against a real job yet.
-  expect(screen.getByTestId('estimate-confidence').textContent).toBe('Uncalibrated - record a real job to check it. Recipe: 11x14. Machine: xTool P2S 55W CO2 (Home).');
+  // The speeds are Ben's, but the machine's travel multiplier and overhead are still the studio's guesses.
+  expect(screen.getByTestId('estimate-confidence').textContent).toBe('PLACEHOLDER inputs - not a real time. Not entered yet: travel multiplier (xTool P2S 55W CO2), overhead per piece (xTool P2S 55W CO2). Recipe: 11x14. Machine: xTool P2S 55W CO2 (Home).');
   expect(screen.getByTestId('estimate-time').textContent).toMatch(/^~/);
   expect(screen.getByTestId('estimate-total').textContent).toMatch(/^\$\d+\.\d\d$/);
  });
@@ -75,7 +75,31 @@ describe('EstimatePanel',()=>{
   fireEvent.click(screen.getByRole('tab',{name:'Machines'}));
   fireEvent.change(screen.getByTestId('xtool-p2s-55w-truflat-scoreSpeedMmS'),{target:{value:'150'}});
   expect(label('xtool-p2s-55w-truflat-scoreSpeedMmS').textContent).not.toContain('PLACEHOLDER');
+  expect(screen.getByTestId('estimate-confidence').textContent).not.toContain('score speed');
+  // The machine's guesses stay listed until they are typed or kept as they are.
+  expect(label('xtool-p2s-55w-travelMultiplier').textContent).toContain('PLACEHOLDER - calibrate');
+  expect(screen.getByTestId('estimate-confidence').textContent).toMatch(/^PLACEHOLDER inputs .* Not entered yet: travel multiplier \(xTool P2S 55W CO2\), overhead per piece/);
+  fireEvent.change(screen.getByTestId('xtool-p2s-55w-perPieceOverheadMin'),{target:{value:'2.5'}});
+  fireEvent.click(screen.getByRole('button',{name:'Keep travel multiplier 1.3x'}));
+  expect(label('xtool-p2s-55w-travelMultiplier').textContent).not.toContain('PLACEHOLDER');
+  expect(label('xtool-p2s-55w-perPieceOverheadMin').textContent).not.toContain('PLACEHOLDER');
   expect(screen.getByTestId('estimate-confidence').textContent).toMatch(/^Uncalibrated/);
+ });
+
+ it('removing the stock a material is set to puts that material back on the cheapest stock',()=>{
+  const configs:EstimateConfig[]=[];
+  render(<Harness job={lakeSceneToJob(scene)} onConfig={c=>configs.push(c)}/>);
+  const before=screen.getByTestId('estimate-total').textContent;
+  fireEvent.click(screen.getByRole('button',{name:'Estimate settings…'}));
+  fireEvent.click(screen.getByRole('tab',{name:'Materials & stock'}));
+  fireEvent.change(screen.getByRole('combobox',{name:'1/8" MDF'}),{target:{value:'mdf-20x48'}});
+  expect(configs.at(-1)!.stockSelection['mdf-1-8']).toBe('mdf-20x48');
+  const fieldset=screen.getAllByRole('group').find(g=>g.tagName==='FIELDSET'&&g.querySelector('legend')!.textContent!.startsWith('1/8" MDF 20x48 in'))!;
+  fireEvent.click(within(fieldset).getByRole('button',{name:'Remove stock'}));
+  expect(configs.at(-1)!.stockSelection['mdf-1-8']).toBe('auto');
+  expect((screen.getByRole('combobox',{name:'1/8" MDF'}) as HTMLSelectElement).value).toBe('auto');
+  // Back to the cheapest stock that fits, not $0 of MDF.
+  expect(screen.getByTestId('estimate-total').textContent).toBe(before);
  });
 
  it('the Sterlings machines are listed and each recipe names its machine',()=>{
@@ -88,7 +112,8 @@ describe('EstimatePanel',()=>{
  });
 
  it('timed design work is billed instead of the default design hours',()=>{
-  localStorage.setItem('layered-map-studio.design-timer.v1',JSON.stringify({running:false,accumulatedMs:30*60000,lastActivity:null}));
+  // EstimatePanel with no timerId uses the 'default' project's timer.
+  localStorage.setItem('layered-map-studio.design-timer.v2:default',JSON.stringify({running:false,accumulatedMs:30*60000,lastActivity:null}));
   try{
    render(<Harness job={lakeSceneToJob(scene)}/>);
    expect(screen.getByTestId('design-timer').textContent).toBe('0:30:00');
@@ -96,7 +121,26 @@ describe('EstimatePanel',()=>{
    fireEvent.click(screen.getByRole('button',{name:'Reset'}));
    expect(screen.getByTestId('estimate-design').textContent).toBe('$0.00');
    expect(screen.getByRole('button',{name:'Start'})).toBeTruthy();
-  }finally{localStorage.removeItem('layered-map-studio.design-timer.v1')}
+  }finally{localStorage.removeItem('layered-map-studio.design-timer.v2:default')}
+ });
+
+ it('each project has its own timer; another tab\'s change to it shows up',()=>{
+  const key=(id:string)=>`layered-map-studio.design-timer.v2:${id}`;
+  localStorage.setItem(key('lake-a'),JSON.stringify({running:false,accumulatedMs:30*60000,lastActivity:null}));
+  try{
+   const config=createDefaultEstimateConfig();
+   const panel=(timerId:string)=><EstimatePanel job={lakeSceneToJob(scene)} title="t" product="p" config={config} setConfig={()=>{}} appVersion="test" timerId={timerId}/>;
+   const {rerender}=render(panel('lake-a'));
+   expect(screen.getByTestId('design-timer').textContent).toBe('0:30:00');
+   rerender(panel('lake-b'));
+   expect(screen.getByTestId('design-timer').textContent).toBe('0:00:00');
+   rerender(panel('lake-a'));
+   expect(screen.getByTestId('design-timer').textContent).toBe('0:30:00');
+   // Another tab writes lake-a's timer.
+   localStorage.setItem(key('lake-a'),JSON.stringify({running:false,accumulatedMs:45*60000,lastActivity:null}));
+   act(()=>{window.dispatchEvent(new StorageEvent('storage',{key:key('lake-a')}))});
+   expect(screen.getByTestId('design-timer').textContent).toBe('0:45:00');
+  }finally{localStorage.removeItem(key('lake-a'));localStorage.removeItem(key('lake-b'))}
  });
 
  it('records an actual job time and offers the multiplier it implies',()=>{
@@ -108,9 +152,15 @@ describe('EstimatePanel',()=>{
   expect(configs.at(-1)!.calibration[0].actualMin).toBe(95);
   const table=screen.getByRole('table',{name:'Estimate versus actual'});
   expect(within(table).getByText('95.0')).toBeTruthy();
+  expect(screen.getByTestId('calibration-advice').textContent).toMatch(/multiplier is a guess/);
   fireEvent.click(screen.getByRole('button',{name:/^Use multiplier x/}));
-  expect(configs.at(-1)!.machines.find(m=>m.id==='xtool-p2s-55w')!.travelMultiplier).not.toBe(1.3);
+  const p2s=configs.at(-1)!.machines.find(m=>m.id==='xtool-p2s-55w')!;
+  expect(p2s.travelMultiplier).not.toBe(1.3);
+  expect(p2s.guessed).toEqual(['perPieceOverheadMin']);
   expect(configs.at(-1)!.calibration[0].machineId).toBe('xtool-p2s-55w');
+  // One job is a suggestion, not a calibration: the time stays approximate.
+  expect(screen.getByTestId('estimate-time').textContent).toMatch(/^~/);
+  expect(screen.getByTestId('calibration-advice').textContent).toMatch(/^Record a job at x/);
  });
 
  it('exports the estimate JSON as a download',()=>{

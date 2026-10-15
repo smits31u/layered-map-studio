@@ -1,6 +1,7 @@
 import {useCallback,useEffect,useRef,useState} from 'react';
 import type {SavedLakeProject} from '../../state/projects/projectStore';
 import type {ProjectSession} from '../../state/projects/useProjectSession';
+import {replaceWarning} from '../../state/projects/sessionLogic';
 
 const inches=(mm:number)=>+(mm/25.4).toFixed(2);
 const DEPTH:Record<string,string>={'true-bathymetry':'True bathymetry','decorative-offsets':'Artistic depth','procedural-terrain':'Procedural terrain'};
@@ -17,19 +18,28 @@ export function ProjectsDialog({session,onClose,onDownload}:{session:ProjectSess
  useEffect(()=>{refresh()},[]);
  useEffect(()=>{ref.current?.focus();const key=(e:KeyboardEvent)=>{if(e.key==='Escape')onClose()};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key)},[onClose]);
  const shown=(projects??[]).filter(p=>!filter.trim()||`${p.name} ${p.project.title.text}`.toLowerCase().includes(filter.trim().toLowerCase()));
+ // Both ask first when the session on screen has unsaved work, saved before or not (reopening the
+ // open project replaces its unsaved changes with the saved copy too).
  const open=async(p:SavedLakeProject)=>{
-  if(session.current.dirty&&session.current.id&&session.current.id!==p.id&&!window.confirm(`Open ${p.name}? Unsaved changes to ${session.current.name} will be lost.`))return;
+  const warning=replaceWarning(session.current,'open',p.name);
+  if(warning&&!window.confirm(warning))return;
   await session.open(p.id);onClose();
  };
  const remove=async(p:SavedLakeProject)=>{if(!window.confirm(`Delete ${p.name} from this browser? This cannot be undone; export it first if you might want it back.`))return;await session.remove(p.id);refresh()};
  const exportOne=async(p:SavedLakeProject)=>{const file=await session.exportFile(p.id);onDownload(file.name,file.json)};
- const importOne=async(file?:File)=>{if(!file)return;if(await session.importFile(await file.text()))onClose()};
+ // A cancelled or failed import clears the picker, so choosing the same file again still fires.
+ const importOne=async(input:HTMLInputElement)=>{
+  const file=input.files?.[0];if(!file)return;
+  const warning=replaceWarning(session.current,'import',file.name);
+  if(warning&&!window.confirm(warning)){input.value='';return}
+  if(await session.importFile(await file.text()))onClose();else input.value='';
+ };
  return <div className="project-dialog-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}>
   <div className="project-dialog" role="dialog" aria-modal="true" aria-label="Saved projects" tabIndex={-1} ref={ref}>
    <header><h2>Saved projects</h2><button className="btn-quiet" onClick={onClose} aria-label="Close projects">Close</button></header>
    <div className="project-dialog-tools">
     <input type="search" aria-label="Find a project" placeholder="Find by name or title" value={filter} onChange={e=>setFilter(e.target.value)}/>
-    <label className="project-import">Import file… <input type="file" accept=".json,application/json" aria-label="Import project file" onChange={e=>void importOne(e.target.files?.[0])}/></label>
+    <label className="project-import">Import file… <input type="file" accept=".json,application/json" aria-label="Import project file" onChange={e=>void importOne(e.currentTarget)}/></label>
    </div>
    <div className="project-dialog-body">
     {loadError&&<p className="error" role="alert">{loadError}</p>}

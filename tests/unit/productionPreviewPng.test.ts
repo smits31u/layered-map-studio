@@ -5,7 +5,7 @@ import {lakeSceneToJob} from '../../src/production/adapters/lakeScene';
 import {createDefaultEstimateConfig} from '../../src/production/estimate/config';
 import type {MeshData} from '../../src/production/preview3d/extrude';
 import {encodePng,insertPngText,readPngChunks,readPngInfo} from '../../src/production/preview3d/png';
-import {exportSize,finalizePreviewPng,previewPngText,RENDER_NOTICE,watermarkText} from '../../src/production/preview3d/previewImage';
+import {checkDrawingBuffer,exportSize,finalizePreviewPng,previewPngText,RENDER_NOTICE,watermarkText} from '../../src/production/preview3d/previewImage';
 import {defaultLayerColors,explodedY,stackLayers} from '../../src/production/preview3d/stack';
 import {buildLayerMesh} from '../../src/production/preview3d/worker/buildLayerMesh';
 import {caldronFallsFeatures,caldronFallsProject} from '../fixtures/caldronFalls';
@@ -72,6 +72,16 @@ describe('preview PNG export',()=>{
  it('refuses an image that is not the size asked for',()=>{
   const png=encodePng(new Uint8Array(4*4*4),4,4);
   expect(()=>finalizePreviewPng(png,{width:3000,height:2250},meta)).toThrow(/produced 4 x 4 px instead of 3000 x 2250/);
+ });
+
+ it('refuses a WebGL drawing buffer smaller than asked for, or a lost context, which the PNG size cannot show',()=>{
+  // The 2D canvas the frame is copied into is always the requested size, so the PNG check above
+  // passes even when the GPU handed back a smaller buffer: the export came out upscaled and blurry.
+  const gl=(w:number,h:number,lost=false)=>({drawingBufferWidth:w,drawingBufferHeight:h,isContextLost:()=>lost});
+  const size={width:6000,height:4500};
+  expect(()=>checkDrawingBuffer(gl(6000,4500),size)).not.toThrow();
+  expect(()=>checkDrawingBuffer(gl(4096,3072),size)).toThrow(/gave the renderer 4096 x 3072 px instead of 6000 x 4500; the image would come out blurry/);
+  expect(()=>checkDrawingBuffer(gl(6000,4500,true),size)).toThrow(/WebGL context lost/);
  });
 
  it('metadata goes in valid tEXt chunks right after IHDR, before the pixels',()=>{
