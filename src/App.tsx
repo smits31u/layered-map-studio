@@ -10,7 +10,8 @@ import {assertManufacturingSceneUsable,type ManufacturingScene} from './export/s
 import {buildScene,buildPresentationScene} from './export/buildScene';
 import {getCachedGeometryLayers,type GeometryCache} from './export/geometryCache';
 import {individualSvgsZip,individualZipName,sceneToSvg} from './export/svg/exportSvg';
-import {preloadAllFonts} from './text/fontRegistry';
+import {preloadAllFonts,subscribeFonts} from './text/fontRegistry';
+import {FontLoadNotice} from './components/ui/FontLoadNotice';
 import {ThemeToggle} from './components/ui/ThemeToggle';
 // Bundle splitting (Phase 0 backlog item 5): the ornament and topo tools are separate manufacturing
 // targets from the lake map (see the `tool` state comment below) and are only ever rendered once the
@@ -50,6 +51,11 @@ export default function App(){
  const debounceRef=useRef<number|undefined>(undefined);
 
  useEffect(()=>{preloadAllFonts()},[]);
+ // When a font arrives (a retry after a failure, or a slow first load) after a build that needed
+ // it, rebuild so the preview stops showing the font error.
+ const errorRef=useRef(error);
+ errorRef.current=error;
+ useEffect(()=>subscribeFonts(()=>{if(/font/i.test(errorRef.current))rebuildScene(projectRef.current)}),[]);
 
  // Rebuilds the generated scene from whatever geography is already cached — never re-fetches map
  // tiles or re-runs extraction. Reuses the expensive geometry stage whenever nothing that affects
@@ -102,7 +108,11 @@ export default function App(){
   ensureFeatures().then(buildFrom,(e:Error)=>{setStatus('Generate failed');setError(`Could not capture map features for the selected crop: ${e.message}`)});
  };
  const selectedWater=async()=>selectedWaterGeo(projectRef.current,await ensureFeatures());
- const exportIt=()=>{try{const s=scene??buildScene(project,features);assertManufacturingSceneUsable(s);setStatus('Building SVG…');if(project.exportSettings.layout==='individual')download(individualZipName(s),individualSvgsZip(s),'application/zip');else download(`layered-map-${project.exportSettings.layout}.svg`,sceneToSvg(s,project.exportSettings.layout,project.exportSettings.panelGapMm,project.exportSettings.annotations));setStatus('Export complete');setError('')}catch(e){setStatus('Export failed');setError(`SVG export failed: ${(e as Error).message}`)}};
+ // Export builds from the current project, never from the scene on screen. A live update that
+ // fails (a font that never loaded, say) leaves the last good scene in the preview by design. Export
+ // used to cut that stale scene: type a title while its font is missing and the file went out
+ // without the title, with no error. Now the same failure refuses the export.
+ const exportIt=()=>{try{const p=projectRef.current,current=featuresRef.current;let s;if(p.map.crop&&current.water.length){const {cache,result}=getCachedGeometryLayers(geometryCacheRef.current,p,current);geometryCacheRef.current=cache;s=buildPresentationScene(p,current,result);setScene(s)}else s=buildScene(p,current);assertManufacturingSceneUsable(s);setStatus('Building SVG…');if(project.exportSettings.layout==='individual')download(individualZipName(s),individualSvgsZip(s),'application/zip');else download(`layered-map-${project.exportSettings.layout}.svg`,sceneToSvg(s,project.exportSettings.layout,project.exportSettings.panelGapMm,project.exportSettings.annotations));setStatus('Export complete');setError('')}catch(e){setStatus('Export failed');setError(`SVG export failed: ${(e as Error).message}`)}};
  // Drag/nudge/flip/hide/reset from the generated-map editor: never debounced (each already fires
  // once per discrete user action, not per keystroke) but goes through the same cache-aware path.
  const commitOverride=(updater:(p:MapProject)=>MapProject)=>{
@@ -117,5 +127,5 @@ export default function App(){
  // once loaded, React caches the lazy component so switching tools again is instant.
  if(tool==='ornament')return <Suspense fallback={<div className="tool-loading">Loading Ornament Studio…</div>}><OrnamentPage onExit={()=>setTool('lake-map')}/></Suspense>;
  if(tool==='topo')return <Suspense fallback={<div className="tool-loading">Loading Topo Map Builder…</div>}><TopoPage onExit={()=>setTool('lake-map')}/></Suspense>;
- return <main className="studio"><Controls project={project} setProject={setProjectLive} onSelect={select} onGenerate={generate} onExport={exportIt} status={status} generateError={error} counts={{water:features.water.length,roads:features.roads.length,namedRoads:features.roads.filter(r=>r.name).length,places:features.places.length}} selectedWater={selectedWater}/><section className="workspace"><nav><div className="nav-tabs" role="group" aria-label="View"><button className={mode==='map'?'active':''} onClick={()=>setMode('map')}>Map Mode</button><button className={mode==='generated'?'active':''} onClick={()=>setMode('generated')}>Generated Map</button></div>{error&&<span className="nav-error error" role="alert" title={error}>{error}</span>}<div className="nav-tools"><button onClick={()=>setTool('ornament')}>Ornament Studio →</button><button onClick={()=>setTool('topo')}>Topo Map Builder →</button></div><ThemeToggle/></nav>{mode==='map'?<MapViewer project={project} flyTo={fly} onView={m=>setProjectState(p=>({...p,map:m}))} onCrop={crop=>setProjectState(p=>({...p,map:{...p.map,crop}}))} onStatus={setStatus} captureRef={captureRef} onFeatures={f=>{applyFeatures(f,projectRef.current.map.crop);const total=f.water.length+f.roads.length+f.places.length;setStatus(total?`Loaded ${f.water.length} water, ${f.roads.length} roads, ${f.places.length} places`:'No vector features found in the selected crop.')}}/>:<GeneratedPreview scene={scene} featuresLoaded={loaded} project={project} error={error} onCommitOverride={commitOverride}/>}</section></main>;
+ return <main className="studio"><Controls project={project} setProject={setProjectLive} onSelect={select} onGenerate={generate} onExport={exportIt} status={status} generateError={error} counts={{water:features.water.length,roads:features.roads.length,namedRoads:features.roads.filter(r=>r.name).length,places:features.places.length}} selectedWater={selectedWater}/><section className="workspace"><nav><div className="nav-tabs" role="group" aria-label="View"><button className={mode==='map'?'active':''} onClick={()=>setMode('map')}>Map Mode</button><button className={mode==='generated'?'active':''} onClick={()=>setMode('generated')}>Generated Map</button></div>{error&&<span className="nav-error error" role="alert" title={error}>{error}</span>}<div className="nav-tools"><button onClick={()=>setTool('ornament')}>Ornament Studio →</button><button onClick={()=>setTool('topo')}>Topo Map Builder →</button></div><ThemeToggle/></nav><FontLoadNotice/>{mode==='map'?<MapViewer project={project} flyTo={fly} onView={m=>setProjectState(p=>({...p,map:m}))} onCrop={crop=>setProjectState(p=>({...p,map:{...p.map,crop}}))} onStatus={setStatus} captureRef={captureRef} onFeatures={f=>{applyFeatures(f,projectRef.current.map.crop);const total=f.water.length+f.roads.length+f.places.length;setStatus(total?`Loaded ${f.water.length} water, ${f.roads.length} roads, ${f.places.length} places`:'No vector features found in the selected crop.')}}/>:<GeneratedPreview scene={scene} featuresLoaded={loaded} project={project} error={error} onCommitOverride={commitOverride}/>}</section></main>;
 }

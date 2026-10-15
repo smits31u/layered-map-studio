@@ -1,0 +1,8 @@
+# gitleaks false positives: SHA-256 golden geometry fingerprints (key:'<sha256>') in
+# tests/unit/depthModeIsolation.test.ts, not credentials. Reviewed 2026-10-10 (gitleaks v8.21.2).
+0880c6a6457c4080732eb97c996567e51ca4b368:tests/unit/depthModeIsolation.test.ts:generic-api-key:63
+0880c6a6457c4080732eb97c996567e51ca4b368:tests/unit/depthModeIsolation.test.ts:generic-api-key:65
+0880c6a6457c4080732eb97c996567e51ca4b368:tests/unit/depthModeIsolation.test.ts:generic-api-key:66
+0880c6a6457c4080732eb97c996567e51ca4b368:tests/unit/depthModeIsolation.test.ts:generic-api-key:67
+0880c6a6457c4080732eb97c996567e51ca4b368:tests/unit/depthModeIsolation.test.ts:generic-api-key:68
+0880c6a6457c4080732eb97c996567e51ca4b368:tests/unit/depthModeIsolation.test.ts:generic-api-key:70

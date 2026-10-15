@@ -53,6 +53,24 @@ function inside(geometry:MultiPolygonMm,x:number,y:number){
  }
  return hit;
 }
+// The same even-odd rule as inside(), for a whole row of samples at once: every edge crossing of
+// the horizontal line y, sorted, so a sample is inside when an odd number of crossings lie to its
+// right. One pass over the edges per row instead of one per sample. Testing each sample against
+// every edge was most of this file's run time on the real lake shorelines (samples² × vertices),
+// and under coverage it pushed the normalize-first test past its timeout.
+function rowCrossings(geometry:MultiPolygonMm,y:number){
+ const xs:number[]=[];
+ for(const polygon of geometry)for(const ring of polygon)for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+  const [ax,ay]=ring[i],[bx,by]=ring[j];
+  if((ay>y)!==(by>y))xs.push((bx-ax)*(y-ay)/(by-ay)+ax);
+ }
+ return xs.sort((a,b)=>a-b);
+}
+function insideRow(crossings:readonly number[],x:number){
+ let lo=0,hi=crossings.length;
+ while(lo<hi){const m=(lo+hi)>>1;if(crossings[m]<=x)lo=m+1;else hi=m}
+ return (crossings.length-lo)%2===1;
+}
 // Boolean area helpers on Clipper at 0.0001mm (ten times finer than the implementation's grid, and
 // written separately from it). polygon-clipping cannot be used here: it throws on polygons sharing
 // edges with their container, which nested contours do by construction.
@@ -83,9 +101,12 @@ function expectNested(contours:DepthContours,shoreline:MultiPolygonMm,label:stri
     expect(outside,where).toBe(0);
     worstOutside.value=Math.max(worstOutside.value,outside);
     const b=bbox(level.geometry);
-    for(let j=0;j<samples;j++)for(let i=0;i<samples;i++){
-     const x=b.minX+(i+.3719)*(b.maxX-b.minX)/samples,y=b.minY+(j+.6173)*(b.maxY-b.minY)/samples;
-     if(inside(level.geometry,x,y)){exercised++;if(!inside(outer,x,y))throw new Error(`${where}: point ${x},${y} is inside this level but outside the one above`)}
+    for(let j=0;j<samples;j++){
+     const y=b.minY+(j+.6173)*(b.maxY-b.minY)/samples,levelRow=rowCrossings(level.geometry,y),outerRow=rowCrossings(outer,y);
+     for(let i=0;i<samples;i++){
+      const x=b.minX+(i+.3719)*(b.maxX-b.minX)/samples;
+      if(insideRow(levelRow,x)){exercised++;if(!insideRow(outerRow,x))throw new Error(`${where}: point ${x},${y} is inside this level but outside the one above`)}
+     }
     }
    }
    outer=level.geometry;

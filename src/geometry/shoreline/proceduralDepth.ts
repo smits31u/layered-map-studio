@@ -1,4 +1,5 @@
 import {extractDepthContours,type DepthContours} from '../terrain/depthContours';
+import {nestingSliverWarning} from '../terrain/nestedBands';
 import {generateDepthTerrain,type DepthTerrain} from '../terrain/depthTerrain';
 import {DEFAULT_SIMPLE_TERRAIN_CONTROLS,expandSimpleControls,type SimpleTerrainControls} from '../terrain/terrainParams';
 import {multiPolygonArea,type MultiPolygonMm} from './polygonEngine';
@@ -28,7 +29,8 @@ export const terrainControlsOf=(settings?:Partial<SimpleTerrainControls>):Simple
 
 export const proceduralThresholds=(panelCount:number)=>Array.from({length:panelCount},(_,j)=>(j+1.5)/(panelCount+1));
 
-export function proceduralDepthOpenings(water:MultiPolygonMm,panelCount:number,settings?:Partial<SimpleTerrainControls>):ProceduralDepthOpening[]{
+// warnings: receives a message for each sliver the nesting check trimmed (see enforceNesting).
+export function proceduralDepthOpenings(water:MultiPolygonMm,panelCount:number,settings?:Partial<SimpleTerrainControls>,warnings?:string[]):ProceduralDepthOpening[]{
  if(panelCount<=0)return [];
  const params={...expandSimpleControls(terrainControlsOf(settings)),terraceLevels:panelCount+1};
  let terrain:DepthTerrain;
@@ -39,6 +41,7 @@ export function proceduralDepthOpenings(water:MultiPolygonMm,panelCount:number,s
  let contours:DepthContours;
  try{contours=extractDepthContours(terrain,water,thresholds)}
  catch(error){throw new Error(`PROCEDURAL TERRAIN contour extraction failed: ${(error as Error).message}`)}
+ warnings?.push(...contours.nestingSlivers.map(nestingSliverWarning));
  // Bodies are disjoint, so a level's polygons across bodies form a valid MultiPolygon as they are.
  return contours.thresholds.map((threshold,k)=>{
   const geometry=contours.bodies.flatMap(body=>body.levels[k].geometry);

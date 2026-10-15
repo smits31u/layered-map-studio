@@ -1,3 +1,4 @@
+import {FontLoadNotice} from '../../components/ui/FontLoadNotice';
 import {useEffect,useMemo,useReducer,useRef,useState} from 'react';
 import type {CaptureWarning} from '../../ornament/capture/mapCapture';
 import {roadWidthMm} from '../../ornament/geometry/roadWidths';
@@ -228,6 +229,7 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
  // The design system's sidebar (styles/studio.css), as in the lake tool: the product wordmark over
  // this tool's name, the numbered steps scrolling beneath, and the export pinned to the foot.
  return <main className="studio topo-page">
+  <FontLoadNotice/>
   <aside>
    <header className="studio-brand">
     <div className="studio-wordmark">Layered Map Studio</div>

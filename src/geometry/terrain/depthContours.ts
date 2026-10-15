@@ -1,7 +1,7 @@
 import type {MultiPolygonMm,RingMm} from '../shoreline/polygonEngine';
 import type {DepthTerrain} from './depthTerrain';
 import {traceContourRings,type IndexRing} from './marchingSquares';
-import {areaMm2,assertLevelChain,nestedBandLevel,normalizeContourOptions,vertexCount,type ContourOptions,type ContourStats} from './nestedBands';
+import {areaMm2,assertLevelChain,nestedBandLevel,normalizeContourOptions,vertexCount,type ContourOptions,type ContourStats,type NestingSliver} from './nestedBands';
 
 // Phase B: turns a Phase A depth grid into nested contour polygons, one set per requested depth
 // threshold per water body. Pure and UI-independent, like Phase A. See docs/depth-terrain.md.
@@ -30,7 +30,8 @@ export interface ContourLevel{
  rawRingCount:number;
 }
 export interface BodyContours{bodyId:number;levels:ContourLevel[]}
-export interface DepthContours{thresholds:number[];options:ContourOptions;bodies:BodyContours[];stats:ContourStats}
+// nestingSlivers: slivers the final nesting check trimmed (see enforceNesting in nestedBands.ts).
+export interface DepthContours{thresholds:number[];options:ContourOptions;bodies:BodyContours[];stats:ContourStats;nestingSlivers:NestingSliver[]}
 
 // Thresholds are a geometry request rather than a style parameter: a bad one is refused, not
 // clamped. Quietly dropping or moving a requested layer would produce a different stack of cuts
@@ -65,15 +66,16 @@ export function extractDepthContours(terrain:DepthTerrain,shoreline:MultiPolygon
    previous.set(body.bodyId,geometry);
   }
  }
- const result={thresholds:levels,options,bodies,stats};
- assertNestedContours(result,shoreline);
+ const result:DepthContours={thresholds:levels,options,bodies,stats,nestingSlivers:[]};
+ result.nestingSlivers=assertNestedContours(result,shoreline);
  return result;
 }
 
 // Independent check of the output before it is returned: every coordinate finite, every ring
 // closed, level 1 inside the shoreline, and every level inside the one above it for the same body,
-// with exactly zero area outside. Throws rather than returning something that would cut a deeper
-// layer outside a shallower one.
-export function assertNestedContours(contours:DepthContours,shoreline:MultiPolygonMm):void{
- for(const body of contours.bodies)assertLevelChain(body.levels,shoreline,'the shoreline',threshold=>`body ${body.bodyId} at ${threshold}`);
+// with nothing but rounding noise outside: a sliver under NESTING_SLIVER_TOLERANCE_MM2 is trimmed and
+// returned for a warning, and anything larger throws, naming the body, level and position, rather
+// than returning something that would cut a deeper layer outside a shallower one.
+export function assertNestedContours(contours:DepthContours,shoreline:MultiPolygonMm):NestingSliver[]{
+ return contours.bodies.flatMap(body=>assertLevelChain(body.levels,shoreline,'the shoreline',threshold=>`body ${body.bodyId} at ${threshold}`));
 }

@@ -1,4 +1,4 @@
-import * as polygonClipping from 'polygon-clipping';
+import {robustBoolean} from './robustBoolean';
 import ClipperLib from 'clipper-lib';
 import type {GeoPolygon,LngLat} from '../../types/project';
 import type {CropProjection,PointMm} from '../projection/cropProjection';
@@ -57,8 +57,8 @@ export function buildWaterModel(features:GeoPolygon[],projection:CropProjection,
  let invalidRejectedRings=0;
  const normalized=features.map(feature=>normalizeFeature(feature,projection,()=>invalidRejectedRings++)).filter((polygon):polygon is PolygonMm=>Boolean(polygon));
  let unioned:MultiPolygonMm=[];
- if(normalized.length){try{unioned=polygonClipping.union(normalized[0],...normalized.slice(1))}catch(error){throw new Error(`Water polygon union failed: ${(error as Error).message}`)}}
- try{unioned=unioned.length?polygonClipping.intersection(unioned,rectangle(width,height)):[]}catch(error){throw new Error(`Water crop clipping failed: ${(error as Error).message}`)}
+ if(normalized.length){try{unioned=robustBoolean('union',normalized[0],normalized.slice(1))}catch(error){throw new Error(`Water polygon union failed: ${(error as Error).message}`)}}
+ try{unioned=unioned.length?robustBoolean('intersection',unioned,[rectangle(width,height)]):[]}catch(error){throw new Error(`Water crop clipping failed: ${(error as Error).message}`)}
  const minArea=Math.max(0,options.minAreaMm2??1),filtered=unioned.filter(poly=>polygonArea(poly)>=minArea);
  const selected=selectWater(filtered,options.mode??'primary',options.focus?projection.project(options.focus):undefined);
  if(!selected.length)throw new Error('No valid water polygon remains after normalization and physical-area filtering.');
@@ -73,12 +73,12 @@ export function offsetWater(water:MultiPolygonMm,offsetMm:number,width:number,he
  offsetter.Execute(tree,offsetMm*SCALE);
  const expanded:MultiPolygonMm=ClipperLib.JS.PolyTreeToExPolygons(tree).map(poly=>[poly.outer,...poly.holes].map(path=>{const ring=path.map(p=>[p.X/SCALE,p.Y/SCALE] as [number,number]);ring.push([...ring[0]] as [number,number]);return ring}));
  if(!expanded.length)throw new Error(`Water opening collapsed at ${offsetMm} mm offset.`);
- try{return polygonClipping.intersection(expanded,rectangle(width,height))}catch(error){throw new Error(`Water offset clipping failed at ${offsetMm} mm: ${(error as Error).message}`)}
+ try{return robustBoolean('intersection',expanded,[rectangle(width,height)])}catch(error){throw new Error(`Water offset clipping failed at ${offsetMm} mm: ${(error as Error).message}`)}
 }
 
 export function panelFromWater(water:MultiPolygonMm,width:number,height:number):MultiPolygonMm{
  if(!water.length)return rectangle(width,height);
- try{return polygonClipping.difference(rectangle(width,height),water)}catch(error){throw new Error(`Land panel difference failed: ${(error as Error).message}`)}
+ try{return robustBoolean('difference',rectangle(width,height),[water])}catch(error){throw new Error(`Land panel difference failed: ${(error as Error).message}`)}
 }
 export function geometryPath(geometry:MultiPolygonMm){return geometry.flatMap(poly=>poly).map(ring=>ring.map(([x,y],i)=>`${i?'L':'M'}${x.toFixed(3)} ${y.toFixed(3)}`).join(' ')+' Z').join(' ')}
 export function validatePanel(geometry:MultiPolygonMm,width:number,height:number,label:string){if(!geometry.length)throw new Error(`${label} geometry could not be generated safely.`);for(const polygon of geometry){if(!polygon.length)throw new Error(`${label} geometry could not be generated safely.`);for(const ring of polygon){if(ring.length<4||!same(ring[0],ring.at(-1)!))throw new Error(`${label} contains an open or degenerate ring.`);for(const [x,y] of ring)if(!Number.isFinite(x)||!Number.isFinite(y)||x<-EPS||y<-EPS||x>width+EPS||y>height+EPS)throw new Error(`${label} contains coordinates outside the physical product.`)}}}
