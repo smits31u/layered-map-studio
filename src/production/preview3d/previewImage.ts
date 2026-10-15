@@ -36,6 +36,15 @@ export function previewPngText(meta:PreviewMeta):Record<string,string>{
  };
 }
 
+// Checks the WebGL drawing buffer actually is the export size. A browser short on GPU memory quietly
+// gives a smaller buffer than setSize asked for (or loses the context outright), and the PNG size
+// check below cannot see it: the 2D canvas the frame is copied into is always the requested size,
+// so a shrunken buffer came out upscaled and blurry, a lost one blank.
+export function checkDrawingBuffer(gl:{drawingBufferWidth:number;drawingBufferHeight:number;isContextLost():boolean},expected:{width:number;height:number}):void{
+ if(gl.isContextLost())throw new Error(`The browser dropped the 3D renderer (WebGL context lost) at ${expected.width} x ${expected.height} px. Reload the page and try a smaller width.`);
+ if(gl.drawingBufferWidth!==expected.width||gl.drawingBufferHeight!==expected.height)throw new Error(`The browser gave the renderer ${gl.drawingBufferWidth} x ${gl.drawingBufferHeight} px instead of ${expected.width} x ${expected.height}; the image would come out blurry. Try a smaller width.`);
+}
+
 // Adds the metadata to the browser-encoded PNG and checks it is the size that was asked for.
 export function finalizePreviewPng(png:Uint8Array,expected:{width:number;height:number},meta:PreviewMeta):Uint8Array{
  const info=readPngInfo(png);

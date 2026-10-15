@@ -1,7 +1,7 @@
 import {describe,expect,it} from 'vitest';
 import {createDefaultEstimateConfig,lineIntervalFromUnit,lineIntervalToUnit,PLACEHOLDER_LABEL,SETTING_FIELDS} from '../../src/production/estimate/config';
 import {clampEstimateConfig,ESTIMATE_STORAGE_KEY,loadEstimateConfig,saveEstimateConfig} from '../../src/production/estimate/persistence';
-import {DESIGN_TIMER_KEY,IDLE_LIMIT_MS,emptyTimer,formatTimer,loadTimer,noteActivity,pauseTimer,saveTimer,startTimer,timerElapsedMs,timerIdle} from '../../src/production/estimate/designTimer';
+import {DESIGN_TIMER_KEY,IDLE_LIMIT_MS,adoptLegacyTimer,copyTimer,designTimerKey,emptyTimer,formatTimer,loadTimer,noteActivity,pauseTimer,saveTimer,startTimer,timerElapsedMs,timerIdle} from '../../src/production/estimate/designTimer';
 
 // The estimate config persists the same way the ornament and topo projects do: one schema-versioned
 // localStorage record, merged over defaults and clamped, so nothing stored can break a quote.
@@ -85,6 +85,16 @@ describe('estimate config persistence',()=>{
   expect(p2s.settings.find(s=>s.materialId==='birch')!.placeholder).toEqual([...SETTING_FIELDS]);
   expect(c.rates).toEqual({designPerHour:25,designHours:.5,suppliesPct:10});
   expect(c.calibration[0].machineId).toBe('xtool-p2s-55w');
+  // Saved before machines listed their guesses: a value still at the studio's default is one, a
+  // changed one (the 1.5 multiplier) is Ben's.
+  expect(p2s.guessed).toEqual(['perPieceOverheadMin']);
+  expect(c.machines[1].guessed).toEqual(['travelMultiplier','perPieceOverheadMin']);
+ });
+
+ it('a stock choice naming removed stock, or stock of another material, loads as auto',()=>{
+  const c=createDefaultEstimateConfig();
+  const loaded=clampEstimateConfig({...c,stock:c.stock.filter(s=>s.id!=='mdf-20x48'),stockSelection:{'mdf-1-8':'mdf-20x48',birch:'mdf-12x20',truflat:'truflat-12x19'}});
+  expect(loaded.stockSelection).toEqual({'mdf-1-8':'auto',birch:'auto',truflat:'truflat-12x19'});
  });
 
  it('nothing stored, unparseable JSON or another schema version all load the defaults',()=>{
@@ -155,14 +165,35 @@ describe('design timer',()=>{
   expect(timerElapsedMs(t,71*MIN)).toBe(11*MIN);
  });
 
- it('persists, including a running timer across a reload',()=>{
+ it('persists per project, including a running timer across a reload',()=>{
   const storage=memoryStorage();
   const t=noteActivity(startTimer(emptyTimer(),1000),61000);
-  saveTimer(t,storage);
-  expect(storage.data.has(DESIGN_TIMER_KEY)).toBe(true);
-  expect(loadTimer(storage)).toEqual(t);
-  storage.setItem(DESIGN_TIMER_KEY,JSON.stringify({running:true,accumulatedMs:-5,lastActivity:'x'}));
-  expect(loadTimer(storage)).toEqual(emptyTimer());
+  saveTimer(t,'lake-a',storage);
+  expect(storage.data.has(designTimerKey('lake-a'))).toBe(true);
+  expect(loadTimer('lake-a',storage)).toEqual(t);
+  // Another project's timer is its own, starting at zero.
+  expect(loadTimer('lake-b',storage)).toEqual(emptyTimer());
+  storage.setItem(designTimerKey('lake-a'),JSON.stringify({running:true,accumulatedMs:-5,lastActivity:'x'}));
+  expect(loadTimer('lake-a',storage)).toEqual(emptyTimer());
   expect(formatTimer(3*3600_000+4*60_000+5000)).toBe('3:04:05');
+ });
+
+ it('saving a session under a new id carries its time; the old global timer goes to one project, once',()=>{
+  const storage=memoryStorage();
+  const t=pauseTimer(startTimer(emptyTimer(),0),25*60_000);
+  saveTimer(t,'unsaved-x',storage);
+  copyTimer('unsaved-x','lake-saved',storage);
+  expect(loadTimer('lake-saved',storage)).toEqual(t);
+  // The first version's single timer, still in storage after the update.
+  storage.setItem(DESIGN_TIMER_KEY,JSON.stringify({running:false,accumulatedMs:40*60_000,lastActivity:null}));
+  adoptLegacyTimer('lake-restored',storage);
+  expect(loadTimer('lake-restored',storage).accumulatedMs).toBe(40*60_000);
+  expect(storage.data.has(DESIGN_TIMER_KEY)).toBe(false);
+  adoptLegacyTimer('lake-other',storage);
+  expect(loadTimer('lake-other',storage)).toEqual(emptyTimer());
+  // A project that already has its own timer keeps it.
+  storage.setItem(DESIGN_TIMER_KEY,JSON.stringify({running:false,accumulatedMs:5,lastActivity:null}));
+  adoptLegacyTimer('lake-saved',storage);
+  expect(loadTimer('lake-saved',storage)).toEqual(t);
  });
 });

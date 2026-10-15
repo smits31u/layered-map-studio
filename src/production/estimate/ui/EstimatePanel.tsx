@@ -3,7 +3,8 @@ import type {ProductionJob} from '../../job';
 import {downloadFile,fileSlug} from '../../download';
 import {MM_PER_IN,type EstimateConfig} from '../config';
 import {formatTimer} from '../designTimer';
-import {confidenceLabel,estimateJob,formatMachineTime,type DesignTime} from '../estimate';
+import {calibrationAdvice,confidenceLabel,estimateJob,formatMachineTime,type DesignTime} from '../estimate';
+import {applySuggestedMultiplier} from '../edits';
 import {calibrationEntryFrom,estimateJson,quoteSheetHtml,type EstimateMeta} from '../exports';
 import {EstimateSettings} from './EstimateSettings';
 import {useDesignTimer} from './useDesignTimer';
@@ -15,8 +16,9 @@ const length=(mm:number)=>mm>=1000?`${(mm/1000).toFixed(2)} m`:`${Math.round(mm)
 // The live estimate for whatever the tool has generated. It reads the job and the config and
 // nothing else, so editing a price, a speed or a recipe recomputes this panel without the tool
 // rebuilding its scene; layer, size and setting changes reach it through the tool's own rebuild.
-export function EstimatePanel({job,title,product,config,setConfig,appVersion}:{job?:ProductionJob;title:string;product:string;config:EstimateConfig;setConfig:(c:EstimateConfig)=>void;appVersion:string}){
- const timer=useDesignTimer();
+// timerId: whose design time this is (the open project); each project keeps its own timer.
+export function EstimatePanel({job,title,product,config,setConfig,appVersion,timerId='default'}:{job?:ProductionJob;title:string;product:string;config:EstimateConfig;setConfig:(c:EstimateConfig)=>void;appVersion:string;timerId?:string}){
+ const timer=useDesignTimer(timerId);
  // Timed design work replaces the default design hours once there is any. Rounded to the minute so
  // the estimate does not recompute every second while the timer runs.
  const timedMinutes=Math.floor(timer.elapsedMs/60000);
@@ -36,10 +38,11 @@ export function EstimatePanel({job,title,product,config,setConfig,appVersion}:{j
  const actualMin=Number(actual);
  const record=()=>{if(!e||!(actualMin>0))return;setConfig({...config,calibration:[...config.calibration,calibrationEntryFrom(e,config,actualMin,jobLabel||title)]});setActual('');setJobLabel('')};
  const removeEntry=(id:string)=>setConfig({...config,calibration:config.calibration.filter(c=>c.id!==id)});
- const applyMultiplier=(machineId:string,m:number)=>setConfig({...config,machines:config.machines.map(x=>x.id===machineId?{...x,travelMultiplier:Number(m.toFixed(3))}:x)});
+ const applyMultiplier=(machineId:string,m:number)=>setConfig(applySuggestedMultiplier(config,machineId,m));
  // Roads engraved (the default) are part of the engrave area, so the score column only shows when scoring.
  const scored=e?.strokedLines==='score';
- const currentMultiplier=e?config.machines.find(m=>m.id===e.machine.id)?.travelMultiplier:undefined;
+ const machine=e?config.machines.find(m=>m.id===e.machine.id):undefined;
+ const currentMultiplier=machine?.travelMultiplier;
 
  return <div className="estimate-panel" data-testid="estimate-panel">
   {!job&&<small>Generate the scene to see materials, machine time and cost.</small>}
@@ -82,13 +85,14 @@ export function EstimatePanel({job,title,product,config,setConfig,appVersion}:{j
     <button onClick={saveJson}>Estimate JSON</button>
    </div>
    <details className="estimate-calibration"><summary>Calibrate machine time<span className="summary-meta">{e.calibration.entries?`${e.calibration.entries} recorded`:'none recorded'}</span></summary>
-    <small>Enter the job time the laser software reported for this job (or a past one generated at the same settings) on the {e.machine.name}. The ratio tunes that machine's travel multiplier.</small>
+    <small>Enter the job time the laser software reported for this job (or a past one generated at the same settings) on the {e.machine.name}. It is compared with the estimate's laser time, without the per-piece overhead (the software's time leaves out setup between pieces), and tunes that machine's travel multiplier.</small>
     <div className="field-pair">
      <label>Actual min <input type="number" min="0" step="0.5" value={actual} onChange={ev=>setActual(ev.target.value)} aria-label="Actual job minutes"/></label>
      <label>Job <input value={jobLabel} placeholder={title||'Job name'} onChange={ev=>setJobLabel(ev.target.value)} aria-label="Calibration job name"/></label>
     </div>
     <button onClick={record} disabled={!(actualMin>0)}>Record actual time</button>
     {e.calibration.rows.length>0&&<table className="estimate-table" aria-label="Estimate versus actual"><thead><tr><th>Job</th><th className="n">Est.</th><th className="n">Actual</th><th className="n">Ratio</th><th/></tr></thead><tbody>{e.calibration.rows.map(r=><tr key={r.id}><td>{r.label}</td><td className="n">{r.estimatedMin.toFixed(1)}</td><td className="n">{r.actualMin.toFixed(1)}</td><td className="n">{Number.isFinite(r.ratio)?`x${r.ratio.toFixed(2)}`:'-'}</td><td><button className="btn-quiet" onClick={()=>removeEntry(r.id)} aria-label={`Remove ${r.label}`}>x</button></td></tr>)}</tbody></table>}
+    {machine&&<small data-testid="calibration-advice">{calibrationAdvice(e.calibration,machine)}</small>}
     {e.calibration.suggestedMultiplier!==null&&<button onClick={()=>applyMultiplier(e.machine.id,e.calibration.suggestedMultiplier!)}>Use multiplier x{e.calibration.suggestedMultiplier.toFixed(2)} (now x{currentMultiplier})</button>}
    </details>
   </>}

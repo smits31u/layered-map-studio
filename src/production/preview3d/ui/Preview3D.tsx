@@ -5,7 +5,7 @@ import type {EstimateConfig} from '../../estimate/config';
 import {downloadFile,fileSlug} from '../../download';
 import type {JobPiece,ProductionJob} from '../../job';
 import {extrudePolygons,type MeshData} from '../extrude';
-import {EXPORT_ASPECTS,EXPORT_WIDTHS,exportSize,finalizePreviewPng,RENDER_NOTICE,watermarkText,type ExportAspect,type WatermarkOptions} from '../previewImage';
+import {EXPORT_ASPECTS,EXPORT_WIDTHS,checkDrawingBuffer,exportSize,finalizePreviewPng,RENDER_NOTICE,watermarkText,type ExportAspect,type WatermarkOptions} from '../previewImage';
 import {defaultLayerColors,explodedY,stackHeight,stackLayers} from '../stack';
 import {createMeshRunner,isMeshBuildCancelled} from '../worker/meshRunner';
 import './preview3d.css';
@@ -231,8 +231,10 @@ export function Preview3D({job,config,title,sizeLabel,appVersion}:{job:Productio
    if(exportAspect<previous.aspect){const hfov=2*Math.atan(Math.tan(previous.fov*Math.PI/360)*previous.aspect);camera.fov=2*Math.atan(Math.tan(hfov/2)/exportAspect)*180/Math.PI}
    camera.aspect=exportAspect;camera.updateProjectionMatrix();
    renderer.setPixelRatio(1);renderer.setSize(width,height,false);
+   checkDrawingBuffer(gl,{width,height});
    renderer.setClearColor(new Color(background.color),background.transparent?0:1);
    renderer.render(t.scene,camera);
+   checkDrawingBuffer(gl,{width,height});
    const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
    const ctx=canvas.getContext('2d')!;
    // Read the frame back in the same task it was drawn in, before the browser can clear it.

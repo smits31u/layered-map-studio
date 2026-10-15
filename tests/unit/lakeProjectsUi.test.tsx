@@ -33,7 +33,8 @@ beforeEach(()=>{
   return {...r,x:r.left,y:r.top,width:r.right-r.left,height:r.bottom-r.top,toJSON(){}} as DOMRect;
  });
 });
-afterEach(()=>{cleanup();rect.mockRestore();fake.uninstall()});
+afterEach(()=>{cleanup();rect.mockRestore();vi.restoreAllMocks();fake.uninstall()});
+const titleText=()=>(screen.getByLabelText('Title text') as HTMLInputElement).value;
 
 async function generateAndName(title:string){
  fake.setFeatures([lake,road] as unknown as CaptureMapFeature[]);
@@ -102,6 +103,61 @@ describe('saved lake projects',()=>{
   await waitFor(()=>expect(name()).toBe('First Lake 14x11'));
   await waitFor(()=>expect(screen.getByText('Generated Map').className).toBe('active'));
   expect((screen.getByLabelText('Title text') as HTMLInputElement).value).toBe('First Lake');
+ },20000);
+
+ it('a map never saved asks before New; the replaced map comes back with Recover last session',async()=>{
+  await generateAndName('Unsaved Lake');
+  expect(status()).toBe('Not saved yet (autosaved in this browser)');
+  expect(screen.getByTestId('project-status').dataset.dirty).toBe('true');
+  const confirm=vi.spyOn(window,'confirm').mockReturnValue(false);
+  fireEvent.click(screen.getByRole('button',{name:'New'}));
+  expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/^Start a new project\? This map has not been saved/));
+  await settle();
+  expect(titleText()).toBe('Unsaved Lake');
+  confirm.mockReturnValue(true);
+  fireEvent.click(screen.getByRole('button',{name:'New'}));
+  await waitFor(()=>expect(titleText()).toBe(''));
+  await settle();
+  // The new map loading into its own view is not unsaved work.
+  expect(screen.getByTestId('project-status').dataset.dirty).toBe('false');
+  // Let the autosave overwrite the old session; the recovery slot still has it.
+  await act(()=>new Promise(resolve=>setTimeout(resolve,1000)));
+  fireEvent.click(screen.getByRole('button',{name:'Recover last session'}));
+  await waitFor(()=>expect(titleText()).toBe('Unsaved Lake'));
+  await waitFor(()=>expect(screen.getByText('Generated Map').className).toBe('active'));
+  expect(screen.getByTestId('project-status').dataset.dirty).toBe('true');
+ },20000);
+
+ it('Import over unsaved work asks first; cancelling leaves the map alone',async()=>{
+  await generateAndName('Unsaved Lake');
+  const confirm=vi.spyOn(window,'confirm').mockReturnValue(false);
+  fireEvent.click(screen.getByRole('button',{name:'Open…'}));
+  const input=await screen.findByLabelText('Import project file');
+  fireEvent.change(input,{target:{files:[new File(['{}'],'other.lmsproject.json',{type:'application/json'})]}});
+  expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/^Import other\.lmsproject\.json\? This map has not been saved/));
+  await settle();
+  expect(titleText()).toBe('Unsaved Lake');
+  expect(screen.getByRole('dialog',{name:'Saved projects'})).toBeTruthy();
+ },20000);
+
+ it('opening a project saved without geography is not marked unsaved when the map loads; moving it is',async()=>{
+  render(<App/>);
+  await settle();
+  fireEvent.change(screen.getByLabelText('Title text'),{target:{value:'Plain Lake'}});
+  fireEvent.click(screen.getByRole('button',{name:'Save'}));
+  fireEvent.submit(screen.getByLabelText('Project name').closest('form')!);
+  await waitFor(()=>expect(status()).toMatch(/^Saved/));
+  fireEvent.click(screen.getByRole('button',{name:'New'}));
+  await waitFor(()=>expect(name()).toBe('Unsaved project'));
+  await settle();
+  fireEvent.click(screen.getByRole('button',{name:'Open…'}));
+  fireEvent.click(await screen.findByRole('button',{name:'Open Plain Lake 14x11'}));
+  await waitFor(()=>expect(name()).toBe('Plain Lake 14x11'));
+  await settle();
+  expect(status()).toMatch(/^Saved/);
+  // Moving the camera reports a new view and crop, and that is a change.
+  act(()=>{fake.state.center={lng:fake.state.center.lng+.01,lat:fake.state.center.lat};fake.emit('moveend')});
+  await waitFor(()=>expect(status()).toBe('Unsaved changes'));
  },20000);
 });
 

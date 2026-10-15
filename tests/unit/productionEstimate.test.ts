@@ -1,6 +1,7 @@
 import {describe,expect,it} from 'vitest';
 import {createDefaultEstimateConfig,MM_PER_IN,type EstimateConfig} from '../../src/production/estimate/config';
-import {assignMaterials,estimateJob,formatMachineTime,machineFor,matchRecipe,pieceMinutes,summarizeCalibration} from '../../src/production/estimate/estimate';
+import {assignMaterials,calibrationAdvice,estimateJob,formatMachineTime,machineFor,matchRecipe,pieceMinutes,selectedStockId,summarizeCalibration} from '../../src/production/estimate/estimate';
+import {applySuggestedMultiplier,keepMachineValue,removeStock,setMachineValue,setStockMaterials} from '../../src/production/estimate/edits';
 import {calibrationEntryFrom,estimateJson,quoteSheetHtml} from '../../src/production/estimate/exports';
 import {fitsBed,piecesPerSheet} from '../../src/production/estimate/fit';
 import {rectPathData} from '../../src/production/geometry/pathData';
@@ -101,21 +102,36 @@ describe('machine time',()=>{
  });
 
  it('says which unverified inputs the time depends on, and only those',()=>{
+  // Here every machine's multiplier and overhead count as entered (the test below covers them).
+  const entered=(patch:Partial<EstimateConfig>={})=>{const c=testConfig(patch);return {...c,machines:c.machines.map(m=>({...m,guessed:[]}))}};
   // Cutting only: speed and passes are Ben's, so nothing on the P2S is a placeholder.
-  const cutOnly=estimateJob(job(14,11,5),testConfig());
+  const cutOnly=estimateJob(job(14,11,5),entered());
   expect(cutOnly.placeholderInputs).toEqual([]);
   expect(cutOnly.timeConfidence).toBe('uncalibrated');
   // Engraving the top (glyphs and engraved roads): speed and line interval are Ben's too.
-  const engraved=estimateJob(job(14,11,5,[glyph,road]),testConfig());
+  const engraved=estimateJob(job(14,11,5,[glyph,road]),entered());
   expect(engraved.placeholderInputs).toEqual([]);
   expect(engraved.timeConfidence).toBe('uncalibrated');
   // Scoring the roads instead needs the score speed, which is not known.
-  const scored=estimateJob(job(14,11,5,[glyph,road]),testConfig({strokedLines:'score'}));
+  const scored=estimateJob(job(14,11,5,[glyph,road]),entered({strokedLines:'score'}));
   expect(scored.timeConfidence).toBe('placeholder');
   expect(scored.placeholderInputs).toEqual(['score speed (TruFlat premium top (maple/cherry))']);
   // The Sterlings machines run Ben's settings.
-  expect(estimateJob(job(24,18,5),testConfig()).placeholderInputs).toEqual([]);
-  expect(estimateJob(job(36,24,6),testConfig()).placeholderInputs).toEqual([]);
+  expect(estimateJob(job(24,18,5),entered()).placeholderInputs).toEqual([]);
+  expect(estimateJob(job(36,24,6),entered()).placeholderInputs).toEqual([]);
+ });
+
+ it('lists the guessed travel multiplier and overhead as placeholders until they are changed or kept',()=>{
+  const config=testConfig();
+  expect(estimateJob(job(14,11,5),config).placeholderInputs).toEqual(['travel multiplier (xTool P2S 55W CO2)','overhead per piece (xTool P2S 55W CO2)']);
+  expect(estimateJob(job(14,11,5),config).timeConfidence).toBe('placeholder');
+  const overhead=setMachineValue(config,'xtool-p2s-55w','perPieceOverheadMin',4);
+  expect(estimateJob(job(14,11,5),overhead).placeholderInputs).toEqual(['travel multiplier (xTool P2S 55W CO2)']);
+  const both=keepMachineValue(overhead,'xtool-p2s-55w','travelMultiplier');
+  expect(both.machines[0].travelMultiplier).toBe(1.3);
+  expect(estimateJob(job(14,11,5),both).placeholderInputs).toEqual([]);
+  // The OMTech's own guesses are untouched.
+  expect(estimateJob(job(24,18,5),both).placeholderInputs).toEqual(['travel multiplier (OMTech)','overhead per piece (OMTech)']);
  });
 
  it('is never shown more precisely than its confidence allows',()=>{
@@ -241,26 +257,95 @@ describe('cost',()=>{
 });
 
 describe('calibration',()=>{
- it('records estimate vs actual per machine and suggests the multiplier that makes it exact',()=>{
+ // A recorded job with exact numbers: calibrationEntryFrom stores the estimate's motion and overhead.
+ const entry=(id:string,motionMin:number,overheadMin:number,multiplierAtTime:number,actualMin:number,recordedAt:string,machineId='xtool-p2s-55w')=>({id,label:id,recordedAt,machineId,estimatedMotionMin:motionMin,estimatedOverheadMin:overheadMin,multiplierAtTime,actualMin});
+
+ it('compares the laser software\'s time with motion x multiplier, overhead left out: 5 pieces, 30 min motion, 39 min reported -> x1.3',()=>{
+  // Five pieces at the default 3 min overhead each: 15 min of setup the software never sees. The
+  // machine's true multiplier is 1.3, so xTool Studio reports 30 x 1.3 = 39 min.
+  const config={...testConfig(),calibration:[entry('five pieces',30,15,1,39,'2026-10-15T12:00:00Z')]};
+  const summary=summarizeCalibration(config,'xtool-p2s-55w');
+  expect(summary.suggestedMultiplier).toBeCloseTo(1.3,9);
+  // Estimated at x1 it said 30 min (no overhead): the software ran 1.3 times that.
+  expect(summary.rows[0].estimatedMin).toBe(30);
+  expect(summary.rows[0].ratio).toBeCloseTo(1.3,9);
+  // The old math subtracted the overhead the software never included: (39 - 15) / 30 = 0.8.
+  expect(summary.suggestedMultiplier).not.toBeCloseTo(.8,2);
+ });
+
+ it('suggests the mean of actual / motion over the machine\'s jobs, per machine',()=>{
   let config=testConfig();
   const e=estimateJob(job(14,11,5),config);
-  const {motionMin,overheadMin,machineMin}=e.totals;
-  const p2s=config.machines.find(m=>m.id==='xtool-p2s-55w')!;
-  // The laser software reported 20% more motion time than motion x the current multiplier.
-  const actual=motionMin*p2s.travelMultiplier*1.2+overheadMin;
+  const {motionMin}=e.totals;
+  // The software reported 20% more than motion x the current 1.3.
+  const actual=motionMin*1.3*1.2;
   config={...config,calibration:[calibrationEntryFrom(e,config,actual,'Mary Lake test cut',new Date('2026-10-14T12:00:00Z'))]};
   expect(config.calibration[0].machineId).toBe('xtool-p2s-55w');
   const summary=summarizeCalibration(config,'xtool-p2s-55w');
   expect(summary.entries).toBe(1);
-  expect(summary.rows[0].estimatedMin).toBeCloseTo(machineMin,9);
-  expect(summary.rows[0].ratio).toBeCloseTo(actual/machineMin,9);
-  expect(summary.suggestedMultiplier).toBeCloseTo(p2s.travelMultiplier*1.2,9);
+  expect(summary.rows[0].estimatedMin).toBeCloseTo(motionMin*1.3,9);
+  expect(summary.rows[0].ratio).toBeCloseTo(1.2,9);
+  expect(summary.suggestedMultiplier).toBeCloseTo(1.56,9);
   // A P2S job says nothing about the OMTech.
   expect(summarizeCalibration(config,'omtech-sterlings').entries).toBe(0);
-  const tuned={...config,machines:config.machines.map(m=>m.id===p2s.id?{...m,travelMultiplier:summary.suggestedMultiplier!}:m)};
-  const after=estimateJob(job(14,11,5),tuned);
-  expect(after.totals.machineMin).toBeCloseTo(actual,6);
-  expect(after.timeConfidence).toBe('calibrated');
+  const two={...config,calibration:[...config.calibration,entry('second',20,9,1.3,20*1.44,'2026-10-14T13:00:00Z')]};
+  expect(summarizeCalibration(two,'xtool-p2s-55w').suggestedMultiplier).toBeCloseTo((1.56+1.44)/2,9);
+ });
+
+ it('is not calibrated after one job: the multiplier must be applied and a later job land within 10%',()=>{
+  const ready=setMachineValue(testConfig(),'xtool-p2s-55w','perPieceOverheadMin',3);
+  let config={...ready,calibration:[entry('first',30,15,1.3,39*1.2,'2026-10-15T12:00:00Z')]};
+  // One job, the multiplier still the studio's guess: a suggestion, not a calibration.
+  let summary=summarizeCalibration(config,'xtool-p2s-55w');
+  expect(summary.calibrated).toBe(false);
+  expect(estimateJob(job(14,11,5),config).timeConfidence).toBe('placeholder');
+  expect(calibrationAdvice(summary,config.machines[0])).toBe('The x1.3 multiplier is a guess. Use the suggested one, then record another job to confirm it.');
+  // Apply it. The job it came from was recorded before, so it does not confirm it.
+  config=applySuggestedMultiplier(config,'xtool-p2s-55w',summary.suggestedMultiplier!,new Date('2026-10-15T12:05:00Z'));
+  expect(config.machines[0]).toMatchObject({travelMultiplier:1.56,guessed:[],multiplierSetAt:'2026-10-15T12:05:00.000Z'});
+  summary=summarizeCalibration(config,'xtool-p2s-55w');
+  expect(summary).toMatchObject({calibrated:false,checkedEntries:0});
+  expect(estimateJob(job(14,11,5),config).timeConfidence).toBe('uncalibrated');
+  expect(calibrationAdvice(summary,config.machines[0])).toBe('Record a job at x1.56 to confirm it.');
+  // A later job 15% over what x1.56 predicts: still not calibrated.
+  const off={...config,calibration:[...config.calibration,entry('off',20,9,1.56,20*1.56*1.15,'2026-10-15T14:00:00Z')]};
+  expect(summarizeCalibration(off,'xtool-p2s-55w')).toMatchObject({calibrated:false,checkedEntries:1});
+  expect(calibrationAdvice(summarizeCalibration(off,'xtool-p2s-55w'),off.machines[0])).toMatch(/more than 10% off/);
+  // A later job 6% over: calibrated, and the time is shown to the minute.
+  const close={...config,calibration:[...config.calibration,entry('close',20,9,1.56,20*1.56*1.06,'2026-10-15T14:00:00Z')]};
+  summary=summarizeCalibration(close,'xtool-p2s-55w');
+  expect(summary).toMatchObject({calibrated:true,checkedEntries:1});
+  expect(estimateJob(job(14,11,5),close).timeConfidence).toBe('calibrated');
+  expect(calibrationAdvice(summary,close.machines[0])).toBe('Calibrated: 1 job recorded at x1.56 landed within 10%.');
+  // A job recorded at some other multiplier never counts toward the one in use.
+  const other={...config,calibration:[...config.calibration,entry('other',20,9,1.4,20*1.4,'2026-10-15T14:00:00Z')]};
+  expect(summarizeCalibration(other,'xtool-p2s-55w').calibrated).toBe(false);
+ });
+});
+
+describe('stock choice',()=>{
+ it('removing the chosen stock, or unticking its material, puts the material back on auto',()=>{
+  const base=testConfig({stockSelection:{'mdf-1-8':'mdf-20x48',truflat:'auto',birch:'auto'}});
+  const removed=removeStock(base,'mdf-20x48');
+  expect(removed.stockSelection['mdf-1-8']).toBe('auto');
+  expect(removed.stock.some(s=>s.id==='mdf-20x48')).toBe(false);
+  const unticked=setStockMaterials(base,'mdf-20x48',[]);
+  expect(unticked.stockSelection['mdf-1-8']).toBe('auto');
+  // Unticking another material leaves the choice alone.
+  const both=testConfig({stockSelection:{'mdf-1-8':'mdf-birch-24x36',truflat:'auto',birch:'auto'}});
+  expect(setStockMaterials(both,'mdf-birch-24x36',['mdf-1-8']).stockSelection['mdf-1-8']).toBe('mdf-birch-24x36');
+ });
+
+ it('a stale choice is treated as auto instead of costing the material $0',()=>{
+  // Stock removed without the choice being reset, as the settings dialog used to do.
+  const c=testConfig();
+  const stale={...c,stock:c.stock.filter(s=>s.id!=='mdf-20x48'),stockSelection:{'mdf-1-8':'mdf-20x48',truflat:'auto',birch:'auto'}};
+  expect(selectedStockId(stale,'mdf-1-8')).toBeUndefined();
+  const e=estimateJob(job(14,11,5),stale),auto=estimateJob(job(14,11,5),testConfig());
+  const mdf=e.materials.find(m=>m.materialId==='mdf-1-8')!;
+  expect(mdf.cost).toBeGreaterThan(0);
+  expect(mdf).toEqual(auto.materials.find(m=>m.materialId==='mdf-1-8'));
+  expect(e.warnings.some(w=>/will not fit/.test(w))).toBe(false);
  });
 });
 
@@ -270,7 +355,7 @@ describe('exports',()=>{
   const config=testConfig({strokedLines:'score'}),e=estimateJob(job(14,11,5,[glyph,road]),config),json=estimateJson(e,config,meta);
   expect(json.schema).toBe('layered-map-studio.estimate/1');
   expect(json.timeConfidence).toBe('placeholder');
-  expect(json.placeholderInputs).toEqual(['score speed (TruFlat premium top (maple/cherry))']);
+  expect(json.placeholderInputs).toEqual(['score speed (TruFlat premium top (maple/cherry))','travel multiplier (xTool P2S 55W CO2)','overhead per piece (xTool P2S 55W CO2)']);
   expect(json.machine).toMatchObject({id:'xtool-p2s-55w',hourlyRate:25});
   expect(json.pieces).toHaveLength(6);
   expect(json.pieces[0]).toMatchObject({role:'border',manual:true});

@@ -20,9 +20,12 @@ export type SavedLakeProject={
 };
 
 // What reopening the studio restores: the project on screen, its geography, and which saved project
-// it is (if any) and whether it has changed since that save.
-export type LakeAutosave={project:MapProject;features?:ExtractedFeatures;savedId?:string;savedName?:string;dirty:boolean;updatedAt:string};
+// it is (if any) and whether it has changed since that save (dirty; for a session never saved, whether
+// it has any work in it). timerId: whose design timer it uses (the saved id, or one of its own).
+export type LakeAutosave={project:MapProject;features?:ExtractedFeatures;savedId?:string;savedName?:string;dirty:boolean;timerId?:string;updatedAt:string};
 
+// The recovery slot holds the last session that New, Open or Import replaced while it had unsaved
+// work, in the autosave's shape: one level of "I didn't mean to do that".
 export interface LakeProjectStore{
  list():Promise<SavedLakeProject[]>;
  get(id:string):Promise<SavedLakeProject|undefined>;
@@ -30,6 +33,9 @@ export interface LakeProjectStore{
  remove(id:string):Promise<void>;
  getAutosave():Promise<LakeAutosave|undefined>;
  putAutosave(autosave:LakeAutosave):Promise<void>;
+ getRecovery():Promise<LakeAutosave|undefined>;
+ putRecovery(session:LakeAutosave):Promise<void>;
+ clearRecovery():Promise<void>;
 }
 
 const DB_NAME='layered-map-studio';
@@ -37,6 +43,7 @@ const DB_VERSION=1;
 const PROJECTS='lake-projects';
 const SESSION='lake-session';
 const AUTOSAVE_KEY='autosave';
+const RECOVERY_KEY='recovery';
 
 // Stored records are re-validated on the way out, like every other persisted state in the studio.
 export function reviveSavedProject(raw:unknown):SavedLakeProject|undefined{
@@ -67,6 +74,7 @@ function reviveAutosave(raw:unknown):LakeAutosave|undefined{
    ...(typeof o.savedId==='string'?{savedId:o.savedId}:{}),
    ...(typeof o.savedName==='string'?{savedName:o.savedName}:{}),
    dirty:o.dirty===true,
+   ...(typeof o.timerId==='string'&&o.timerId?{timerId:o.timerId}:{}),
    updatedAt:typeof o.updatedAt==='string'?o.updatedAt:'',
   };
  }catch{return undefined}
@@ -106,6 +114,9 @@ export function createIndexedDbProjectStore(factory:IDBFactory=globalThis.indexe
   async remove(id){await run(PROJECTS,'readwrite',s=>s.delete(id))},
   async getAutosave(){return reviveAutosave(await run(SESSION,'readonly',s=>s.get(AUTOSAVE_KEY) as IDBRequest<unknown>))},
   async putAutosave(autosave){await run(SESSION,'readwrite',s=>s.put(autosave,AUTOSAVE_KEY))},
+  async getRecovery(){return reviveAutosave(await run(SESSION,'readonly',s=>s.get(RECOVERY_KEY) as IDBRequest<unknown>))},
+  async putRecovery(session){await run(SESSION,'readwrite',s=>s.put(session,RECOVERY_KEY))},
+  async clearRecovery(){await run(SESSION,'readwrite',s=>s.delete(RECOVERY_KEY))},
  };
 }
 
@@ -113,7 +124,7 @@ export function createIndexedDbProjectStore(factory:IDBFactory=globalThis.indexe
 // nothing persisted past the page.
 export function createMemoryProjectStore():LakeProjectStore{
  const projects=new Map<string,SavedLakeProject>();
- let autosave:LakeAutosave|undefined;
+ let autosave:LakeAutosave|undefined,recovery:LakeAutosave|undefined;
  const clone=<T>(v:T):T=>structuredClone(v);
  return {
   async list(){return [...projects.values()].map(clone).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))},
@@ -122,6 +133,9 @@ export function createMemoryProjectStore():LakeProjectStore{
   async remove(id){projects.delete(id)},
   async getAutosave(){return autosave&&clone(autosave)},
   async putAutosave(a){autosave=clone(a)},
+  async getRecovery(){return recovery&&clone(recovery)},
+  async putRecovery(a){recovery=clone(a)},
+  async clearRecovery(){recovery=undefined},
  };
 }
 

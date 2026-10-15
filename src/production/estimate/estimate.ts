@@ -1,6 +1,6 @@
 import {rectPathData} from '../geometry/pathData';
 import {pieceMetrics,type JobPiece,type PieceMetrics,type ProductionJob} from '../job';
-import {MM_PER_IN,SETTING_LABELS,type EstimateConfig,type LayerRecipe,type MachineProfile,type MaterialSettings,type SettingField,type StockItem} from './config';
+import {MACHINE_GUESS_LABELS,MM_PER_IN,SETTING_LABELS,type EstimateConfig,type LayerRecipe,type MachineProfile,type MaterialSettings,type SettingField,type StockItem} from './config';
 import {fitsBed,piecesPerSheet} from './fit';
 
 // The material, machine-time and cost estimate for one production job. Pure: a job and a config in,
@@ -25,12 +25,17 @@ export type EstimatePiece={
 
 export type MaterialLine={materialId:string;materialName:string;pieces:number;stockId:string|null;stockName:string|null;piecesPerSheet:number;sheets:number;sheetPrice:number;cost:number;unplaced:number};
 
-// placeholder: an input the time depends on (a speed, the line interval) is still a default.
-// uncalibrated: every such input was entered, but no real job time has been recorded on this machine.
-// calibrated: real job times have been recorded on this machine; the multiplier can be tuned from them.
+// placeholder: an input the time depends on (a speed, the line interval, the machine's travel
+// multiplier or overhead) is still a default or a guess.
+// uncalibrated: every such input was entered, but the multiplier in use has not been checked against
+// a real job recorded after it was set.
+// calibrated: jobs recorded at the multiplier in use, after it was set, land within 10% of it.
 export type TimeConfidence='placeholder'|'uncalibrated'|'calibrated';
 
-export type CalibrationSummary={machineId:string;entries:number;meanRatio:number|null;suggestedMultiplier:number|null;rows:{id:string;label:string;recordedAt:string;estimatedMin:number;actualMin:number;ratio:number}[]};
+// estimatedMin is what the estimate said the laser software would report: motion x the multiplier at
+// the time, no overhead. checked: recorded at the multiplier now in use, after it was set.
+export type CalibrationRow={id:string;label:string;recordedAt:string;estimatedMin:number;actualMin:number;ratio:number;checked:boolean};
+export type CalibrationSummary={machineId:string;entries:number;meanRatio:number|null;suggestedMultiplier:number|null;checkedEntries:number;calibrated:boolean;rows:CalibrationRow[]};
 
 export type DesignTime={hours:number;source:'timer'|'default'};
 
@@ -141,10 +146,18 @@ const fieldsUsed=(work:{cutLengthMm:number;scoreLengthMm:number;engraveAreaMm2:n
 
 type StockChoice={stock:StockItem|null;perSheet:number;sheets:number;sheetPrice:number;cost:number};
 
+// The stock item chosen for a material, when the choice still names stock of that material. A
+// choice left pointing at removed stock, or at stock no longer listed for the material, is 'auto':
+// before, it matched nothing and the material silently cost $0.
+export function selectedStockId(config:EstimateConfig,materialId:string):string|undefined{
+ const selected=config.stockSelection[materialId];
+ return selected&&selected!=='auto'&&config.stock.some(s=>s.id===selected&&s.materialIds.includes(materialId))?selected:undefined;
+}
+
 function chooseStock(config:EstimateConfig,materialId:string,widthMm:number,heightMm:number,count:number):StockChoice{
  const candidates=config.stock.filter(s=>s.materialIds.includes(materialId));
- const selected=config.stockSelection[materialId];
- const pool=selected&&selected!=='auto'?candidates.filter(s=>s.id===selected):candidates;
+ const selected=selectedStockId(config,materialId);
+ const pool=selected?candidates.filter(s=>s.id===selected):candidates;
  let best:StockChoice={stock:null,perSheet:0,sheets:0,sheetPrice:0,cost:0};
  for(const stock of pool){
   const perSheet=stock.widthIn===null||stock.heightIn===null?1:piecesPerSheet(widthMm,heightMm,stock.widthIn*MM_PER_IN,stock.heightIn*MM_PER_IN,config.sheetMarginMm,config.pieceSpacingMm);
@@ -157,18 +170,45 @@ function chooseStock(config:EstimateConfig,materialId:string,widthMm:number,heig
  return best;
 }
 
+export const CALIBRATION_TOLERANCE=.1;
+
 // Calibration is per machine: a multiplier tuned on the P2S says nothing about the Thunder.
+//
+// The time Ben records is the job time the laser software (xTool Studio) reported. That is the
+// laser's own run: it leaves out the setup and material changes between pieces. So it is compared
+// with motion x multiplier, and the multiplier that would have made a job exact is actual / motion.
+// Overhead stays out of calibration entirely (it used to be subtracted from the software's time,
+// which never contained it, pulling the suggestion low by overhead / motion).
+//
+// One recorded job only suggests a multiplier. The time counts as calibrated once a multiplier is in
+// use that was set on purpose (applied from here or typed), and the jobs recorded at it since then
+// all land within 10% of what it predicts.
 export function summarizeCalibration(config:EstimateConfig,machineId:string):CalibrationSummary{
+ const machine=config.machines.find(m=>m.id===machineId);
  const entries=config.calibration.filter(e=>e.machineId===machineId);
- const rows=entries.map(e=>{const estimatedMin=e.estimatedMotionMin*e.multiplierAtTime+e.estimatedOverheadMin;return{id:e.id,label:e.label,recordedAt:e.recordedAt,estimatedMin,actualMin:e.actualMin,ratio:estimatedMin>0?e.actualMin/estimatedMin:NaN}});
+ const settled=Boolean(machine)&&!machine!.guessed.includes('travelMultiplier');
+ const checks=(e:EstimateConfig['calibration'][number])=>settled&&Math.abs(e.multiplierAtTime-machine!.travelMultiplier)<1e-9&&(!machine!.multiplierSetAt||e.recordedAt>machine!.multiplierSetAt);
+ const rows=entries.map(e=>{const estimatedMin=e.estimatedMotionMin*e.multiplierAtTime;return{id:e.id,label:e.label,recordedAt:e.recordedAt,estimatedMin,actualMin:e.actualMin,ratio:estimatedMin>0?e.actualMin/estimatedMin:NaN,checked:checks(e)}});
  const ratios=rows.map(r=>r.ratio).filter(Number.isFinite);
- // The multiplier that would have made each recorded job exact, given its motion and overhead time.
- const implied=entries.filter(e=>e.estimatedMotionMin>0).map(e=>(e.actualMin-e.estimatedOverheadMin)/e.estimatedMotionMin).filter(m=>Number.isFinite(m)&&m>0);
+ const implied=entries.filter(e=>e.estimatedMotionMin>0).map(e=>e.actualMin/e.estimatedMotionMin).filter(m=>Number.isFinite(m)&&m>0);
+ const checked=rows.filter(r=>r.checked);
  return {
   machineId,entries:rows.length,rows,
   meanRatio:ratios.length?ratios.reduce((a,b)=>a+b,0)/ratios.length:null,
   suggestedMultiplier:implied.length?Math.min(10,Math.max(.1,implied.reduce((a,b)=>a+b,0)/implied.length)):null,
+  checkedEntries:checked.length,
+  calibrated:checked.length>0&&checked.every(r=>Number.isFinite(r.ratio)&&Math.abs(r.ratio-1)<=CALIBRATION_TOLERANCE+1e-9),
  };
+}
+
+// One line under the calibration table saying where calibration stands and what to do next.
+export function calibrationAdvice(summary:CalibrationSummary,machine:MachineProfile):string{
+ const m=`x${+machine.travelMultiplier.toFixed(3)}`;
+ if(!summary.entries)return `No jobs recorded on the ${machine.name} yet.`;
+ if(summary.calibrated)return `Calibrated: ${summary.checkedEntries} job${summary.checkedEntries===1?'':'s'} recorded at ${m} landed within 10%.`;
+ if(machine.guessed.includes('travelMultiplier'))return `The ${m} multiplier is a guess. Use the suggested one, then record another job to confirm it.`;
+ if(!summary.checkedEntries)return `Record a job at ${m} to confirm it.`;
+ return `Jobs recorded at ${m} are more than 10% off. Use the suggested multiplier, then record another job.`;
 }
 
 export function estimateJob(job:ProductionJob,config:EstimateConfig,design:DesignTime={hours:config.rates.designHours,source:'default'}):Estimate{
@@ -187,8 +227,8 @@ export function estimateJob(job:ProductionJob,config:EstimateConfig,design:Desig
   choices.set(materialId,choice);
   const name=materialName(config,materialId);
   if(!choice.stock){
-   const selected=config.stockSelection[materialId];
-   const which=selected&&selected!=='auto'?`the selected ${config.stock.find(s=>s.id===selected)?.name??selected}`:`any configured ${name} stock`;
+   const selected=selectedStockId(config,materialId);
+   const which=selected?`the selected ${config.stock.find(s=>s.id===selected)?.name??selected}`:`any configured ${name} stock`;
    warnings.push(`${list.map(a=>a.piece.name).join(', ')} (${fmtIn(widthMm)} x ${fmtIn(heightMm)} in) will not fit on ${which}. Material cost excludes ${list.length===1?'it':'them'}.`);
   }
   materials.push({materialId,materialName:name,pieces:list.length,stockId:choice.stock?.id??null,stockName:choice.stock?.name??null,piecesPerSheet:choice.perSheet,sheets:choice.sheets,sheetPrice:choice.sheetPrice,cost:choice.cost,unplaced:choice.stock?0:list.length});
@@ -209,6 +249,8 @@ export function estimateJob(job:ProductionJob,config:EstimateConfig,design:Desig
    minutes:manual?{cut:0,score:0,engrave:0,motion:0,overhead:0,total:0}:pieceMinutes(work,settings,machine.travelMultiplier,machine.perPieceOverheadMin),
   };
  });
+ // The machine's own guesses feed every lasered piece's time.
+ if(pieces.some(p=>!p.manual))for(const field of machine.guessed)placeholderInputs.add(`${MACHINE_GUESS_LABELS[field]} (${machine.name})`);
  const machineLabel=`${machine.name}${machine.location?` (${machine.location})`:''}`;
  const tooBig=pieces.filter(p=>!p.fitsBed);
  if(tooBig.length)warnings.push(`${tooBig.length===pieces.filter(p=>!p.manual).length?'Every piece':tooBig.map(p=>p.name).join(', ')} (${fmtIn(job.widthMm)} x ${fmtIn(job.heightMm)} in) is larger than the ${machineLabel} bed (${machine.bedWidthMm} x ${machine.bedHeightMm} mm${machine.bedPlaceholder?', not verified':''}).`);
@@ -223,7 +265,7 @@ export function estimateJob(job:ProductionJob,config:EstimateConfig,design:Desig
  const designCost=design.hours*config.rates.designPerHour;
  const frameCost=recipe?.frameCost??null;
  const calibration=summarizeCalibration(config,machine.id);
- const timeConfidence:TimeConfidence=placeholderInputs.size?'placeholder':calibration.entries?'calibrated':'uncalibrated';
+ const timeConfidence:TimeConfidence=placeholderInputs.size?'placeholder':calibration.calibrated?'calibrated':'uncalibrated';
  return {
   recipe:recipe?{id:recipe.id,label:recipe.label}:null,
   machine:{id:machine.id,name:machine.name,location:machine.location,hourlyRate:machine.hourlyRate,chosenBy},

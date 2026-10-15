@@ -1,4 +1,4 @@
-import {createDefaultEstimateConfig,SETTING_FIELDS,type CalibrationEntry,type EstimateConfig,type LayerRecipe,type MachineProfile,type MaterialSettings,type MaterialType,type RecipeSlot,type SettingField,type StockItem} from './config';
+import {createDefaultEstimateConfig,MACHINE_GUESS_FIELDS,SETTING_FIELDS,type CalibrationEntry,type EstimateConfig,type LayerRecipe,type MachineProfile,type MaterialSettings,type MaterialType,type RecipeSlot,type SettingField,type StockItem} from './config';
 
 // localStorage persistence, the same pattern as the ornament and topo projects (schema-versioned key,
 // merged over a fresh default, clamped). The estimate config is not part of any one project: it is
@@ -50,13 +50,16 @@ const settingsRow=(o:Record<string,unknown>):MaterialSettings|undefined=>typeof 
 
 function machine(o:Record<string,unknown>,base:MachineProfile,laserPerHour?:unknown):MachineProfile|undefined{
  if(typeof o.id!=='string'||!o.id)return undefined;
+ const values={perPieceOverheadMin:num(o.perPieceOverheadMin,base.perPieceOverheadMin,0,600),travelMultiplier:num(o.travelMultiplier,base.travelMultiplier,.1,10)};
  return {
   id:o.id,name:str(o.name,base.name),location:typeof o.location==='string'?o.location:base.location,
   bedWidthMm:num(o.bedWidthMm,base.bedWidthMm,10,5000),bedHeightMm:num(o.bedHeightMm,base.bedHeightMm,10,5000),
   bedPlaceholder:bool(o.bedPlaceholder,base.bedPlaceholder),
   hourlyRate:num(o.hourlyRate??laserPerHour,base.hourlyRate,0,10000),
-  perPieceOverheadMin:num(o.perPieceOverheadMin,base.perPieceOverheadMin,0,600),
-  travelMultiplier:num(o.travelMultiplier,base.travelMultiplier,.1,10),
+  ...values,
+  // Records saved before `guessed` existed: a value still at the studio's default is its guess.
+  guessed:Array.isArray(o.guessed)?MACHINE_GUESS_FIELDS.filter(f=>(o.guessed as unknown[]).includes(f)):MACHINE_GUESS_FIELDS.filter(f=>values[f]===base[f]),
+  ...(typeof o.multiplierSetAt==='string'&&o.multiplierSetAt?{multiplierSetAt:o.multiplierSetAt}:{}),
   settings:list(o.settings,settingsRow)??base.settings,
  };
 }
@@ -106,6 +109,8 @@ export function clampEstimateConfig(raw:unknown):EstimateConfig{
   lineIntervalUnit:o.lineIntervalUnit==='lpi'||o.lineIntervalUnit==='mm'||o.lineIntervalUnit==='lpcm'?o.lineIntervalUnit:base.lineIntervalUnit,
  };
  config.calibration=list(o.calibration,e=>calibrationEntry(e,config.defaultMachineId))??[];
+ // A stock choice must name stock of that material; anything else (removed stock) is 'auto'.
+ config.stockSelection=Object.fromEntries(Object.entries(config.stockSelection).map(([m,id])=>[m,id==='auto'||config.stock.some(s=>s.id===id&&s.materialIds.includes(m))?id:'auto']));
  // Every material needs a settings row on every machine for the time estimate; a missing one gets
  // that machine's first row with every field marked unverified, so the estimate runs and says so.
  for(const m of config.machines)for(const mat of config.materials)if(!m.settings.some(s=>s.materialId===mat.id))m.settings.push({...(baseFor(m.id).settings.find(s=>s.materialId===mat.id)??m.settings[0]??baseFor(m.id).settings[0]),materialId:mat.id,placeholder:[...SETTING_FIELDS]});
