@@ -19,6 +19,8 @@ import {useEstimateConfig} from './production/estimate/ui/useEstimateConfig';
 import {fileSlug} from './production/download';
 import {ProjectPanel} from './components/projects/ProjectPanel';
 import {useProjectSession,type SessionApply} from './state/projects/useProjectSession';
+import {assertCropMatchesBoard,cropContains,cropMatchesBoard,fitCropToBoard} from './geometry/projection/cropAspect';
+import {resizeBoard} from './state/boardResize';
 // Bundle splitting (Phase 0 backlog item 5): the ornament and topo tools are separate manufacturing
 // targets from the lake map (see the `tool` state comment below) and are only ever rendered once the
 // user actually switches to them. Loading them lazily keeps their code — including each tool's own
@@ -37,6 +39,10 @@ const download=(name:string,data:string|Uint8Array,type='image/svg+xml')=>{const
 // lightly debounced so rapid typing/clicking coalesces into one rebuild instead of one per
 // keystroke, while still feeling live — see docs/v1-milestones.md.
 const LIVE_DEBOUNCE_MS=120;
+// Every build from the map refuses a crop that is not the board's shape (see cropAspect.ts): it would
+// stretch every panel. buildScene itself does not check, so its fixtures stay as recorded.
+const assertBoardShape=(p:MapProject)=>{if(p.map.crop)assertCropMatchesBoard(p.map.crop,p.dimensions.widthMm,p.dimensions.heightMm)};
+const STALE_CAPTURE='The map has moved since its features were captured. Press Generate to capture the new view first.';
 const APP_VERSION=typeof __APP_VERSION__==='string'?__APP_VERSION__:'0.0.0-dev';
 // Identifies a crop together with the board size it was framed for. An opened project's crop stays
 // pinned only while both are unchanged; resizing the board or moving the map lets the map re-measure.
@@ -60,9 +66,10 @@ export default function App(){
  projectRef.current=project;
  // MapViewer registers its capture here while the map is mounted. capturedCropRef is the crop the
  // current features were captured for, so Generate can tell a fresh capture from a stale or
- // missing one.
+ // missing one: they cover any crop inside it (a board resize refits the crop inside it), and
+ // nothing else.
  const captureRef=useRef<MapCapture|undefined>(undefined);
- const capturedCropRef=useRef<string|undefined>(undefined);
+ const capturedCropRef=useRef<CropGeography|undefined>(undefined);
  const debounceRef=useRef<number|undefined>(undefined);
  // Set when a saved project is opened or the session restored: the map keeps that crop (see
  // MapViewer's keepCrop) so the saved geography still matches it. mapKey remounts the map so it
@@ -86,7 +93,11 @@ export default function App(){
  const rebuildScene=useCallback((nextProject:MapProject)=>{
   const currentFeatures=featuresRef.current;
   if(!nextProject.map.crop||!currentFeatures.water.length)return;
+  // The map has moved since the capture: building would pair the new crop with geography captured
+  // for the old one. The last good scene stays on screen, and Generate recaptures.
+  if(needsCapture(nextProject)){setStatus('Update refused');setError(STALE_CAPTURE);return}
   try{
+   assertBoardShape(nextProject);
    const {cache,result}=getCachedGeometryLayers(geometryCacheRef.current,nextProject,currentFeatures);
    geometryCacheRef.current=cache;
    setScene(buildPresentationScene(nextProject,currentFeatures,result));
@@ -94,7 +105,10 @@ export default function App(){
   }catch(e){setStatus('Update failed');setError((e as Error).message)}
  },[]);
 
- const setProjectLive=useCallback((next:MapProject)=>{
+ // A board size change also refits the crop and moves the title and compass (resizeBoard).
+ const setProjectLive=useCallback((requested:MapProject)=>{
+  const previous=projectRef.current,next=resizeBoard(requested,{...previous.dimensions,crop:previous.map.crop},capturedCropRef.current);
+  projectRef.current=next;
   setProjectState(next);
   if(debounceRef.current)window.clearTimeout(debounceRef.current);
   debounceRef.current=window.setTimeout(()=>rebuildScene(next),LIVE_DEBOUNCE_MS);
@@ -105,8 +119,8 @@ export default function App(){
  // geography" — the first build, or an explicit refresh after a new geographic extraction. It is
  // no longer required after routine presentation edits (title/compass/roads/labels/layers), which
  // update live via setProjectLive/commitOverride above and below.
- const applyFeatures=(f:ExtractedFeatures,crop:CropGeography|undefined)=>{featuresRef.current=f;setFeatures(f);setScene(undefined);geometryCacheRef.current=undefined;capturedCropRef.current=cropKey(crop)};
- const needsCapture=()=>{const crop=projectRef.current.map.crop;return Boolean(crop)&&capturedCropRef.current!==cropKey(crop)};
+ const applyFeatures=(f:ExtractedFeatures,crop:CropGeography|undefined)=>{featuresRef.current=f;setFeatures(f);setScene(undefined);geometryCacheRef.current=undefined;capturedCropRef.current=crop};
+ function needsCapture(p=projectRef.current){const crop=p.map.crop,captured=capturedCropRef.current;return Boolean(crop)&&!(captured&&cropContains(captured,crop!))}
  const mapMounted=()=>new Promise<MapCapture>((resolve,reject)=>{const started=Date.now(),check=()=>{if(captureRef.current)resolve(captureRef.current);else if(Date.now()-started>MAP_MOUNT_TIMEOUT_MS)reject(new Error('the map did not open.'));else setTimeout(check,50)};check()});
  // The features for the current crop: the last capture when it was taken for this exact crop, a
  // new capture otherwise. Generate used to build from whatever had been captured — nothing at all
@@ -119,7 +133,7 @@ export default function App(){
   applyFeatures(captured,projectRef.current.map.crop);
   return captured;
  };
- const buildFrom=(current:ExtractedFeatures)=>{setStatus('Processing shoreline and roads…');try{const p=projectRef.current,{cache,result}=getCachedGeometryLayers(geometryCacheRef.current,p,current);geometryCacheRef.current=cache;setScene(buildPresentationScene(p,current,result));setMode('generated');setStatus('Done');setError('')}catch(e){setStatus('Generate failed');setError((e as Error).message)}};
+ const buildFrom=(current:ExtractedFeatures)=>{setStatus('Processing shoreline and roads…');try{const p=projectRef.current;assertBoardShape(p);const {cache,result}=getCachedGeometryLayers(geometryCacheRef.current,p,current);geometryCacheRef.current=cache;setScene(buildPresentationScene(p,current,result));setMode('generated');setStatus('Done');setError('')}catch(e){setStatus('Generate failed');setError((e as Error).message)}};
  // Synchronous when the capture is already fresh (or there is no crop yet, which buildScene
  // refuses), so a refusal is on screen the moment the button is pressed.
  const generate=()=>{
@@ -131,8 +145,9 @@ export default function App(){
  // Export builds from the current project, never from the scene on screen. A live update that
  // fails (a font that never loaded, say) leaves the last good scene in the preview by design. Export
  // used to cut that stale scene: type a title while its font is missing and the file went out
- // without the title, with no error. Now the same failure refuses the export.
- const exportIt=()=>{try{const p=projectRef.current,current=featuresRef.current;let s;if(p.map.crop&&current.water.length){const {cache,result}=getCachedGeometryLayers(geometryCacheRef.current,p,current);geometryCacheRef.current=cache;s=buildPresentationScene(p,current,result);setScene(s)}else s=buildScene(p,current);assertManufacturingSceneUsable(s);setStatus('Building SVG…');if(project.exportSettings.layout==='individual')download(individualZipName(s),individualSvgsZip(s),'application/zip');else download(`layered-map-${project.exportSettings.layout}.svg`,sceneToSvg(s,project.exportSettings.layout,project.exportSettings.panelGapMm,project.exportSettings.annotations));setStatus('Export complete');setError('')}catch(e){setStatus('Export failed');setError(`SVG export failed: ${(e as Error).message}`)}};
+ // without the title, with no error. Now the same failure refuses the export, and so does a map
+ // moved since the capture, which used to cut the new crop from the old crop's geography.
+ const exportIt=()=>{try{const p=projectRef.current,current=featuresRef.current;if(current.water.length&&needsCapture(p))throw new Error(STALE_CAPTURE);assertBoardShape(p);let s;if(p.map.crop&&current.water.length){const {cache,result}=getCachedGeometryLayers(geometryCacheRef.current,p,current);geometryCacheRef.current=cache;s=buildPresentationScene(p,current,result);setScene(s)}else s=buildScene(p,current);assertManufacturingSceneUsable(s);setStatus('Building SVG…');if(project.exportSettings.layout==='individual')download(individualZipName(s),individualSvgsZip(s),'application/zip');else download(`layered-map-${project.exportSettings.layout}.svg`,sceneToSvg(s,project.exportSettings.layout,project.exportSettings.panelGapMm,project.exportSettings.annotations));setStatus('Export complete');setError('')}catch(e){setStatus('Export failed');setError(`SVG export failed: ${(e as Error).message}`)}};
  // Drag/nudge/flip/hide/reset from the generated-map editor: never debounced (each already fires
  // once per discrete user action, not per keystroke) but goes through the same cache-aware path.
  const commitOverride=(updater:(p:MapProject)=>MapProject)=>{
@@ -146,11 +161,14 @@ export default function App(){
  // saved geography replace what is on screen, and the scene is rebuilt from that geography (once the
  // fonts are in), without touching the map. That is what makes a reopened project identical to the
  // one that was saved, even if the map data has changed since.
- const applyProject:SessionApply=(next,savedFeatures,how)=>{
+ const applyProject:SessionApply=(opened,savedFeatures,how)=>{
   if(debounceRef.current){window.clearTimeout(debounceRef.current);debounceRef.current=undefined}
+  // Projects saved before the crop frame kept the board's shape carry a crop a few percent off it.
+  // Their geography covers the largest crop of the right shape inside it, so they reopen as that.
+  const crop=opened.map.crop,{widthMm:w,heightMm:h}=opened.dimensions,next=crop&&savedFeatures&&!cropMatchesBoard(crop,w,h)?{...opened,map:{...opened.map,crop:fitCropToBoard(crop,w,h)}}:opened;
   projectRef.current=next;
   setProjectState(next);
-  applyFeatures(savedFeatures??empty,savedFeatures?next.map.crop:undefined);
+  applyFeatures(savedFeatures??empty,savedFeatures?crop:undefined);
   if(!savedFeatures)capturedCropRef.current=undefined;
   setError('');
   setPinnedCrop(savedFeatures?pinKey(next):undefined);
@@ -171,5 +189,5 @@ export default function App(){
  // once loaded, React caches the lazy component so switching tools again is instant.
  if(tool==='ornament')return <Suspense fallback={<div className="tool-loading">Loading Ornament Studio…</div>}><OrnamentPage onExit={()=>setTool('lake-map')}/></Suspense>;
  if(tool==='topo')return <Suspense fallback={<div className="tool-loading">Loading Topo Map Builder…</div>}><TopoPage onExit={()=>setTool('lake-map')}/></Suspense>;
- return <main className="studio"><Controls project={project} setProject={setProjectLive} onSelect={select} onGenerate={generate} onExport={exportIt} status={status} generateError={error} counts={{water:features.water.length,roads:features.roads.length,namedRoads:features.roads.filter(r=>r.name).length,places:features.places.length}} selectedWater={selectedWater} estimate={estimate} projects={projectPanel}/><section className="workspace"><nav><div className="nav-tabs" role="group" aria-label="View"><button className={mode==='map'?'active':''} onClick={()=>setMode('map')}>Map Mode</button><button className={mode==='generated'?'active':''} onClick={()=>setMode('generated')}>Generated Map</button><button className={mode==='3d'?'active':''} onClick={()=>setMode('3d')}>3D Preview</button></div>{error&&<span className="nav-error error" role="alert" title={error}>{error}</span>}<div className="nav-tools"><button onClick={()=>setTool('ornament')}>Ornament Studio →</button><button onClick={()=>setTool('topo')}>Topo Map Builder →</button></div><ThemeToggle/></nav><FontLoadNotice/>{mode==='map'?<MapViewer key={mapKey} keepCrop={pinnedCrop!==undefined&&pinnedCrop===pinKey(project)} project={project} flyTo={fly} onView={m=>setProjectState(p=>({...p,map:m}))} onCrop={crop=>setProjectState(p=>({...p,map:{...p.map,crop}}))} onStatus={setStatus} captureRef={captureRef} onFeatures={f=>{applyFeatures(f,projectRef.current.map.crop);const total=f.water.length+f.roads.length+f.places.length;setStatus(total?`Loaded ${f.water.length} water, ${f.roads.length} roads, ${f.places.length} places`:'No vector features found in the selected crop.')}}/>:mode==='3d'?(job?<Suspense fallback={<div className="empty">Loading 3D preview…</div>}><Preview3D job={job} config={estimateConfig} title={project.title.text} sizeLabel={sizeLabel(job)} appVersion={APP_VERSION}/></Suspense>:<div className="empty">Generate the scene to see it as a stacked 3D object.</div>):<GeneratedPreview scene={scene} featuresLoaded={loaded} project={project} error={error} onCommitOverride={commitOverride}/>}</section></main>;
+ return <main className="studio lake-page"><Controls project={project} setProject={setProjectLive} onSelect={select} onGenerate={generate} onExport={exportIt} status={status} generateError={error} counts={{water:features.water.length,roads:features.roads.length,namedRoads:features.roads.filter(r=>r.name).length,places:features.places.length}} selectedWater={selectedWater} estimate={estimate} projects={projectPanel}/><section className="workspace"><nav><div className="nav-tabs" role="group" aria-label="View"><button className={mode==='map'?'active':''} onClick={()=>setMode('map')}>Map Mode</button><button className={mode==='generated'?'active':''} onClick={()=>setMode('generated')}>Generated Map</button><button className={mode==='3d'?'active':''} onClick={()=>setMode('3d')}>3D Preview</button></div>{error&&<span className="nav-error error" role="alert" title={error}>{error}</span>}<div className="nav-tools"><button onClick={()=>setTool('ornament')}>Ornament Studio →</button><button onClick={()=>setTool('topo')}>Topo Map Builder →</button></div><ThemeToggle/></nav><FontLoadNotice/>{mode==='map'?<MapViewer key={mapKey} keepCrop={pinnedCrop!==undefined&&pinnedCrop===pinKey(project)} project={project} flyTo={fly} onView={m=>setProjectState(p=>({...p,map:m}))} onCrop={crop=>setProjectState(p=>({...p,map:{...p.map,crop}}))} onStatus={setStatus} captureRef={captureRef} onFeatures={f=>{applyFeatures(f,projectRef.current.map.crop);const total=f.water.length+f.roads.length+f.places.length;setStatus(total?`Loaded ${f.water.length} water, ${f.roads.length} roads, ${f.places.length} places`:'No vector features found in the selected crop.')}}/>:mode==='3d'?(job?<Suspense fallback={<div className="empty">Loading 3D preview…</div>}><Preview3D job={job} config={estimateConfig} title={project.title.text} sizeLabel={sizeLabel(job)} appVersion={APP_VERSION}/></Suspense>:<div className="empty">Generate the scene to see it as a stacked 3D object.</div>):<GeneratedPreview scene={scene} featuresLoaded={loaded} project={project} error={error} onCommitOverride={commitOverride}/>}</section></main>;
 }

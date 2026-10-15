@@ -1,5 +1,6 @@
 import type {BathymetrySourceMetadata,ExtractedFeatures,FontId,MapProject} from '../types/project';
 import {CropProjection} from '../geometry/projection/cropProjection';
+import {cropNorthDeg} from '../geometry/projection/cropAspect';
 import {buildWaterModel,geometryPath,multiPolygonArea,panelFromWater,validatePanel,type MultiPolygonMm,type WaterModel} from '../geometry/shoreline/polygonEngine';
 import {artisticDepthOpenings,COLLAPSED_ARTISTIC_OPENING_AREA_MM2,normalizedProductSize,presetOffsets} from '../geometry/shoreline/artisticDepth';
 import {proceduralDepthOpenings} from '../geometry/shoreline/proceduralDepth';
@@ -105,7 +106,11 @@ export function buildPresentationScene(project:MapProject,features:ExtractedFeat
  // reduction ("apply keep-out only to road engraving for now" if label collisions add too much
  // scope). This is the generalized KeepOutRegion system's first second consumer.
  const markerObjects=buildMarkerSceneObjects(project.markers,projection,w,h,project.overrides);
- const compassPlacement=project.compass.position!=='off'?resolvePlacement({xMm:project.compass.xMm,yMm:project.compass.yMm,rotationDeg:project.compass.rotationDeg},project.overrides.compass):undefined;
+ // The compass points at true north on the board. For a crop saved while the map could still rotate,
+ // north is not straight up. Under 0.01 degrees is the projection's own rounding, left out so an
+ // unrotated crop's output stays byte-identical.
+ const north=project.map.crop?cropNorthDeg(project.map.crop,w,h):0,placed=project.compass.position!=='off'?resolvePlacement({xMm:project.compass.xMm,yMm:project.compass.yMm,rotationDeg:project.compass.rotationDeg},project.overrides.compass):undefined;
+ const compassPlacement=placed&&Math.abs(north)>=.01?{...placed,rotationDeg:placed.rotationDeg+north}:placed;
  const keepOutRegions:KeepOutRegion[]=[];
  if(compassPlacement?.visible)keepOutRegions.push(keepOutFootprint('compass-keepout','compass',compassPlacement.xMm,compassPlacement.yMm,compassFootprintRadiusMm(project.compass.style,project.compass.sizeMm),project.compass.keepOutPaddingMm,['roads-major','roads-minor','road-labels','place-labels']));
  for(const m of markerObjects){
