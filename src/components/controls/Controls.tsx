@@ -3,6 +3,7 @@ import type {GeocoderResult} from '../../map/geocoding/GeocoderService';
 import {ProxyGeocoder} from '../../map/geocoding/GeocoderService';
 import type {MapProject} from '../../types/project';
 import {inchesToMm,mmToInches,validateDimensionMm} from '../../utils/units';
+import {NumberEntry} from '../ui/NumberEntry';
 import {importDepthRegionGeoJson} from '../../bathymetry/model';
 import {BathymetryResolver,LocalStorageBathymetryCache} from '../../bathymetry/resolver';
 import {NoaaNceiProvider,StateRoutedProvider,UsgsProvider} from '../../bathymetry/providers';
@@ -22,7 +23,7 @@ export function Controls({project,setProject,onSelect,onGenerate,onExport,status
  const cropHash=project.map.crop?hashCropSnapshot(serializeCropSnapshot(project)):undefined;
  const copyCropJson=async()=>{try{const json=JSON.stringify(serializeCropSnapshot(project),null,2);setCropJsonText(json);if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(json);setCropStatus('Crop JSON copied to clipboard.')}else{setCropStatus('Clipboard unavailable — copy the JSON below manually.')}}catch(e){setCropStatus((e as Error).message)}};
  const applyCropJson=()=>{try{setProject(applyCropSnapshot(project,JSON.parse(cropJsonText) as CropSnapshot));setCropStatus('Crop applied from JSON. Reload visible vector features to match the restored framing.')}catch(e){setCropStatus(`Apply failed: ${(e as Error).message}`)}};
- const dim=(key:'widthMm'|'heightMm',raw:number)=>{const mm=project.dimensions.displayUnit==='in'?inchesToMm(raw):raw;if(validateDimensionMm(mm))patch({dimensions:{...project.dimensions,[key]:mm}})};
+ const toMm=(raw:number)=>project.dimensions.displayUnit==='in'?inchesToMm(raw):raw,dim=(key:'widthMm'|'heightMm',raw:number)=>{const mm=toMm(raw);if(validateDimensionMm(mm))patch({dimensions:{...project.dimensions,[key]:mm}})};
  // Asks about the selected water body (captured first if needed), routed to the DNR of the state it
  // is in. Cache prefix v3: v2 entries include Wisconsin "matches" with WBIC 0 for out-of-state lakes.
  const checkBathymetry=async()=>{setCheckingDepth(true);const resolver=new BathymetryResolver([new StateRoutedProvider(),new NoaaNceiProvider(),new UsgsProvider()],new LocalStorageBathymetryCache('lms:bathymetry:v3:'));try{let water:GeoMultiPolygon|undefined;if(selectedWater){try{water=await selectedWater()}catch(reason){patch({bathymetry:{...project.bathymetry,status:'error',statusMessage:`Could not identify the selected water body: ${(reason as Error).message}`,dataset:undefined,datasetId:undefined}});return}}const[longitude,latitude]=water?interiorPoint(water):[project.map.longitude,project.map.latitude],found=await resolver.resolve({longitude,latitude,waterbodyName:q,water}),result=found.find(item=>item.status==='available')??found[0],available=result.status==='available';patch({bathymetry:{...project.bathymetry,mode:available?'true-bathymetry':project.bathymetry.mode,provider:result.provider==='none'?undefined:result.provider,status:available?'available':result.status==='unsupported'?'unsupported':'unavailable',statusMessage:result.message,dataset:result.dataset,datasetId:result.dataset?.source.datasetId}})}finally{setCheckingDepth(false)}};
@@ -53,8 +54,8 @@ export function Controls({project,setProject,onSelect,onGenerate,onExport,status
    <details open><summary>Physical size<span className="summary-meta">{sizeText}</span></summary><div className="section-body">
     <label>Units <select value={unit} onChange={e=>patch({dimensions:{...project.dimensions,displayUnit:e.target.value as 'in'|'mm'}})}><option value="in">Inches</option><option value="mm">Millimeters</option></select></label>
     <div className="field-pair">
-     <label>Width ({unit}) <input type="number" step="0.1" value={unit==='in'?mmToInches(project.dimensions.widthMm):project.dimensions.widthMm} onChange={e=>dim('widthMm',+e.target.value)}/></label>
-     <label>Height ({unit}) <input type="number" step="0.1" value={unit==='in'?mmToInches(project.dimensions.heightMm):project.dimensions.heightMm} onChange={e=>dim('heightMm',+e.target.value)}/></label>
+     <label>Width ({unit}) <NumberEntry step="0.1" value={unit==='in'?mmToInches(project.dimensions.widthMm):project.dimensions.widthMm} isValid={n=>validateDimensionMm(toMm(n))} onChange={n=>dim('widthMm',n)}/></label>
+     <label>Height ({unit}) <NumberEntry step="0.1" value={unit==='in'?mmToInches(project.dimensions.heightMm):project.dimensions.heightMm} isValid={n=>validateDimensionMm(toMm(n))} onChange={n=>dim('heightMm',n)}/></label>
     </div>
     <span className="readout">{project.dimensions.widthMm.toFixed(3)} × {project.dimensions.heightMm.toFixed(3)} mm</span>
    </div></details>
