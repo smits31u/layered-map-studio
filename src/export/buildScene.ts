@@ -59,7 +59,9 @@ export function buildGeometryLayers(project:MapProject,features:ExtractedFeature
  const {widthMm:w,heightMm:h}=project.dimensions,projection=new CropProjection(project.map.crop,w,h),layers:PhysicalLayer[]=[],manufacturingWarnings:string[]=[];
  const model=buildWaterModel(features.water,projection,w,h,{mode:project.shoreline.waterMode,minAreaMm2:project.shoreline.minWaterAreaMm2,focus:{lng:project.map.longitude,lat:project.map.latitude}});
  const trueDepth=project.bathymetry.mode==='true-bathymetry';
- if(trueDepth&&!project.bathymetry.dataset)throw new Error('TRUE BATHYMETRY selected, but no verified depth-valued dataset is loaded. Import bathymetry or choose Decorative Offsets.');
+ // Say what the last Check Bathymetry found (e.g. "Michigan DNR has no surveyed lake contours…"), so
+ // the error explains why there is no dataset rather than only that there isn't one.
+ if(trueDepth&&!project.bathymetry.dataset){const last=project.bathymetry.status==='unavailable'||project.bathymetry.status==='unsupported'?project.bathymetry.statusMessage:undefined;throw new Error(`TRUE BATHYMETRY selected, but no verified depth-valued dataset is loaded.${last?` Last check: ${last}`:''} Import bathymetry or choose Decorative Offsets or Procedural Terrain.`)}
  // Procedural Terrain (geometry/shoreline/proceduralDepth.ts) is a third source of depth openings.
  // Like True Bathymetry it maps one opening to each *enabled* depth panel in order; like Artistic
  // Depth it reports an empty opening as a collapsed layer. The other two modes' paths below are

@@ -70,6 +70,22 @@ describe('Controls: physical size',()=>{
   expect(screen.queryByText(/12\.7/)).toBeNull(); // rejected: readout still shows the last valid size
   expect(screen.getByText(/508\.000/)).toBeTruthy();
  });
+
+ it('lets a size be typed through values the range rejects, then shows the stored size on blur',()=>{
+  render(<Harness/>);
+  const widthInput=screen.getByLabelText(/^Width \(in\)/) as HTMLInputElement;
+  // Clearing the box and the "1" on the way to "18" (25.4 mm) are both outside the range: the box
+  // keeps them on screen, flagged, instead of snapping back to 14.
+  for(const text of ['','1']){fireEvent.change(widthInput,{target:{value:text}});expect(widthInput.value).toBe(text);expect(widthInput.getAttribute('aria-invalid')).toBe('true')}
+  expect(screen.getByText('355.600 × 279.400 mm')).toBeTruthy();
+  fireEvent.change(widthInput,{target:{value:'18'}});
+  expect(screen.getByText('457.200 × 279.400 mm')).toBeTruthy();
+  expect(widthInput.getAttribute('aria-invalid')).toBeNull();
+  fireEvent.change(widthInput,{target:{value:'0.5'}});
+  fireEvent.blur(widthInput);
+  expect(widthInput.value).toBe('18');
+  expect(widthInput.getAttribute('aria-invalid')).toBeNull();
+ });
 });
 
 // "Mode" labels a <select> in both the Depth data and Roads sections, so every query below is
