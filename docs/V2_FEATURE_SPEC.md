@@ -116,6 +116,7 @@ Acceptance: a single SVG with everything in engrave/score groups, exact preset d
 Finish what's already picked, then accuracy, then shop time, then new products. Each step ends with tests, a production build, and a check in the rebuilt production container.
 
 1. **Close the A5/A6 gaps (calibration input, uncalibrated badge, ZIP summary, proof PNG).** Gate: estimate within 15% of a timed real job; preview layers match the export.
+   *Progress 2026-10-20:* built and deployed (branch `feat/v2-step1-estimate-preview`), topo included. Preview-matches-export: **passed** (lake and topo tests). 15% real-job gate: **not run yet**, waiting on Ben's timed job. Details in `docs/implementation-status.md`.
 2. **B2 max-depth table.** About an evening. Gate: Noquebay defaults to its DNR depth.
 3. **B1 traced chart import, Shawano pilot.** Gate: a real 11x14 Shawano map cut from traced data with no hand edits except placement.
 4. **A1 layer numbers and A4 single-line fonts.** Gate: labels engrave as single strokes in xTool Studio, with the time saving measured.
