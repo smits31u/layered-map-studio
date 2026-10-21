@@ -1,6 +1,7 @@
 import {rectPathData} from '../geometry/pathData';
 import {pieceMetrics,type JobPiece,type PieceMetrics,type ProductionJob} from '../job';
 import {MM_PER_IN,SETTING_LABELS,type EstimateConfig,type LayerRecipe,type MachineProfile,type MaterialSettings,type SettingField,type StockItem} from './config';
+import {percentError} from './calibration';
 import {fitsBed,piecesPerSheet} from './fit';
 
 // The material, machine-time and cost estimate for one production job. Pure: a job and a config in,
@@ -30,9 +31,16 @@ export type MaterialLine={materialId:string;materialName:string;pieces:number;st
 // calibrated: real job times have been recorded on this machine; the multiplier can be tuned from them.
 export type TimeConfidence='placeholder'|'uncalibrated'|'calibrated';
 
-export type CalibrationSummary={machineId:string;entries:number;meanRatio:number|null;suggestedMultiplier:number|null;rows:{id:string;label:string;recordedAt:string;estimatedMin:number;actualMin:number;ratio:number}[]};
+export type CalibrationSummary={machineId:string;entries:number;meanRatio:number|null;suggestedMultiplier:number|null;rows:{id:string;label:string;recordedAt:string;estimatedMin:number;actualMin:number;ratio:number;errorPct:number|null}[]};
 
 export type DesignTime={hours:number;source:'timer'|'default'};
+
+// Timed design work replaces the default design hours once it has counted a whole minute. Rounded
+// down to the minute so a running timer does not change the estimate every second.
+export function designTimeFrom(elapsedMs:number,defaultHours:number):DesignTime{
+ const minutes=Math.floor(Math.max(0,elapsedMs)/60000);
+ return minutes>0?{hours:minutes/60,source:'timer'}:{hours:defaultHours,source:'default'};
+}
 
 export type Estimate={
  recipe:{id:string;label:string}|null;
@@ -54,10 +62,12 @@ const IN_TOLERANCE=.06;
 const inches=(mm:number)=>mm/MM_PER_IN;
 const fmtIn=(mm:number)=>`${+inches(mm).toFixed(2)}`;
 
-// The recipe for a product size, matched in either orientation (14x11 is an 11x14 board).
-export function matchRecipe(widthMm:number,heightMm:number,recipes:LayerRecipe[]):LayerRecipe|undefined{
+// The recipe for a product size, matched in either orientation (14x11 is an 11x14 board). With a
+// product, a recipe limited to other products is skipped: an 11x14 lake map's TruFlat top and
+// hand-made border say nothing about an 11x14 topo board.
+export function matchRecipe(widthMm:number,heightMm:number,recipes:LayerRecipe[],product?:string):LayerRecipe|undefined{
  const w=inches(widthMm),h=inches(heightMm);
- return recipes.find(r=>(Math.abs(r.widthIn-w)<=IN_TOLERANCE&&Math.abs(r.heightIn-h)<=IN_TOLERANCE)||(Math.abs(r.widthIn-h)<=IN_TOLERANCE&&Math.abs(r.heightIn-w)<=IN_TOLERANCE));
+ return recipes.filter(r=>!product||!r.products?.length||r.products.includes(product)).find(r=>(Math.abs(r.widthIn-w)<=IN_TOLERANCE&&Math.abs(r.heightIn-h)<=IN_TOLERANCE)||(Math.abs(r.widthIn-h)<=IN_TOLERANCE&&Math.abs(r.heightIn-w)<=IN_TOLERANCE));
 }
 
 // The laser a job runs on: the one its size's recipe names, else the smallest bed the board fits on,
@@ -125,10 +135,11 @@ export function pieceMinutes(metrics:{cutLengthMm:number;scoreLengthMm:number;en
 }
 
 // What the laser does on a piece once the shop's choice for stroked lines is applied: engraved
-// roads join the engrave area (length x stroke width) and leave the score length.
+// roads join the engrave area (length x stroke width) and leave the score length. Hairline scores
+// (no width) stay scores either way.
 export function laserWork(metrics:PieceMetrics,strokedLines:EstimateConfig['strokedLines']){
  return strokedLines==='engrave'
-  ?{cutLengthMm:metrics.cutLengthMm,scoreLengthMm:0,engraveAreaMm2:metrics.engraveAreaMm2+metrics.scoreAreaMm2}
+  ?{cutLengthMm:metrics.cutLengthMm,scoreLengthMm:Math.max(0,metrics.scoreLengthMm-metrics.strokedLengthMm),engraveAreaMm2:metrics.engraveAreaMm2+metrics.scoreAreaMm2}
   :{cutLengthMm:metrics.cutLengthMm,scoreLengthMm:metrics.scoreLengthMm,engraveAreaMm2:metrics.engraveAreaMm2};
 }
 
@@ -160,7 +171,7 @@ function chooseStock(config:EstimateConfig,materialId:string,widthMm:number,heig
 // Calibration is per machine: a multiplier tuned on the P2S says nothing about the Thunder.
 export function summarizeCalibration(config:EstimateConfig,machineId:string):CalibrationSummary{
  const entries=config.calibration.filter(e=>e.machineId===machineId);
- const rows=entries.map(e=>{const estimatedMin=e.estimatedMotionMin*e.multiplierAtTime+e.estimatedOverheadMin;return{id:e.id,label:e.label,recordedAt:e.recordedAt,estimatedMin,actualMin:e.actualMin,ratio:estimatedMin>0?e.actualMin/estimatedMin:NaN}});
+ const rows=entries.map(e=>{const estimatedMin=e.estimatedMotionMin*e.multiplierAtTime+e.estimatedOverheadMin;return{id:e.id,label:e.label,recordedAt:e.recordedAt,estimatedMin,actualMin:e.actualMin,ratio:estimatedMin>0?e.actualMin/estimatedMin:NaN,errorPct:percentError(estimatedMin,e.actualMin)}});
  const ratios=rows.map(r=>r.ratio).filter(Number.isFinite);
  // The multiplier that would have made each recorded job exact, given its motion and overhead time.
  const implied=entries.filter(e=>e.estimatedMotionMin>0).map(e=>(e.actualMin-e.estimatedOverheadMin)/e.estimatedMotionMin).filter(m=>Number.isFinite(m)&&m>0);
@@ -172,7 +183,7 @@ export function summarizeCalibration(config:EstimateConfig,machineId:string):Cal
 }
 
 export function estimateJob(job:ProductionJob,config:EstimateConfig,design:DesignTime={hours:config.rates.designHours,source:'default'}):Estimate{
- const recipe=matchRecipe(job.widthMm,job.heightMm,config.recipes);
+ const recipe=matchRecipe(job.widthMm,job.heightMm,config.recipes,job.product);
  const {machine,chosenBy}=machineFor(job.widthMm,job.heightMm,recipe,config);
  const {pieces:assigned,warnings}=assignMaterials(job,recipe,config);
 
@@ -243,5 +254,8 @@ export function formatMachineTime(minutes:number,confidence:TimeConfidence):stri
  const text=rounded>=60?`${Math.floor(rounded/60)} h ${String(rounded%60).padStart(2,'0')} min`:`${rounded} min`;
  return confidence==='calibrated'?text:`~${text}`;
 }
+
+// The short form, for the badge next to the machine time.
+export const confidenceBadge=(confidence:TimeConfidence)=>confidence==='placeholder'?'Placeholder speeds':confidence==='uncalibrated'?'Uncalibrated':'Calibrated';
 
 export const confidenceLabel=(confidence:TimeConfidence)=>confidence==='placeholder'?'PLACEHOLDER inputs - not a real time':confidence==='uncalibrated'?'Uncalibrated - record a real job to check it':'Calibrated against recorded jobs';

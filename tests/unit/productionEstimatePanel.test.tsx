@@ -128,3 +128,32 @@ describe('EstimatePanel',()=>{
   }finally{urls.createObjectURL=original.create;urls.revokeObjectURL=original.revoke}
  });
 });
+
+describe('EstimatePanel calibration (V2 Step 1)',()=>{
+ it('badges the machine time as uncalibrated until a real job is recorded',()=>{
+  render(<Harness job={lakeSceneToJob(scene)}/>);
+  const badge=screen.getByTestId('estimate-badge');
+  expect(badge.textContent).toBe('Uncalibrated');
+  expect(badge.dataset.confidence).toBe('uncalibrated');
+ });
+
+ it('shows the percent error against the estimate as the actual minutes are typed, then per recorded job',()=>{
+  render(<Harness job={lakeSceneToJob(scene)}/>);
+  const shown=screen.getByTestId('calibration-error');
+  const estimated=Number(/This estimate: ([\d.]+) min\./.exec(shown.textContent!)![1]);
+  expect(shown.textContent).toContain('Enter the minutes the laser software reported.');
+  // A job that took 20% longer than estimated: the estimate is 16.7% low, outside the gate.
+  const actual=Number((estimated*1.2).toFixed(1));
+  fireEvent.change(screen.getByLabelText('Actual job minutes'),{target:{value:String(actual)}});
+  const pct=(estimated-actual)/actual*100;
+  expect(shown.textContent).toContain(`Estimate -${Math.abs(pct).toFixed(1)}% (low): outside the 15% gate.`);
+  expect(shown.dataset.severity).toBe('warning');
+  fireEvent.click(screen.getByRole('button',{name:'Record actual time'}));
+  expect(screen.getByTestId('calibration-row-error').textContent).toBe(`-${Math.abs(pct).toFixed(1)}%`);
+  expect(screen.getByTestId('estimate-badge').textContent).toBe('Calibrated');
+  // Within the gate: a job 10% quicker than estimated.
+  fireEvent.change(screen.getByLabelText('Actual job minutes'),{target:{value:String(Number((estimated/1.1).toFixed(2)))}});
+  expect(screen.getByTestId('calibration-error').textContent).toMatch(/\(high\): within the 15% gate\./);
+  expect(screen.getByTestId('calibration-error').dataset.severity).toBe('success');
+ });
+});

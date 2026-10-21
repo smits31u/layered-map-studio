@@ -22,7 +22,7 @@ export type StackLayer={
 // Only the pieces the scene draws are stacked: a recipe's border piece is an estimate line with
 // assumed geometry, and the preview never shows anything that is not in the cut file.
 export function stackLayers(job:ProductionJob,config:EstimateConfig):StackLayer[]{
- const {pieces}=assignMaterials(job,matchRecipe(job.widthMm,job.heightMm,config.recipes),config);
+ const {pieces}=assignMaterials(job,matchRecipe(job.widthMm,job.heightMm,config.recipes,job.product),config);
  const layered=pieces.filter(p=>p.piece.role==='layer');
  const thickness=(materialId:string)=>config.materials.find(m=>m.id===materialId)?.thicknessMm??3.175;
  // assignMaterials keeps the job's order, top first; the stack is built from the bottom.
@@ -45,10 +45,14 @@ const WOOD='#c9a46c';
 const SHALLOW=[0x9c,0xcf,0xe8],DEEP=[0x12,0x3a,0x66];
 const hex=(rgb:number[])=>`#${rgb.map(c=>Math.round(c).toString(16).padStart(2,'0')).join('')}`;
 
+const LOWLAND=[0x5f,0x7d,0x4e],SUMMIT=[0xd9,0xc9,0xa3];
+
 // The lake-map look: wood for the top piece, then water from light to deep blue going down, the
-// bench piece the deepest. Returned bottom-up, matching stackLayers.
-export function defaultLayerColors(layers:StackLayer[]):string[]{
+// bench piece the deepest. A topo board climbs instead: green lowland at the base to pale summit
+// stone at the top. Returned bottom-up, matching stackLayers.
+export function defaultLayerColors(layers:StackLayer[],product='lake-map'):string[]{
  const n=layers.length;
+ if(product==='topo-map')return layers.map(layer=>{const t=n<=1?0:layer.level/(n-1);return hex(LOWLAND.map((c,i)=>c+(SUMMIT[i]-c)*t))});
  return layers.map(layer=>{
   if(layer.level===n-1)return WOOD;
   const below=n-1;// water pieces: every level below the top

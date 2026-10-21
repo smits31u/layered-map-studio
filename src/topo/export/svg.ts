@@ -1,7 +1,8 @@
 import {CUT_STROKE_MM} from '../../ornament/export/lightburn';
 import {escapeXml} from '../../ornament/export/metadata';
 import {formatMm as n,geometryPathMm} from '../../ornament/export/svg';
-import type {TopoBoard,TopoExportGroup,TopoOperation} from './board';
+import type {MultiPolygonMm} from '../../geometry/shoreline/polygonEngine';
+import type {TopoBoard,TopoExportGroup,TopoOperation,TopoScoreLine} from './board';
 import {topoMetadataXml,type TopoExportMetadata} from './metadata';
 
 // The topo board's manufacturing SVG (plan §6). The ornament serializer's rules, unchanged:
@@ -21,13 +22,18 @@ const STYLE:Record<TopoOperation,{fill:string;stroke:string}>={
 
 const linePath=(line:[number,number][])=>line.map(([x,y],i)=>`${i?'L':'M'}${n(x)} ${n(y)}`).join(' ');
 
+// The path data the file holds for one polygon of a group and for one score entry. Exported so the
+// production estimate and 3D preview read the exact strings written here (adapters/topoBoard.ts).
+export const polygonPathData=(polygon:MultiPolygonMm[number])=>geometryPathMm([polygon]);
+export const scorePathData=(score:TopoScoreLine)=>score.lines.filter(line=>line.length>=2).map(linePath).join(' ');
+
 function groupBody(group:TopoExportGroup):string{
  const parts:string[]=[];
  // One path per polygon, so each piece can be selected on its own in the laser software; holes stay
  // with their outer ring under the group's even-odd rule.
- for(const polygon of group.geometry)parts.push(`<path d="${geometryPathMm([polygon])}"/>`);
+ for(const polygon of group.geometry)parts.push(`<path d="${polygonPathData(polygon)}"/>`);
  for(const score of group.lines){
-  const d=score.lines.filter(line=>line.length>=2).map(linePath).join(' ');
+  const d=scorePathData(score);
   if(d)parts.push(`<path d="${d}"${score.label?` data-label="${escapeXml(score.label)}"`:''}/>`);
  }
  for(const glyph of group.glyphs)if(glyph.d)parts.push(`<path d="${glyph.d}" data-text="${escapeXml(glyph.name)}"/>`);

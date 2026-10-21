@@ -74,7 +74,7 @@ describe('extrudePolygons',()=>{
 
 describe('stack order and heights',()=>{
  const IN=MM_PER_IN,w=14*IN,h=11*IN;
- const job:ProductionJob={product:'test',widthMm:w,heightMm:h,pieces:['layer-land','layer-depth-2','layer-depth-3','layer-depth-4','layer-base'].map(id=>({id,name:id,role:'layer' as const,widthMm:w,heightMm:h,shapes:[{id:`${id}-panel`,d:rectPathData(0,0,w,h),operation:'cut' as const,outline:true}]}))};
+ const job:ProductionJob={product:'lake-map',widthMm:w,heightMm:h,pieces:['layer-land','layer-depth-2','layer-depth-3','layer-depth-4','layer-base'].map(id=>({id,name:id,role:'layer' as const,widthMm:w,heightMm:h,shapes:[{id:`${id}-panel`,d:rectPathData(0,0,w,h),operation:'cut' as const,outline:true}]}))};
  const config=createDefaultEstimateConfig();
 
  it('builds from the bench up: base at the bottom, Land / Top last, each on the one below',()=>{

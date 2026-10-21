@@ -7,6 +7,12 @@ import {insertPngText,readPngInfo} from './png';
 export const RENDER_NOTICE='RENDERED PREVIEW - design render, not a photo of the finished piece';
 
 export const EXPORT_WIDTHS=[3000,4000,6000] as const;
+// V2 spec, A6: a proof or listing image is at least 2000 px on its long side. Every width and shape
+// offered clears it; finalizePreviewPng refuses anything that does not.
+export const MIN_PROOF_LONG_SIDE=2000;
+// The proof background: an opaque light neutral grey, so a proof reads the same on any page and a
+// listing photo has no transparency for a marketplace to fill with black.
+export const PROOF_BACKGROUND='#ecebe8';
 export const EXPORT_ASPECTS=[{id:'4:3',value:4/3},{id:'1:1',value:1},{id:'3:2',value:3/2},{id:'16:9',value:16/9}] as const;
 export type ExportAspect=typeof EXPORT_ASPECTS[number]['id'];
 
@@ -39,6 +45,7 @@ export function previewPngText(meta:PreviewMeta):Record<string,string>{
 // Adds the metadata to the browser-encoded PNG and checks it is the size that was asked for.
 export function finalizePreviewPng(png:Uint8Array,expected:{width:number;height:number},meta:PreviewMeta):Uint8Array{
  const info=readPngInfo(png);
+ if(Math.max(expected.width,expected.height)<MIN_PROOF_LONG_SIDE)throw new Error(`A preview image must be at least ${MIN_PROOF_LONG_SIDE} px on its long side; ${expected.width} x ${expected.height} px was asked for.`);
  if(info.width!==expected.width||info.height!==expected.height)throw new Error(`The renderer produced ${info.width} x ${info.height} px instead of ${expected.width} x ${expected.height}. The browser may not support images this large; try a smaller width.`);
  return insertPngText(png,previewPngText(meta));
 }

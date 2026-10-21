@@ -1,11 +1,16 @@
 import {MM_PER_IN,type CalibrationEntry,type EstimateConfig} from './config';
-import {confidenceLabel,formatMachineTime,type Estimate} from './estimate';
+import {CALIBRATION_GATE_PCT,formatPercentError} from './calibration';
+import type {ProductionJob} from '../job';
+import {confidenceBadge,confidenceLabel,estimateJob,formatMachineTime,type DesignTime,type Estimate} from './estimate';
 
-// The estimate's two file outputs: a JSON record for a future Business Suite import, and a one-page
-// printable quote sheet for Ben's own reference. Neither is customer-facing, and neither is sent
-// anywhere: both are built here and handed to the browser as a download.
+// The estimate's file outputs: a JSON record for a future Business Suite import, a one-page
+// printable quote sheet for Ben's own reference, and a short summary packed into a tool's export
+// (estimateSummaryFiles). None is customer-facing, and none is sent anywhere: each is built here and
+// handed to the browser as a download.
 
-export type EstimateMeta={product:string;title:string;generatedAt:string;appVersion:string};
+// generatedAt is left out of the summary packed into an export ZIP: the ZIP pins its timestamps so
+// re-exporting an unchanged design gives the same bytes, and a clock reading would break that.
+export type EstimateMeta={product:string;title:string;generatedAt?:string;appVersion:string};
 
 export const ESTIMATE_JSON_SCHEMA='layered-map-studio.estimate/1';
 
@@ -28,7 +33,8 @@ export function estimateJson(estimate:Estimate,config:EstimateConfig,meta:Estima
   materials:estimate.materials.map(m=>({material:m.materialId,stock:m.stockId,pieces:m.pieces,piecesPerSheet:m.piecesPerSheet,sheets:round(m.sheets,3),sheetPrice:round(m.sheetPrice),cost:round(m.cost),unplaced:m.unplaced})),
   totals:Object.fromEntries(Object.entries(estimate.totals).map(([k,v])=>[k,v===null?null:round(v,k.endsWith('Min')||k.endsWith('Hours')?3:2)])),
   rates:{...config.rates,laserPerHour:estimate.machine.hourlyRate},
-  calibration:{machineId:estimate.calibration.machineId,entries:estimate.calibration.entries,meanRatio:estimate.calibration.meanRatio===null?null:round(estimate.calibration.meanRatio,3),suggestedMultiplier:estimate.calibration.suggestedMultiplier===null?null:round(estimate.calibration.suggestedMultiplier,3)},
+  calibration:{machineId:estimate.calibration.machineId,entries:estimate.calibration.entries,meanRatio:estimate.calibration.meanRatio===null?null:round(estimate.calibration.meanRatio,3),suggestedMultiplier:estimate.calibration.suggestedMultiplier===null?null:round(estimate.calibration.suggestedMultiplier,3),gatePct:CALIBRATION_GATE_PCT,latestErrorPct:(()=>{const e=estimate.calibration.rows.at(-1)?.errorPct;return e===undefined||e===null?null:round(e,1)})()},
+  operations:Object.fromEntries(Object.entries(operationTotals(estimate)).map(([k,v])=>[k,round(v,k.endsWith('Min')?2:1)])),
   warnings:estimate.warnings,
  };
 }
@@ -69,7 +75,7 @@ ul{margin:4px 0 0 16px;padding:0}
 .foot{color:#5b544b;font-size:9px;margin-top:10px}
 </style></head><body>
 <h1>${esc(meta.title)} - ${esc(size)}</h1>
-<p class="sub">Internal quote sheet (not customer-facing) · ${esc(meta.product)} · ${esc(meta.generatedAt)} · recipe ${esc(estimate.recipe?.label??'none')} · ${esc(machineLabel)}</p>
+<p class="sub">Internal quote sheet (not customer-facing) · ${esc(meta.product)} · ${esc(meta.generatedAt??'')} · recipe ${esc(estimate.recipe?.label??'none')} · ${esc(machineLabel)}</p>
 <div class="flag"><b>Machine time: ${esc(confidenceLabel(estimate.timeConfidence))}.</b>${unverified} Prices are from Ben's notes and are unverified. Travel multiplier ${machine?.travelMultiplier??'-'}, ${machine?.perPieceOverheadMin??'-'} min overhead per piece. Roads ${estimate.strokedLines==='engrave'?'engraved':'scored'}.</div>
 <h2>Layers</h2>
 <table><thead><tr><th>Piece</th><th>Material</th><th class="n">Cut</th><th class="n">Score</th><th class="n">Engrave</th><th class="n">Sheets</th><th class="n">Time</th></tr></thead><tbody>${rows}</tbody></table>
@@ -105,4 +111,65 @@ export function calibrationEntryFrom(estimate:Estimate,config:EstimateConfig,act
   multiplierAtTime:machine?.travelMultiplier??1,
   actualMin,
  };
+}
+
+// Cut, score and engrave totals over the pieces the laser runs (by-hand pieces take no laser time).
+export function operationTotals(estimate:Estimate){
+ const lasered=estimate.pieces.filter(p=>!p.manual);
+ return {
+  cutLengthMm:lasered.reduce((s,p)=>s+p.cutLengthMm,0),
+  scoreLengthMm:lasered.reduce((s,p)=>s+p.scoreLengthMm,0),
+  engraveAreaMm2:lasered.reduce((s,p)=>s+p.engraveAreaMm2,0),
+  cutMin:lasered.reduce((s,p)=>s+p.minutes.cut,0),
+  scoreMin:lasered.reduce((s,p)=>s+p.minutes.score,0),
+  engraveMin:lasered.reduce((s,p)=>s+p.minutes.engrave,0),
+ };
+}
+
+// The plain-text half of the export summary: what a person opening the ZIP reads first. Labor is
+// the laser time at the machine's rate; design time is listed on its own line.
+export function estimateSummaryText(estimate:Estimate,config:EstimateConfig,meta:EstimateMeta):string{
+ const t=estimate.totals,ops=operationTotals(estimate);
+ const inSize=`${+(estimate.widthMm/MM_PER_IN).toFixed(2)} x ${+(estimate.heightMm/MM_PER_IN).toFixed(2)} in`;
+ const machine=`${estimate.machine.name}${estimate.machine.location?` (${estimate.machine.location})`:''}`;
+ const last=estimate.calibration.rows.at(-1);
+ const lines=[
+  `Layered Map Studio estimate - ${meta.title} (${meta.product})`,
+  `Size ${inSize} · recipe ${estimate.recipe?.label??'none'} · ${machine}`,
+  `Machine time: ${formatMachineTime(t.machineMin,estimate.timeConfidence)} (${t.machineMin.toFixed(1)} min computed) - ${confidenceBadge(estimate.timeConfidence).toUpperCase()}`,
+  `  ${confidenceLabel(estimate.timeConfidence)}.${estimate.placeholderInputs.length?` Not entered yet: ${estimate.placeholderInputs.join(', ')}.`:''}`,
+  `  Calibration on this machine: ${estimate.calibration.entries?`${estimate.calibration.entries} timed job(s); latest ${formatPercentError(last?.errorPct??null)} against its actual time (gate ${CALIBRATION_GATE_PCT}%)`:'no timed jobs recorded'}.`,
+  '',
+  'Operations',
+  `  Cut     ${(ops.cutLengthMm/1000).toFixed(2)} m   ${ops.cutMin.toFixed(1)} min`,
+  `  Score   ${(ops.scoreLengthMm/1000).toFixed(2)} m   ${ops.scoreMin.toFixed(1)} min`,
+  `  Engrave ${Math.round(ops.engraveAreaMm2)} mm²   ${ops.engraveMin.toFixed(1)} min`,
+  `  Travel multiplier x${config.machines.find(m=>m.id===estimate.machine.id)?.travelMultiplier??'-'}, overhead ${t.overheadMin.toFixed(1)} min`,
+  '',
+  'Sheets',
+  ...estimate.materials.map(m=>`  ${m.materialName}: ${m.pieces} piece(s) on ${+m.sheets.toFixed(2)} x ${m.stockName??'no stock that fits'} = ${money(m.cost)}`),
+  '',
+  `Material  ${money(t.materialCost)}`,
+  `Supplies  ${money(t.suppliesCost)} (${config.rates.suppliesPct}% of material)`,
+  `Labor     ${money(t.laserCost)} (laser ${hours(t.machineHours)} at ${money(estimate.machine.hourlyRate)}/h)`,
+  `Design    ${money(t.designCost)} (${hours(estimate.design.hours)}${estimate.design.source==='timer'?', timed':''})`,
+  `Frame     ${t.frameCost===null?'not set':money(t.frameCost)}`,
+  `Total     ${money(t.suggestedTotal)}`,
+  ...(estimate.warnings.length?['','Check before quoting',...estimate.warnings.map(w=>`  - ${w}`)]:[]),
+  '',
+  `Layered Map Studio ${meta.appVersion}. Internal estimate, not a quote. Prices are from Ben's notes.`,
+ ];
+ return lines.join('\n')+'\n';
+}
+
+// The two files a tool's export carries: the JSON record and the text summary.
+export function estimateSummaryFiles(estimate:Estimate,config:EstimateConfig,meta:EstimateMeta):{'estimate.json':string;'estimate.txt':string}{
+ return {'estimate.json':JSON.stringify(estimateJson(estimate,config,meta),null,1)+'\n','estimate.txt':estimateSummaryText(estimate,config,meta)};
+}
+
+// The summary files for a job, for a tool's export. An estimate that cannot be built must not stop
+// the cut files from being written, so the failure goes into the summary instead.
+export function estimateFilesFor(job:ProductionJob,config:EstimateConfig,design:DesignTime,meta:EstimateMeta):Record<string,string>{
+ try{return estimateSummaryFiles(estimateJob(job,config,design),config,meta)}
+ catch(error){return {'estimate.txt':`The estimate could not be built for this export: ${(error as Error).message}\n`}}
 }

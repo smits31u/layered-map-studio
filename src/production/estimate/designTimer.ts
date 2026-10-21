@@ -44,3 +44,6 @@ export function loadTimer(storage=defaultStorage()):DesignTimer{
 export function saveTimer(t:DesignTimer,storage=defaultStorage()):void{
  try{storage?.setItem(DESIGN_TIMER_KEY,JSON.stringify(t))}catch{/* persistence is a convenience */}
 }
+
+// The time the saved timer shows now, for code outside the panel (an export packing the estimate).
+export const savedTimerElapsedMs=(now=Date.now(),storage=defaultStorage())=>timerElapsedMs(loadTimer(storage),now);

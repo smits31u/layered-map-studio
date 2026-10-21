@@ -3,7 +3,8 @@ import type {ProductionJob} from '../../job';
 import {downloadFile,fileSlug} from '../../download';
 import {MM_PER_IN,type EstimateConfig} from '../config';
 import {formatTimer} from '../designTimer';
-import {confidenceLabel,estimateJob,formatMachineTime,type DesignTime} from '../estimate';
+import {CALIBRATION_GATE_PCT,describeError,formatPercentError,percentError,withinGate} from '../calibration';
+import {confidenceBadge,confidenceLabel,designTimeFrom,estimateJob,formatMachineTime} from '../estimate';
 import {calibrationEntryFrom,estimateJson,quoteSheetHtml,type EstimateMeta} from '../exports';
 import {EstimateSettings} from './EstimateSettings';
 import {useDesignTimer} from './useDesignTimer';
@@ -17,10 +18,7 @@ const length=(mm:number)=>mm>=1000?`${(mm/1000).toFixed(2)} m`:`${Math.round(mm)
 // rebuilding its scene; layer, size and setting changes reach it through the tool's own rebuild.
 export function EstimatePanel({job,title,product,config,setConfig,appVersion}:{job?:ProductionJob;title:string;product:string;config:EstimateConfig;setConfig:(c:EstimateConfig)=>void;appVersion:string}){
  const timer=useDesignTimer();
- // Timed design work replaces the default design hours once there is any. Rounded to the minute so
- // the estimate does not recompute every second while the timer runs.
- const timedMinutes=Math.floor(timer.elapsedMs/60000);
- const design:DesignTime=timedMinutes>0?{hours:timedMinutes/60,source:'timer'}:{hours:config.rates.designHours,source:'default'};
+ const design=designTimeFrom(timer.elapsedMs,config.rates.designHours);
  const estimate=useMemo(()=>{
   if(!job)return {value:undefined,error:''};
   try{return {value:estimateJob(job,config,design),error:''}}catch(e){return {value:undefined,error:(e as Error).message}}
@@ -47,7 +45,7 @@ export function EstimatePanel({job,title,product,config,setConfig,appVersion}:{j
   {e&&<>
    <div className="estimate-headline">
     <div><span className="estimate-key">Suggested total</span><b data-testid="estimate-total">{money(e.totals.suggestedTotal)}</b></div>
-    <div><span className="estimate-key">Machine time</span><b data-testid="estimate-time">{formatMachineTime(e.totals.machineMin,e.timeConfidence)}</b></div>
+    <div><span className="estimate-key">Machine time</span><b data-testid="estimate-time">{formatMachineTime(e.totals.machineMin,e.timeConfidence)}</b><span className="estimate-badge" data-confidence={e.timeConfidence} data-testid="estimate-badge">{confidenceBadge(e.timeConfidence)}</span></div>
    </div>
    <small className="notice" data-severity={e.timeConfidence==='calibrated'?'success':'warning'} data-testid="estimate-confidence">{confidenceLabel(e.timeConfidence)}.{e.placeholderInputs.length>0&&` Not entered yet: ${e.placeholderInputs.join(', ')}.`} Recipe: {e.recipe?.label??'none for this size'}. Machine: <span data-testid="estimate-machine">{e.machine.name}{e.machine.location?` (${e.machine.location})`:''}</span>.</small>
    {/* Sized for the 330px sidebar: material and sheet share the piece cell, engrave is in mm². */}
@@ -87,8 +85,9 @@ export function EstimatePanel({job,title,product,config,setConfig,appVersion}:{j
      <label>Actual min <input type="number" min="0" step="0.5" value={actual} onChange={ev=>setActual(ev.target.value)} aria-label="Actual job minutes"/></label>
      <label>Job <input value={jobLabel} placeholder={title||'Job name'} onChange={ev=>setJobLabel(ev.target.value)} aria-label="Calibration job name"/></label>
     </div>
+    {(()=>{const err=actualMin>0?percentError(e.totals.machineMin,actualMin):null;return <small className="notice" data-severity={err===null?undefined:withinGate(err)?'success':'warning'} data-testid="calibration-error">This estimate: {e.totals.machineMin.toFixed(1)} min. {describeError(err)}</small>})()}
     <button onClick={record} disabled={!(actualMin>0)}>Record actual time</button>
-    {e.calibration.rows.length>0&&<table className="estimate-table" aria-label="Estimate versus actual"><thead><tr><th>Job</th><th className="n">Est.</th><th className="n">Actual</th><th className="n">Ratio</th><th/></tr></thead><tbody>{e.calibration.rows.map(r=><tr key={r.id}><td>{r.label}</td><td className="n">{r.estimatedMin.toFixed(1)}</td><td className="n">{r.actualMin.toFixed(1)}</td><td className="n">{Number.isFinite(r.ratio)?`x${r.ratio.toFixed(2)}`:'-'}</td><td><button className="btn-quiet" onClick={()=>removeEntry(r.id)} aria-label={`Remove ${r.label}`}>x</button></td></tr>)}</tbody></table>}
+    {e.calibration.rows.length>0&&<table className="estimate-table" aria-label="Estimate versus actual"><thead><tr><th>Job</th><th className="n">Est.</th><th className="n">Actual</th><th className="n" title={`Estimate against the actual time; the gate is ${CALIBRATION_GATE_PCT}%`}>Error</th><th/></tr></thead><tbody>{e.calibration.rows.map(r=><tr key={r.id} className={r.errorPct!==null&&!withinGate(r.errorPct)?'estimate-flag':undefined}><td>{r.label}</td><td className="n">{r.estimatedMin.toFixed(1)}</td><td className="n">{r.actualMin.toFixed(1)}</td><td className="n" data-testid="calibration-row-error">{formatPercentError(r.errorPct)}</td><td><button className="btn-quiet" onClick={()=>removeEntry(r.id)} aria-label={`Remove ${r.label}`}>x</button></td></tr>)}</tbody></table>}
     {e.calibration.suggestedMultiplier!==null&&<button onClick={()=>applyMultiplier(e.machine.id,e.calibration.suggestedMultiplier!)}>Use multiplier x{e.calibration.suggestedMultiplier.toFixed(2)} (now x{currentMultiplier})</button>}
    </details>
   </>}
