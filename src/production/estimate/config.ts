@@ -45,7 +45,11 @@ export type MachineProfile={
 export type RecipeSlot={kind:'layer'|'border';materialId:string;count:number;upTo?:boolean;manual?:boolean;note?:string};
 
 // machineId: which laser this size is cut on. Absent, the smallest bed the board fits on is used.
-export type LayerRecipe={id:string;label:string;widthIn:number;heightIn:number;slots:RecipeSlot[];frameCost:number|null;machineId?:string};
+// products: the product ids (ProductionJob.product) the recipe is for; absent or empty, every product.
+export type LayerRecipe={id:string;label:string;widthIn:number;heightIn:number;slots:RecipeSlot[];frameCost:number|null;machineId?:string;products?:string[]};
+
+// The products a recipe can be limited to, as the tools name their jobs.
+export const PRODUCTS:Record<string,string>={'lake-map':'Lake maps','topo-map':'Topo maps'};
 
 // designHours is the default for a job with no design timer running.
 export type Rates={designPerHour:number;designHours:number;suppliesPct:number};
@@ -102,7 +106,8 @@ const UNKNOWN:SettingField[]=['scoreSpeedMmS','scorePowerPct','engravePowerPct']
 
 const machine=(id:string,name:string,location:string,bedWidthMm:number,bedHeightMm:number,bedPlaceholder:boolean,placeholder:SettingField[]):MachineProfile=>({id,name,location,bedWidthMm,bedHeightMm,bedPlaceholder,hourlyRate:25,perPieceOverheadMin:3,travelMultiplier:1.3,settings:MATERIAL_IDS.map(m=>settings(m,placeholder))});
 
-const recipe=(id:string,widthIn:number,heightIn:number,machineId:string,slots:RecipeSlot[]):LayerRecipe=>({id,label:`${widthIn}x${heightIn}`,widthIn,heightIn,slots,frameCost:null,machineId});
+// Ben's recipes are for lake maps: topo boards have no recipes yet, so they are estimated by bed fit.
+const recipe=(id:string,widthIn:number,heightIn:number,machineId:string,slots:RecipeSlot[]):LayerRecipe=>({id,label:`${widthIn}x${heightIn}`,widthIn,heightIn,slots,frameCost:null,machineId,products:['lake-map']});
 const smallSlots=(mdf:number):RecipeSlot[]=>[
  {kind:'border',materialId:'truflat',count:1,manual:true,note:'border with the lake name, made by hand'},
  {kind:'layer',materialId:'truflat',count:1,note:'top'},

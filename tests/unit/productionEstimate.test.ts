@@ -13,7 +13,7 @@ const IN=MM_PER_IN;
 // A plain board of the given size with a rectangular "lake" cut out of it, plus optional score and
 // engrave paths: lengths and areas are exact.
 const piece=(id:string,w:number,h:number,extra:JobPiece['shapes']=[]):JobPiece=>({id,name:id,role:'layer',widthMm:w,heightMm:h,shapes:[{id:`${id}-panel`,d:`${rectPathData(0,0,w,h)} ${rectPathData(w/4,h/4,w/2,h/2)}`,operation:'cut',outline:true},...extra]});
-const job=(wIn:number,hIn:number,layers:number,topExtra:JobPiece['shapes']=[]):ProductionJob=>{const w=wIn*IN,h=hIn*IN;return {product:'test',widthMm:w,heightMm:h,pieces:Array.from({length:layers},(_,i)=>piece(i===0?'layer-land':i===layers-1?'layer-base':`layer-depth-${i+1}`,w,h,i===0?topExtra:[]))}};
+const job=(wIn:number,hIn:number,layers:number,topExtra:JobPiece['shapes']=[]):ProductionJob=>{const w=wIn*IN,h=hIn*IN;return {product:'lake-map',widthMm:w,heightMm:h,pieces:Array.from({length:layers},(_,i)=>piece(i===0?'layer-land':i===layers-1?'layer-base':`layer-depth-${i+1}`,w,h,i===0?topExtra:[]))}};
 const testConfig=(patch:Partial<EstimateConfig>={}):EstimateConfig=>({...createDefaultEstimateConfig(),sheetMarginMm:3,pieceSpacingMm:3,...patch});
 // A road 50mm long, 0.45mm wide, and a 5 x 4 mm engraved glyph.
 const road={id:'road',d:'M0 0 L30 40',operation:'score' as const,strokeWidthMm:.45};

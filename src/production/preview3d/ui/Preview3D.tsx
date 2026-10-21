@@ -5,7 +5,7 @@ import type {EstimateConfig} from '../../estimate/config';
 import {downloadFile,fileSlug} from '../../download';
 import type {JobPiece,ProductionJob} from '../../job';
 import {extrudePolygons,type MeshData} from '../extrude';
-import {EXPORT_ASPECTS,EXPORT_WIDTHS,exportSize,finalizePreviewPng,RENDER_NOTICE,watermarkText,type ExportAspect,type WatermarkOptions} from '../previewImage';
+import {EXPORT_ASPECTS,EXPORT_WIDTHS,exportSize,finalizePreviewPng,PROOF_BACKGROUND,RENDER_NOTICE,watermarkText,type ExportAspect,type WatermarkOptions} from '../previewImage';
 import {defaultLayerColors,explodedY,stackHeight,stackLayers} from '../stack';
 import {createMeshRunner,isMeshBuildCancelled} from '../worker/meshRunner';
 import './preview3d.css';
@@ -90,12 +90,12 @@ export function Preview3D({job,config,title,sizeLabel,appVersion}:{job:Productio
  const[colors,setColors]=useState<Record<string,string>>({});
  const[explode,setExplode]=useState(0);
  const[frame,setFrame]=useState({enabled:false,widthMm:19,color:'#4a3526'});
- const[background,setBackground]=useState({transparent:true,color:'#f3efe7'});
+ const[background,setBackground]=useState({transparent:false,color:PROOF_BACKGROUND});
  const[exportWidth,setExportWidth]=useState<number>(3000),[aspect,setAspect]=useState<ExportAspect>('4:3');
  const[watermark,setWatermark]=useState<WatermarkOptions>({enabled:false,text:'PROOF',customer:'',lake:title,size:sizeLabel});
  const[build,setBuild]=useState<{state:'building'|'ready'|'error';built:number;message:string}>({state:'building',built:0,message:''});
  const[exporting,setExporting]=useState('');
- const defaults=useMemo(()=>defaultLayerColors(layers),[layers]);
+ const defaults=useMemo(()=>defaultLayerColors(layers,job.product),[layers,job.product]);
  const colorOf=useCallback((id:string)=>colors[id]??defaults[layers.findIndex(l=>l.id===id)]??'#888888',[colors,defaults,layers]);
  useEffect(()=>{setWatermark(w=>({...w,lake:w.lake||title,size:sizeLabel}))},[title,sizeLabel]);
 
@@ -216,8 +216,11 @@ export function Preview3D({job,config,title,sizeLabel,appVersion}:{job:Productio
  // build) and again when it is complete. Declared after the placement effect so it measures placed pieces.
  useEffect(()=>{if(build.built===1||build.state==='ready')fit('three-quarter')},[build.built===1,build.state,fit]);
 
- const exportPng=async()=>{
+ // 'proof' is the one-click customer proof / listing photo: the chosen size and watermark, always on
+ // the opaque neutral background whatever the background setting says.
+ const exportPng=async(kind:'export'|'proof'='export')=>{
   const t=threeRef.current;if(!t)return;
+  const bg=kind==='proof'?{transparent:false,color:PROOF_BACKGROUND}:background;
   setExporting('Rendering…');
   const {width,height}=exportSize(exportWidth,aspect);
   const {renderer,camera}=t;
@@ -231,7 +234,7 @@ export function Preview3D({job,config,title,sizeLabel,appVersion}:{job:Productio
    if(exportAspect<previous.aspect){const hfov=2*Math.atan(Math.tan(previous.fov*Math.PI/360)*previous.aspect);camera.fov=2*Math.atan(Math.tan(hfov/2)/exportAspect)*180/Math.PI}
    camera.aspect=exportAspect;camera.updateProjectionMatrix();
    renderer.setPixelRatio(1);renderer.setSize(width,height,false);
-   renderer.setClearColor(new Color(background.color),background.transparent?0:1);
+   renderer.setClearColor(new Color(bg.color),bg.transparent?0:1);
    renderer.render(t.scene,camera);
    const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
    const ctx=canvas.getContext('2d')!;
@@ -241,7 +244,7 @@ export function Preview3D({job,config,title,sizeLabel,appVersion}:{job:Productio
    setExporting('Encoding PNG…');
    const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('The browser could not encode the image.')),'image/png'));
    const png=finalizePreviewPng(new Uint8Array(await blob.arrayBuffer()),{width,height},{title:`${title||'Layered map'} - 3D preview`,customer:watermark.customer,lake:watermark.lake,size:watermark.size,appVersion,createdAt:new Date().toISOString(),watermarked:watermark.enabled});
-   downloadFile(`${fileSlug(title,'layered-map')}-3d-preview-${width}x${height}${watermark.enabled?'-proof':''}.png`,png,'image/png');
+   downloadFile(`${fileSlug(title,'layered-map')}-3d-${kind==='proof'?'proof':'preview'}-${width}x${height}${watermark.enabled?'-watermarked':''}.png`,png,'image/png');
    setExporting(`Exported ${width} x ${height} px.`);
   }catch(error){setExporting(`PNG export failed: ${(error as Error).message}`)}
   finally{
@@ -287,7 +290,11 @@ export function Preview3D({job,config,title,sizeLabel,appVersion}:{job:Productio
      <label>Size <input value={watermark.size} onChange={e=>setWatermark({...watermark,size:e.target.value})}/></label>
      <small>The watermark always includes "{RENDER_NOTICE}".</small>
     </>}
-    <button className="btn-primary" onClick={exportPng} disabled={build.state!=='ready'||Boolean(exporting&&/…$/.test(exporting))}>Export PNG</button>
+    <div className="preview3d-export-actions">
+     <button className="btn-primary" onClick={()=>void exportPng('proof')} disabled={build.state!=='ready'||Boolean(exporting&&/…$/.test(exporting))} data-testid="preview3d-proof">Save proof PNG</button>
+     <button onClick={()=>void exportPng('export')} disabled={build.state!=='ready'||Boolean(exporting&&/…$/.test(exporting))}>Export PNG</button>
+    </div>
+    <small>Proof PNG: neutral background, for customer proofs and listing photos. Export PNG uses the background setting above.</small>
     {exporting&&<small role="status" data-testid="preview3d-export-status">{exporting}</small>}
     <small>Every exported PNG is labelled a rendered preview in its metadata.</small>
    </details>

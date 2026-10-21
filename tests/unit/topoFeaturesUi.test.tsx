@@ -167,11 +167,14 @@ describe('the board overlay in edit mode',()=>{
    const downloads=fetchMock.mock.calls.length;
    fireEvent.click(exportButton());
    const status=await screen.findByTestId('topo-export-status',{},{timeout:HEAVY});
-   expect(status.textContent).toMatch(/^Exported topo-.+\.svg and topo-.+\.json\. Preflight passed all 8 checks/);
-   // The SVG goes out inside the click; the project file follows in a later task (download.ts).
-   await waitFor(()=>expect(names).toHaveLength(2),{timeout:HEAVY});
+   expect(status.textContent).toMatch(/^Exported topo-.+\.svg, topo-.+\.json and the estimate summary\. Preflight passed all 8 checks/);
+   // The SVG goes out inside the click; the project file and the estimate summary (V2 Step 1) follow
+   // in later tasks (download.ts).
+   await waitFor(()=>expect(names).toHaveLength(4),{timeout:HEAVY});
    expect(names[0]).toMatch(/^topo-37_7881n-122_4097w-228\.6x228\.6mm\.svg$/);
    expect(names[1]).toBe(names[0].replace(/svg$/,'json'));
+   expect(names.slice(2)).toEqual([names[0].replace(/\.svg$/,'-estimate.json'),names[0].replace(/\.svg$/,'-estimate.txt')]);
+   expect(JSON.parse(await blobs[2].text())).toMatchObject({schema:'layered-map-studio.estimate/1',product:'Topographic map',recipe:null});
    const svg=await blobs[0].text();
    const doc=new DOMParser().parseFromString(svg,'image/svg+xml');
    expect(doc.getElementsByTagName('parsererror')).toHaveLength(0);
@@ -190,7 +193,7 @@ describe('the board overlay in edit mode',()=>{
    await waitFor(()=>expect(alert.getAttribute('role')).toBe('alert'),{timeout:HEAVY});
    expect(screen.getByTestId('topo-export-status').textContent).toMatch(/must be fixed before this board can be exported/);
    expect(screen.getByLabelText('Preflight findings').textContent).toMatch(/Blocks export:.*engrave\/title reaches outside/);
-   expect(names).toHaveLength(2);
+   expect(names).toHaveLength(4);
    expect(terrainJobs).toHaveLength(1);
   }finally{
    URL.createObjectURL=original.create;URL.revokeObjectURL=original.revoke;HTMLAnchorElement.prototype.click=original.click;

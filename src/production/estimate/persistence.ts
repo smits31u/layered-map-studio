@@ -63,10 +63,17 @@ function machine(o:Record<string,unknown>,base:MachineProfile,laserPerHour?:unkn
 
 const slot=(o:Record<string,unknown>):RecipeSlot|undefined=>typeof o.materialId==='string'?{kind:o.kind==='border'?'border':'layer',materialId:o.materialId,count:Math.round(num(o.count,1,0,30)),...(o.upTo===true?{upTo:true}:{}),...(o.manual===true?{manual:true}:{}),...(typeof o.note==='string'?{note:o.note}:{})}:undefined;
 
+// Recipes saved before they could be limited to a product were all Ben's lake-map recipes; the
+// default ids keep that scope, so a saved 11x14 is not applied to an 11x14 topo board. A recipe Ben
+// added himself stays for every product until he limits it.
+const DEFAULT_RECIPE_IDS=new Set(createDefaultEstimateConfig().recipes.map(r=>r.id));
+const products=(o:Record<string,unknown>):string[]|undefined=>Array.isArray(o.products)?o.products.filter((p):p is string=>typeof p==='string'&&Boolean(p)):typeof o.id==='string'&&DEFAULT_RECIPE_IDS.has(o.id)?['lake-map']:undefined;
+
 function recipe(o:Record<string,unknown>):LayerRecipe|undefined{
  if(typeof o.id!=='string'||!o.id)return undefined;
  const frame=o.frameCost===null||o.frameCost===undefined?null:optionalNum(o.frameCost,0,100000);
- return {id:o.id,label:str(o.label,o.id),widthIn:num(o.widthIn,11,.5,240),heightIn:num(o.heightIn,14,.5,240),slots:list(o.slots,slot)??[],frameCost:frame??null,...(typeof o.machineId==='string'&&o.machineId?{machineId:o.machineId}:{})};
+ const scope=products(o);
+ return {id:o.id,label:str(o.label,o.id),widthIn:num(o.widthIn,11,.5,240),heightIn:num(o.heightIn,14,.5,240),slots:list(o.slots,slot)??[],frameCost:frame??null,...(typeof o.machineId==='string'&&o.machineId?{machineId:o.machineId}:{}),...(scope?.length?{products:scope}:{})};
 }
 
 const calibrationEntry=(o:Record<string,unknown>,fallbackMachine:string):CalibrationEntry|undefined=>typeof o.id==='string'&&typeof o.actualMin==='number'&&o.actualMin>0?{

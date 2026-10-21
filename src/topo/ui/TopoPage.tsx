@@ -1,5 +1,5 @@
 import {FontLoadNotice} from '../../components/ui/FontLoadNotice';
-import {useEffect,useMemo,useReducer,useRef,useState} from 'react';
+import {Suspense,lazy,useEffect,useMemo,useReducer,useRef,useState} from 'react';
 import type {CaptureWarning} from '../../ornament/capture/mapCapture';
 import {roadWidthMm} from '../../ornament/geometry/roadWidths';
 import {PlaceSearch} from '../../ornament/ui/PlaceSearch';
@@ -23,6 +23,15 @@ import {TopoMap,type TopoMapHandle} from './TopoMap';
 import {useFeatureFabrication} from './useFeatureFabrication';
 import {downloadFiles,PROJECT_MIME,SVG_MIME} from '../../ornament/export/download';
 import {exportTopo} from '../export/exportTopo';
+import {buildTopoBoard} from '../export/board';
+import {APP_VERSION} from '../../ornament/export/metadata';
+import {topoBoardToJob} from '../../production/adapters/topoBoard';
+import type {ProductionJob} from '../../production/job';
+import {savedTimerElapsedMs} from '../../production/estimate/designTimer';
+import {designTimeFrom} from '../../production/estimate/estimate';
+import {estimateFilesFor} from '../../production/estimate/exports';
+import {EstimatePanel} from '../../production/estimate/ui/EstimatePanel';
+import {useEstimateConfig} from '../../production/estimate/ui/useEstimateConfig';
 import {topoPreflightSummary,type TopoPreflightReport} from '../export/preflight';
 import {useTerrainGeneration,type GenerationStage,type TerrainGenerationDeps} from './useTerrainGeneration';
 import {Slider} from '../../components/ui/Slider';
@@ -45,6 +54,11 @@ import './topo.css';
 // Search reuses the ornament's PlaceSearch and, through it, the existing /api/geocode proxy (ADR
 // 0003) — search on submit only, up to five candidates, the provider named and switchable. There is
 // deliberately no second geocoder.
+
+// three.js lives only in this chunk; it loads the first time the 3D view is opened, as in the lake tool.
+const Preview3D=lazy(()=>import('../../production/preview3d/ui/Preview3D'));
+// How long the board waits for edits to settle before it is rebuilt for the estimate and 3D view.
+const PRODUCTION_DEBOUNCE_MS=400;
 
 const SOURCE_LABELS={track:'track',route:'route',waypoints:'waypoints'} as const;
 const NO_WATER:[]=[];
@@ -203,6 +217,28 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
   ...(fabrication.route?.warnings??[]),
  ];
 
+
+ // The estimate and the 3D preview read the board the export would build (buildTopoBoard), turned
+ // into a production job. It is built only while one of them is open, after edits settle, and never
+ // reruns terrain: like the export, it takes the terrain result as it stands.
+ const [estimateConfig,setEstimateConfig]=useEstimateConfig();
+ const [estimateOpen,setEstimateOpen]=useState(false);
+ const [view3d,setView3d]=useState(false);
+ const [production,setProduction]=useState<{job?:ProductionJob;error?:string}>({});
+ const wantProduction=mode==='edit'&&Boolean(result)&&!working&&(estimateOpen||view3d);
+ useEffect(()=>{
+  if(!wantProduction||!result){setProduction({});return}
+  const timer=setTimeout(()=>{
+   try{setProduction({job:topoBoardToJob(buildTopoBoard({project,terrain:result,capture,font:getLoadedFont}))})}
+   catch(error){setProduction({error:(error as Error)?.message??String(error)})}
+  },PRODUCTION_DEBOUNCE_MS);
+  return ()=>clearTimeout(timer);
+  // fontTick: rebuild when a font arrives, since getLoadedFont is read synchronously.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+ },[wantProduction,result,capture,project,fontTick]);
+ const mapTitle=project.title.text||project.viewport.selectedPlaceLabel||'Topographic map';
+ const sizeLabel=`${fmt(mmToInches(output.widthMm),2)} x ${fmt(mmToInches(output.heightMm),2)} in`;
+
  const boardChanged=Boolean(frozen&&(frozen.widthMm!==output.widthMm||frozen.heightMm!==output.heightMm));
 
  // Export: the ornament's flow. Build the board from the current settings and the terrain as it
@@ -219,8 +255,12 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
    try{
     const exported=exportTopo({project,terrain:result,capture,font:getLoadedFont});
     if(!exported.ok||!exported.svg){setExportState({busy:false,ok:false,report:exported.preflight,message:topoPreflightSummary(exported.preflight)});return}
-    const wrote=downloadFiles([{name:exported.fileNames.svg,content:exported.svg,type:SVG_MIME},{name:exported.fileNames.project,content:exported.projectJson,type:PROJECT_MIME}]);
-    setExportState({busy:false,ok:wrote,report:exported.preflight,message:wrote?`Exported ${exported.fileNames.svg} and ${exported.fileNames.project}. ${topoPreflightSummary(exported.preflight)}`:'This browser would not accept the download. The board passed preflight — try another browser.'});
+    // The estimate summary for the board just exported, beside the SVG and the project file.
+    const estimate=estimateFilesFor(topoBoardToJob(exported.board),estimateConfig,designTimeFrom(savedTimerElapsedMs(),estimateConfig.rates.designHours),{product:'Topographic map',title:mapTitle,appVersion:APP_VERSION});
+    const stem=exported.fileNames.svg.replace(/.svg$/,'');
+    const estimateFiles=Object.entries(estimate).map(([name,content])=>({name:`${stem}-${name}`,content,type:name.endsWith('.json')?'application/json':'text/plain'}));
+    const wrote=downloadFiles([{name:exported.fileNames.svg,content:exported.svg,type:SVG_MIME},{name:exported.fileNames.project,content:exported.projectJson,type:PROJECT_MIME},...estimateFiles]);
+    setExportState({busy:false,ok:wrote,report:exported.preflight,message:wrote?`Exported ${exported.fileNames.svg}, ${exported.fileNames.project} and the estimate summary. ${topoPreflightSummary(exported.preflight)}`:'This browser would not accept the download. The board passed preflight — try another browser.'});
    }catch(error){setExportState({busy:false,ok:false,message:`The export could not be built: ${(error as Error)?.message??String(error)}`})}
   },0);
  };
@@ -300,6 +340,11 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
      <input type="number" aria-label="Title offset Y (mm)" step={TOPO_LIMITS.titleOffsetMm.step} value={project.title.dyMm} onChange={e=>dispatch({type:'setTitle',patch:{dyMm:Number(e.target.value)}})}/>mm</span></label>
     <small>The title sits at the bottom centre, inside the frame; the offset moves it from there.</small>
    </div></details>
+   <details open={estimateOpen} onToggle={e=>setEstimateOpen((e.currentTarget as HTMLDetailsElement).open)}><summary>9. Estimate</summary><div className="section-body">
+    {mode!=='edit'||!result?<small>Generate terrain to see sheets, machine time and cost.</small>
+     :production.error?<p className="error" role="alert">The estimate could not be built: {production.error}</p>
+     :<EstimatePanel job={production.job} title={mapTitle} product="Topographic map" config={estimateConfig} setConfig={setEstimateConfig} appVersion={APP_VERSION}/>}
+   </div></details>
    <button type="button" className="topo-reset btn-quiet" onClick={()=>{dispatch({type:'reset'});setGpxNote(undefined);setSmoothingRadius(DEFAULT_SMOOTHING_RADIUS)}}>Reset to defaults</button>
    </div>
    {/* Pinned to the foot of the sidebar and always open: the summary only titles it. */}
@@ -327,6 +372,7 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
     <nav>
      <span className="topo-mode">Edit mode</span>
      <button type="button" onClick={backToMap}>← Back to map</button>
+     <div className="nav-tabs" role="group" aria-label="View"><button type="button" className={view3d?'':'active'} aria-pressed={!view3d} onClick={()=>setView3d(false)}>Terrain</button><button type="button" className={view3d?'active':''} aria-pressed={view3d} onClick={()=>setView3d(true)}>3D Preview</button></div>
      {working&&<button type="button" onClick={cancel}>Cancel</button>}
      <span className="topo-progress" role="status" aria-live="polite">{progressText}</span>
      <span className="topo-attribution">Elevation: Terrain Tiles (Mapzen, AWS Open Data) · Map © OpenStreetMap contributors</span>
@@ -341,9 +387,12 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
      {captureWarnings.map(w=><p key={w.code} className="topo-banner warning" role="status">{w.message}</p>)}
      {result?.warnings.map(w=><p key={w.code} className="topo-banner warning" role="status">{w.message}</p>)}
      {featureWarnings.map(w=><p key={w.code} className="topo-banner warning" role="status">{w.message}</p>)}
-     <div className={`topo-preview-frame${working?' busy':''}`}>
+     {view3d&&result&&!working?<div className="topo-preview-frame topo-preview-3d">
+      {production.job?<Suspense fallback={<p className="topo-note">Loading 3D preview…</p>}><Preview3D job={production.job} config={estimateConfig} title={mapTitle} sizeLabel={sizeLabel} appVersion={APP_VERSION}/></Suspense>
+       :<p className={production.error?'error':'topo-note'} role={production.error?'alert':'status'}>{production.error?`The 3D preview could not be built: ${production.error}`:'Building the board…'}</p>}
+     </div>:<div className={`topo-preview-frame${working?' busy':''}`}>
       {result?<TerrainPreview result={result} overlay={overlay}/>:working?<p className="topo-note">{progressText}</p>:null}
-     </div>
+     </div>}
      {result&&<dl className="topo-terrain-stats" aria-label="Terrain details">
       {result.elevation.landSamples>0&&<div><dt>Elevation</dt><dd>{fmt(result.elevation.minM,1)}–{fmt(result.elevation.maxM,1)} m (range {fmt(result.elevation.rangeM,1)} m)</dd></div>}
       {result.layers.map(layer=><div key={layer.index}><dt>Layer {layer.index}</dt><dd>{layer.thresholdM===null?'all land':`≥ ${fmt(layer.thresholdM,1)} m`} · {fmt(layer.coveragePercent,1)}% of land</dd></div>)}

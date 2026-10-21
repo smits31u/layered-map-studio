@@ -29,6 +29,10 @@ export const individualZipName=(scene:ManufacturingScene)=>`layered-map-individu
 // fflate reads it back the same way, so a fixed UTC instant would encode differently per timezone
 // (and a UTC 1980-01-01 lands in 1979 west of Greenwich, outside the format's range entirely).
 const ZIP_MTIME=new Date(2000,0,1,12,0,0);
-export function individualSvgsZip(scene:ManufacturingScene):Uint8Array{
- return zipSync(Object.fromEntries(Object.entries(individualSvgs(scene)).map(([name,svg])=>[name,strToU8(svg)])),{level:6,mtime:ZIP_MTIME});
+// `extra` adds text files beside the panels (the estimate summary); a name that collides with a
+// panel file is refused rather than allowed to replace a cut file.
+export function individualSvgsZip(scene:ManufacturingScene,extra:Record<string,string>={}):Uint8Array{
+ const svgs=individualSvgs(scene);
+ for(const name of Object.keys(extra))if(name in svgs)throw new Error(`${name} would replace a panel file in the ZIP.`);
+ return zipSync(Object.fromEntries([...Object.entries(svgs),...Object.entries(extra)].map(([name,text])=>[name,strToU8(text)])),{level:6,mtime:ZIP_MTIME});
 }

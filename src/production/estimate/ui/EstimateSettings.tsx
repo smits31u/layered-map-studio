@@ -1,5 +1,5 @@
 import {useEffect,useRef,useState} from 'react';
-import {LINE_INTERVAL_UNITS,PLACEHOLDER_LABEL,createDefaultEstimateConfig,lineIntervalFromUnit,lineIntervalToUnit,type LineIntervalUnit,type EstimateConfig,type LayerRecipe,type MachineProfile,type MaterialSettings,type RecipeSlot,type SettingField,type StockItem} from '../config';
+import {LINE_INTERVAL_UNITS,PLACEHOLDER_LABEL,PRODUCTS,createDefaultEstimateConfig,lineIntervalFromUnit,lineIntervalToUnit,type LineIntervalUnit,type EstimateConfig,type LayerRecipe,type MachineProfile,type MaterialSettings,type RecipeSlot,type SettingField,type StockItem} from '../config';
 
 type Tab='machines'|'materials'|'recipes'|'rates';
 
@@ -80,6 +80,7 @@ export function EstimateSettings({config,setConfig,onClose}:{config:EstimateConf
      {config.recipes.map(r=><fieldset key={r.id} className="estimate-fieldset"><legend>{r.label}</legend>
       <div className="field-pair"><Num label="Width" suffix="in" value={r.widthIn} min={.5} onChange={v=>v!==null&&patchRecipe(r.id,{widthIn:v,label:`${v}x${r.heightIn}`})}/><Num label="Height" suffix="in" value={r.heightIn} min={.5} onChange={v=>v!==null&&patchRecipe(r.id,{heightIn:v,label:`${r.widthIn}x${v}`})}/></div>
       <label>Cut on <select aria-label={`Machine for ${r.label}`} value={r.machineId??''} onChange={e=>patchRecipe(r.id,{machineId:e.target.value||undefined})}><option value="">Smallest bed that fits</option>{config.machines.map(m=><option key={m.id} value={m.id}>{m.name}{m.location?` (${m.location})`:''}</option>)}</select></label>
+      <label>For <select aria-label={`Products for ${r.label}`} value={r.products?.[0]??''} onChange={e=>patchRecipe(r.id,{products:e.target.value?[e.target.value]:[]})}><option value="">Every product</option>{Object.entries(PRODUCTS).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
       {r.slots.map((s,i)=><div key={i} className="estimate-slot">
        <select aria-label="Slot kind" value={s.kind} onChange={e=>patchSlot(r,i,{kind:e.target.value as RecipeSlot['kind']})}><option value="layer">Layer</option><option value="border">Border</option></select>
        <select aria-label="Slot material" value={s.materialId} onChange={e=>patchSlot(r,i,{materialId:e.target.value})}>{config.materials.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select>

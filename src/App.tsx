@@ -10,6 +10,9 @@ import {assertManufacturingSceneUsable,type ManufacturingScene} from './export/s
 import {buildScene,buildPresentationScene} from './export/buildScene';
 import {getCachedGeometryLayers,type GeometryCache} from './export/geometryCache';
 import {individualSvgsZip,individualZipName,sceneToSvg} from './export/svg/exportSvg';
+import {designTimeFrom} from './production/estimate/estimate';
+import {estimateFilesFor} from './production/estimate/exports';
+import {savedTimerElapsedMs} from './production/estimate/designTimer';
 import {preloadAllFonts,subscribeFonts} from './text/fontRegistry';
 import {FontLoadNotice} from './components/ui/FontLoadNotice';
 import {ThemeToggle} from './components/ui/ThemeToggle';
@@ -147,7 +150,7 @@ export default function App(){
  // used to cut that stale scene: type a title while its font is missing and the file went out
  // without the title, with no error. Now the same failure refuses the export, and so does a map
  // moved since the capture, which used to cut the new crop from the old crop's geography.
- const exportIt=()=>{try{const p=projectRef.current,current=featuresRef.current;if(current.water.length&&needsCapture(p))throw new Error(STALE_CAPTURE);assertBoardShape(p);let s;if(p.map.crop&&current.water.length){const {cache,result}=getCachedGeometryLayers(geometryCacheRef.current,p,current);geometryCacheRef.current=cache;s=buildPresentationScene(p,current,result);setScene(s)}else s=buildScene(p,current);assertManufacturingSceneUsable(s);setStatus('Building SVG…');if(project.exportSettings.layout==='individual')download(individualZipName(s),individualSvgsZip(s),'application/zip');else download(`layered-map-${project.exportSettings.layout}.svg`,sceneToSvg(s,project.exportSettings.layout,project.exportSettings.panelGapMm,project.exportSettings.annotations));setStatus('Export complete');setError('')}catch(e){setStatus('Export failed');setError(`SVG export failed: ${(e as Error).message}`)}};
+ const exportIt=()=>{try{const p=projectRef.current,current=featuresRef.current;if(current.water.length&&needsCapture(p))throw new Error(STALE_CAPTURE);assertBoardShape(p);let s;if(p.map.crop&&current.water.length){const {cache,result}=getCachedGeometryLayers(geometryCacheRef.current,p,current);geometryCacheRef.current=cache;s=buildPresentationScene(p,current,result);setScene(s)}else s=buildScene(p,current);assertManufacturingSceneUsable(s);setStatus('Building SVG…');if(project.exportSettings.layout==='individual')download(individualZipName(s),individualSvgsZip(s,estimateFilesFor(lakeSceneToJob(s),estimateConfig,designTimeFrom(savedTimerElapsedMs(),estimateConfig.rates.designHours),{product:'Lake depth map',title:p.title.text||'Untitled map',appVersion:APP_VERSION})),'application/zip');else download(`layered-map-${project.exportSettings.layout}.svg`,sceneToSvg(s,project.exportSettings.layout,project.exportSettings.panelGapMm,project.exportSettings.annotations));setStatus('Export complete');setError('')}catch(e){setStatus('Export failed');setError(`SVG export failed: ${(e as Error).message}`)}};
  // Drag/nudge/flip/hide/reset from the generated-map editor: never debounced (each already fires
  // once per discrete user action, not per keystroke) but goes through the same cache-aware path.
  const commitOverride=(updater:(p:MapProject)=>MapProject)=>{

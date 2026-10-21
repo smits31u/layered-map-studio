@@ -11,6 +11,7 @@
 .preview3d-panel{position:absolute;z-index:3;top:10px;right:10px;bottom:10px;width:290px;overflow:auto;display:grid;align-content:start;gap:6px;padding:10px 12px;font-size:var(--lms-text-xs,11.5px);color:var(--lms-ink,#e8edf2);background:var(--lms-surface-panel,#171e26);border:1px solid var(--lms-line,#35414e);border-radius:var(--lms-radius-md,6px);box-shadow:var(--lms-shadow-2,none)}
 .preview3d-panel details{padding:4px 0}
 .preview3d-panel .section-body,.preview3d-panel details>*:not(summary){margin-top:4px}
+.preview3d-export-actions{display:flex;flex-wrap:wrap;gap:6px}
 .preview3d-status{margin:0;color:var(--lms-ink-muted,#9facb8)}
 .preview3d-layer{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px}
 .preview3d-thickness{color:var(--lms-ink-muted,#9facb8);font-variant-numeric:tabular-nums}
