@@ -24,6 +24,7 @@ import {useFeatureFabrication} from './useFeatureFabrication';
 import {downloadFiles,PROJECT_MIME,SVG_MIME} from '../../ornament/export/download';
 import {exportTopo} from '../export/exportTopo';
 import {buildTopoBoard} from '../export/board';
+import {boardRectangle} from '../terrain/bands';
 import {APP_VERSION} from '../../ornament/export/metadata';
 import {topoBoardToJob} from '../../production/adapters/topoBoard';
 import type {ProductionJob} from '../../production/job';
@@ -63,6 +64,9 @@ const PRODUCTION_DEBOUNCE_MS=400;
 const SOURCE_LABELS={track:'track',route:'route',waypoints:'waypoints'} as const;
 const NO_WATER:[]=[];
 const DETAIL_LABELS={low:'Low',medium:'Medium',high:'High'} as const;
+const STYLE_LABELS={topo:'Topographic',street:'Street map'} as const;
+const STREET_ROAD_LABELS={engrave:'Engrave',cut:'Cut out'} as const;
+const STREET_WATER_LABELS={engrave:'Engrave lightly',cutout:'Cut out',none:'Leave off'} as const;
 const CONTOUR_LABELS:Record<number,string>={3:'Sparse (3)',5:'Light (5)',8:'Normal (8)',12:'Dense (12)',18:'Very dense (18)'};
 const STAGE_LABELS:Record<GenerationStage,string>={download:'Downloading elevation tiles',decode:'Decoding elevation tiles',resample:'Cropping and resampling',smooth:'Smoothing',water:'Cutting out water',bands:'Building terrain layers',contours:'Building terrain layers and contours'};
 // Said whenever terrain is generated without a capture, because the result is then exactly Phase 2's
@@ -132,6 +136,12 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
  useEffect(()=>{saveTopoProject(project)},[project]);
 
  const {output,displayUnit:unit,route,terrain}=project;
+ // A street map has no elevation (regeneration.ts): the same capture and worker run, no tiles. Its
+ // roads lie on the whole board unless its water is cut out, and the preview and road stats follow.
+ const street=project.style==='street';
+ const roadsOnLand=!street||project.street.water==='cutout';
+ const product=street?'Street map':'Topographic map';
+ const generateLabel=street?'Build street map':'Generate terrain';
  const min=TOPO_LIMITS.outputMm.min,max=TOPO_LIMITS.outputMm.max;
  const settings=terrainSettingsOf(project,smoothingRadius);
  // The only thing that reruns terrain (regeneration.ts). Roads, labels, frame, title and the route
@@ -210,7 +220,8 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
   // eslint-disable-next-line react-hooks/exhaustive-deps
  },[frozen,result,capture,project.roads,project.labels,project.frame,project.title,project.route,fontTick]);
  const overlay=overlayOut?.overlay;
- const fabrication=useFeatureFabrication({capture,view:frozen,land:result?.layers[0]?.geometry,water:result?.water??NO_WATER,roads:project.roads,routeLines:overlay?.route?.lines,routeWidthMm:route?.widthMm,createRunner:featureRunner});
+ const fabricationLand=useMemo(()=>result?(roadsOnLand?result.layers[0]?.geometry:boardRectangle(result.widthMm,result.heightMm)):undefined,[result,roadsOnLand]);
+ const fabrication=useFeatureFabrication({capture,view:frozen,land:fabricationLand,water:roadsOnLand?result?.water??NO_WATER:NO_WATER,roads:project.roads,routeLines:overlay?.route?.lines,routeWidthMm:route?.widthMm,createRunner:featureRunner});
  const featureWarnings=[
   ...(overlay?.warnings??[]),
   ...(project.roads.enabled?fabrication.roads?.warnings??[]:[]),
@@ -236,7 +247,7 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
   // fontTick: rebuild when a font arrives, since getLoadedFont is read synchronously.
   // eslint-disable-next-line react-hooks/exhaustive-deps
  },[wantProduction,result,capture,project,fontTick]);
- const mapTitle=project.title.text||project.viewport.selectedPlaceLabel||'Topographic map';
+ const mapTitle=project.title.text||project.viewport.selectedPlaceLabel||product;
  const sizeLabel=`${fmt(mmToInches(output.widthMm),2)} x ${fmt(mmToInches(output.heightMm),2)} in`;
 
  const boardChanged=Boolean(frozen&&(frozen.widthMm!==output.widthMm||frozen.heightMm!==output.heightMm));
@@ -256,7 +267,7 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
     const exported=exportTopo({project,terrain:result,capture,font:getLoadedFont});
     if(!exported.ok||!exported.svg){setExportState({busy:false,ok:false,report:exported.preflight,message:topoPreflightSummary(exported.preflight)});return}
     // The estimate summary for the board just exported, beside the SVG and the project file.
-    const estimate=estimateFilesFor(topoBoardToJob(exported.board),estimateConfig,designTimeFrom(savedTimerElapsedMs(),estimateConfig.rates.designHours),{product:'Topographic map',title:mapTitle,appVersion:APP_VERSION});
+    const estimate=estimateFilesFor(topoBoardToJob(exported.board),estimateConfig,designTimeFrom(savedTimerElapsedMs(),estimateConfig.rates.designHours),{product,title:mapTitle,appVersion:APP_VERSION});
     const stem=exported.fileNames.svg.replace(/.svg$/,'');
     const estimateFiles=Object.entries(estimate).map(([name,content])=>({name:`${stem}-${name}`,content,type:name.endsWith('.json')?'application/json':'text/plain'}));
     const wrote=downloadFiles([{name:exported.fileNames.svg,content:exported.svg,type:SVG_MIME},{name:exported.fileNames.project,content:exported.projectJson,type:PROJECT_MIME},...estimateFiles]);
@@ -264,7 +275,8 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
    }catch(error){setExportState({busy:false,ok:false,message:`The export could not be built: ${(error as Error)?.message??String(error)}`})}
   },0);
  };
- const progressText=working&&generation.stage?`${STAGE_LABELS[generation.stage]}${generation.stage==='download'&&generation.total?` (${generation.done}/${generation.total})`:''}…`:'';
+ const stageLabel=(stage:GenerationStage)=>street&&stage==='bands'?'Building the board':STAGE_LABELS[stage];
+ const progressText=working&&generation.stage?`${stageLabel(generation.stage)}${generation.stage==='download'&&generation.total?` (${generation.done}/${generation.total})`:''}…`:'';
 
  // The design system's sidebar (styles/studio.css), as in the lake tool: the product wordmark over
  // this tool's name, the numbered steps scrolling beneath, and the export pinned to the foot.
@@ -305,7 +317,21 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
     {gpxNote&&<p className={gpxNote.kind==='error'?'error':'topo-note'} role={gpxNote.kind==='error'?'alert':'status'}>{gpxNote.text}</p>}
     <small>The route is read in your browser and is not saved between sessions; load the file again after a reload.</small>
    </div></details>
-   <details open><summary>5. Terrain</summary><div className="section-body">
+   <details open><summary>5. Map style</summary><div className="section-body">
+    <div className="topo-segmented" role="group" aria-label="Map style">
+     {(['topo','street'] as const).map(value=><button key={value} type="button" aria-pressed={project.style===value} className={project.style===value?'active':''} onClick={()=>dispatch({type:'setStyle',value})}>{STYLE_LABELS[value]}</button>)}
+    </div>
+    {street?<>
+     <span className="topo-field-label">Roads</span>
+     <div className="topo-segmented" role="group" aria-label="Street roads">
+      {(['engrave','cut'] as const).map(value=><button key={value} type="button" aria-pressed={project.street.roads===value} className={project.street.roads===value?'active':''} onClick={()=>dispatch({type:'setStreet',patch:{roads:value}})}>{STREET_ROAD_LABELS[value]}</button>)}
+     </div>
+     <span className="topo-field-label">Water</span>
+     <div className="topo-segmented" role="group" aria-label="Street water">
+      {(['engrave','cutout','none'] as const).map(value=><button key={value} type="button" aria-pressed={project.street.water===value} className={project.street.water===value?'active':''} onClick={()=>dispatch({type:'setStreet',patch:{water:value}})}>{STREET_WATER_LABELS[value]}</button>)}
+     </div>
+     <small>A flat board: no elevation is downloaded. Roads engrave in black; cut out, they become openings for a top sheet over a backing. Water engraved lightly is grey in the file; cut out, it leaves holes in the base with bridge tabs kept, as on a topographic board.</small>
+    </>:<>
     <div className="topo-segmented" role="group" aria-label="Terrain layers">
      {([1,2,3,4] as const).map(value=><button key={value} type="button" aria-pressed={terrain.layerCount===value} className={terrain.layerCount===value?'active':''} onClick={()=>dispatch({type:'setTerrain',patch:{layerCount:value}})}>{value} {value===1?'layer':'layers'}</button>)}
     </div>
@@ -314,6 +340,7 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
     <label>Contour density<select aria-label="Contour density" disabled={!terrain.contoursEnabled} value={terrain.contourCount} onChange={e=>dispatch({type:'setTerrain',patch:{contourCount:Number(e.target.value) as TopoProject['terrain']['contourCount']}})}>{TOPO_CONTOUR_COUNTS.map(n=><option key={n} value={n}>{CONTOUR_LABELS[n]}</option>)}</select></label>
     <Slider label="Smoothing" min={0} max={MAX_SMOOTHING_RADIUS/2} step={1} value={smoothingRadius} onChange={setSmoothingRadius}/>
     <small>Layer 1 is all land on the board. Each further layer covers the highest share of it you set, and must not cover more than the layer below.</small>
+    </>}
    </div></details>
    <details open><summary>6. Roads</summary><div className="section-body">
     <label>Roads<input type="checkbox" aria-label="Roads" checked={project.roads.enabled} onChange={e=>dispatch({type:'setRoads',patch:{enabled:e.target.checked}})}/></label>
@@ -341,16 +368,16 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
     <small>The title sits at the bottom centre, inside the frame; the offset moves it from there.</small>
    </div></details>
    <details open={estimateOpen} onToggle={e=>setEstimateOpen((e.currentTarget as HTMLDetailsElement).open)}><summary>9. Estimate</summary><div className="section-body">
-    {mode!=='edit'||!result?<small>Generate terrain to see sheets, machine time and cost.</small>
+    {mode!=='edit'||!result?<small>{street?'Build the street map':'Generate terrain'} to see sheets, machine time and cost.</small>
      :production.error?<p className="error" role="alert">The estimate could not be built: {production.error}</p>
-     :<EstimatePanel job={production.job} title={mapTitle} product="Topographic map" config={estimateConfig} setConfig={setEstimateConfig} appVersion={APP_VERSION}/>}
+     :<EstimatePanel job={production.job} title={mapTitle} product={product} config={estimateConfig} setConfig={setEstimateConfig} appVersion={APP_VERSION}/>}
    </div></details>
    <button type="button" className="topo-reset btn-quiet" onClick={()=>{dispatch({type:'reset'});setGpxNote(undefined);setSmoothingRadius(DEFAULT_SMOOTHING_RADIUS)}}>Reset to defaults</button>
    </div>
    {/* Pinned to the foot of the sidebar and always open: the summary only titles it. */}
    <details open className="action-panel topo-export"><summary onClick={e=>e.preventDefault()}>Export</summary>
     <button type="button" className="btn-primary" disabled={!canExport} onClick={onExport}>{exportState.busy?'Exporting…':'Export SVG + project'}</button>
-    {!canExport&&!exportState.busy&&<small>{mode!=='edit'||!result?'Generate terrain first; the export is built from it.':'Wait for the terrain to finish.'}</small>}
+    {!canExport&&!exportState.busy&&<small>{mode!=='edit'||!result?`${street?'Build the street map':'Generate terrain'} first; the export is built from it.`:`Wait for the ${street?'board':'terrain'} to finish.`}</small>}
     {exportState.message&&<p className={exportState.ok?'topo-note':'error'} role={exportState.ok?'status':'alert'} data-testid="topo-export-status">{exportState.message}</p>}
     {exportState.report&&exportState.report.findings.length>0&&<ul className="topo-preflight" data-testid="topo-preflight" aria-label="Preflight findings">
      {[...exportState.report.findings].sort((a,b)=>a.severity===b.severity?0:a.severity==='error'?-1:1).map((f,i)=><li key={i} className={f.severity} data-code={f.code}><strong>{f.severity==='error'?'Blocks export':'Warning'}:</strong> {f.message}</li>)}
@@ -361,7 +388,7 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
    {mode==='map'?<>
     <nav>
      <span className="topo-mode">Map mode</span>
-     <button type="button" className="btn-primary" disabled={capturing} onClick={()=>void startGeneration()}>Generate terrain</button>
+     <button type="button" className="btn-primary" disabled={capturing} onClick={()=>void startGeneration()}>{generateLabel}</button>
      {capturing&&<span className="topo-progress" role="status">Capturing water, roads and labels…</span>}
      {viewError&&<span className="error" role="alert">{viewError}</span>}
      <span className="topo-attribution">Map © OpenStreetMap contributors · OpenFreeMap</span>
@@ -375,13 +402,13 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
      <div className="nav-tabs" role="group" aria-label="View"><button type="button" className={view3d?'':'active'} aria-pressed={!view3d} onClick={()=>setView3d(false)}>Terrain</button><button type="button" className={view3d?'active':''} aria-pressed={view3d} onClick={()=>setView3d(true)}>3D Preview</button></div>
      {working&&<button type="button" onClick={cancel}>Cancel</button>}
      <span className="topo-progress" role="status" aria-live="polite">{progressText}</span>
-     <span className="topo-attribution">Elevation: Terrain Tiles (Mapzen, AWS Open Data) · Map © OpenStreetMap contributors</span>
+     <span className="topo-attribution">{street?'Map © OpenStreetMap contributors · OpenFreeMap':'Elevation: Terrain Tiles (Mapzen, AWS Open Data) · Map © OpenStreetMap contributors'}</span>
      <ThemeToggle/>
     </nav>
     <div className="topo-edit">
      {boardChanged&&<p className="topo-banner" role="status">The board size changed after this terrain was generated. Go back to the map and generate again to use the new size.</p>}
      {generation.status==='error'&&generation.error&&<div className="topo-banner error" role="alert">
-      <strong>{generation.error.code==='missing-tile'?'Elevation data is missing for this area.':'Terrain could not be generated.'}</strong> {generation.error.message}
+      <strong>{generation.error.code==='missing-tile'?'Elevation data is missing for this area.':street?'The street map could not be built.':'Terrain could not be generated.'}</strong> {generation.error.message}
       {frozen&&<button type="button" onClick={()=>{lastRunSettings.current=settingsKey;void generate(frozen,settings,waterOptions(capture))}}>Try again</button>}
      </div>}
      {captureWarnings.map(w=><p key={w.code} className="topo-banner warning" role="status">{w.message}</p>)}
@@ -391,16 +418,17 @@ export function TopoPage({onExit,terrainDeps,featureRunner}:{onExit?:()=>void;te
       {production.job?<Suspense fallback={<p className="topo-note">Loading 3D preview…</p>}><Preview3D job={production.job} config={estimateConfig} title={mapTitle} sizeLabel={sizeLabel} appVersion={APP_VERSION}/></Suspense>
        :<p className={production.error?'error':'topo-note'} role={production.error?'alert':'status'}>{production.error?`The 3D preview could not be built: ${production.error}`:'Building the board…'}</p>}
      </div>:<div className={`topo-preview-frame${working?' busy':''}`}>
-      {result?<TerrainPreview result={result} overlay={overlay}/>:working?<p className="topo-note">{progressText}</p>:null}
+      {result?<TerrainPreview result={result} overlay={overlay} clipToLand={roadsOnLand}/>:working?<p className="topo-note">{progressText}</p>:null}
      </div>}
      {result&&<dl className="topo-terrain-stats" aria-label="Terrain details">
       {result.elevation.landSamples>0&&<div><dt>Elevation</dt><dd>{fmt(result.elevation.minM,1)}–{fmt(result.elevation.maxM,1)} m (range {fmt(result.elevation.rangeM,1)} m)</dd></div>}
-      {result.layers.map(layer=><div key={layer.index}><dt>Layer {layer.index}</dt><dd>{layer.thresholdM===null?'all land':`≥ ${fmt(layer.thresholdM,1)} m`} · {fmt(layer.coveragePercent,1)}% of land</dd></div>)}
+      {!street&&result.layers.map(layer=><div key={layer.index}><dt>Layer {layer.index}</dt><dd>{layer.thresholdM===null?'all land':`≥ ${fmt(layer.thresholdM,1)} m`} · {fmt(layer.coveragePercent,1)}% of land</dd></div>)}
       {result.contours.length>0&&<div><dt>Contours</dt><dd>{result.contours.length} elevations, every {fmt(result.elevation.rangeM/(result.contours.length+1),1)} m</dd></div>}
-      {result.waterMetrics&&<div><dt>Water</dt><dd>{fmt(result.waterMetrics.areaMm2/(result.widthMm*result.heightMm)*100,1)}% of the board, cut from every layer</dd></div>}
-      <div><dt>Source</dt><dd>{result.grid.tileCount} tiles at zoom {result.grid.tileZoom} · {result.grid.columns}×{result.grid.rows} samples · {Math.round(result.durationMs)} ms</dd></div>
+      {result.waterMetrics&&<div><dt>Water</dt><dd>{fmt(result.waterMetrics.areaMm2/(result.widthMm*result.heightMm)*100,1)}% of the board{street?{engrave:', engraved lightly',cutout:', cut out of the base',none:', left off the file'}[project.street.water]:', cut from every layer'}</dd></div>}
+      {street?<div><dt>Source</dt><dd>Map features only, no elevation · {Math.round(result.durationMs)} ms</dd></div>
+       :<div><dt>Source</dt><dd>{result.grid.tileCount} tiles at zoom {result.grid.tileZoom} · {result.grid.columns}×{result.grid.rows} samples · {Math.round(result.durationMs)} ms</dd></div>}
       {capture&&<div><dt>Captured</dt><dd>{capture.features.water.length} water · {capture.features.roads.length.toLocaleString('en-US')} roads ({capture.features.counts.duplicateRoads.toLocaleString('en-US')} duplicates removed) · {capture.labels.length} labels</dd></div>}
-      {project.roads.enabled&&<div><dt>Roads</dt><dd>{fabrication.roads?`${fmt(fabrication.roads.metrics.finalAreaMm2,0)} mm² engraved, ${fabrication.roads.metrics.widthGroups} widths ${fabrication.roads.metrics.widthsMm.map(w=>fmt(w,2)).join('/')} mm`:fabrication.error?<span className="topo-fabrication-error" role="alert">Could not build road geometry: {fabrication.error}</span>:'building…'}</dd></div>}
+      {project.roads.enabled&&<div><dt>Roads</dt><dd>{fabrication.roads?`${fmt(fabrication.roads.metrics.finalAreaMm2,0)} mm² ${street&&project.street.roads==='cut'?'cut out':'engraved'}, ${fabrication.roads.metrics.widthGroups} widths ${fabrication.roads.metrics.widthsMm.map(w=>fmt(w,2)).join('/')} mm`:fabrication.error?<span className="topo-fabrication-error" role="alert">Could not build road geometry: {fabrication.error}</span>:'building…'}</dd></div>}
       {project.roads.enabled&&fabrication.roads&&fabrication.roads.bridges.spans>0&&<div><dt>Bridges</dt><dd>{fabrication.roads.bridges.spans} span{fabrication.roads.bridges.spans>1?'s':''} kept across water on tabs, {fmt(fabrication.roads.bridges.lengthMm,1)} mm in all{fabrication.roads.bridges.narrowestTabMm!==undefined?`; tabs ${fmt(fabrication.roads.bridges.narrowestTabMm,2)}–${fmt(fabrication.roads.bridges.widestTabMm??fabrication.roads.bridges.narrowestTabMm,2)} mm wide`:''}</dd></div>}
       {overlay?.labels.visible&&overlay.labels.layer&&<div><dt>Labels</dt><dd>{overlay.labels.layer.placed.length} placed</dd></div>}
      </dl>}

@@ -10,6 +10,10 @@ import type {TopoProject} from './types';
 // Board size is deliberately absent too: the frozen view fixes the board the terrain was generated
 // for, and a size change after generation is reported by the page as needing a new generation from
 // the map, not rerun silently at the wrong size.
-export const terrainSettingsOf=(project:TopoProject,smoothingRadius:number):TerrainSettings=>({...project.terrain,smoothingRadius});
+//
+// The map style is in it too: a street map is the same run with `flat` set, which skips the
+// elevation download altogether (pipeline.ts). The street options (roads engraved or cut, water
+// engraved, cut out or left off) are not — the export decides those from the same result.
+export const terrainSettingsOf=(project:TopoProject,smoothingRadius:number):TerrainSettings=>({...project.terrain,smoothingRadius,...(project.style==='street'?{flat:true}:{})});
 
 export const terrainRunKey=(project:TopoProject,smoothingRadius:number)=>JSON.stringify(terrainSettingsOf(project,smoothingRadius));

@@ -8,6 +8,7 @@ import {buildOverlay,type BoardOverlay} from '../features/overlay';
 import {buildTopoRoads,type TopoRoadLayer} from '../features/roads';
 import {buildRouteGeometry,type TopoRouteLayer} from '../features/route';
 import type {TopoFeatureWarning} from '../features/warnings';
+import {boardRectangle} from '../terrain/bands';
 import type {TerrainResult} from '../terrain/pipeline';
 import type {TopoProject} from '../types';
 
@@ -36,18 +37,37 @@ import type {TopoProject} from '../types';
 //                   is always present and always empty.
 // Every group is always emitted, in this order, so an importer can rely on the structure; an unused
 // one is empty and says so.
+//
+// A street map (project.style 'street') is one flat board, so it has its own order, STREET_GROUP_ORDER:
+//   cut/base            the board. A rectangle, unless water is cut out: then the land plus bridge
+//                       tabs, holes and all, exactly like cut/terrain-1. There is no cut/water: the
+//                       shoreline is cut once, as the base's holes, not a second time as openings.
+//   cut/roads           the roads as openings, when street.roads is 'cut' (a top sheet over a backing).
+//   score/route         the GPX route's centreline.
+//   engrave-light/water the water, engraved lightly, when street.water is 'engrave'. The roads are
+//                       subtracted from it, so no area is burned twice where a bridge crosses.
+//   engrave/roads       the roads as filled areas, when street.roads is 'engrave' (the default).
+//   engrave/labels, engrave/title   as on a topo board.
+// When water is not cut out, roads are kept over it (a bridge is engraved across the water, not
+// tabbed), since nothing under them is removed.
 
 export type TopoGroupId=
  |'cut/frame'|'cut/terrain-1'|'cut/terrain-2'|'cut/terrain-3'|'cut/terrain-4'|'cut/water'|'cut/roads'
  |'score/contours'|'score/route'
- |'engrave/labels'|'engrave/title'|'engrave/compass';
+ |'engrave/labels'|'engrave/title'|'engrave/compass'
+ |'cut/base'|'engrave-light/water'|'engrave/roads';
 
 export const TOPO_GROUP_ORDER:readonly TopoGroupId[]=['cut/frame','cut/terrain-1','cut/terrain-2','cut/terrain-3','cut/terrain-4','cut/water','cut/roads','score/contours','score/route','engrave/labels','engrave/title','engrave/compass'];
+export const STREET_GROUP_ORDER:readonly TopoGroupId[]=['cut/frame','cut/base','cut/roads','score/route','engrave-light/water','engrave/roads','engrave/labels','engrave/title'];
 
-export type TopoOperation='cut'|'score'|'engrave';
+// The group that is the board's base material: what is cut out and what everything sits on.
+export const baseGroupId=(style:TopoProject['style']):TopoGroupId=>style==='street'?'cut/base':'cut/terrain-1';
+
+export type TopoOperation='cut'|'score'|'engrave'|'engrave-light';
 // pieces: closed regions that are material (the pieces a maker picks up). openings: closed regions
-// removed from material. lines: open score paths. glyphs: closed engrave outlines.
-export type TopoGroupKind='pieces'|'openings'|'lines'|'glyphs';
+// removed from material. lines: open score paths. glyphs: closed engrave outlines. areas: closed
+// regions engraved as a fill (a street map's roads and water).
+export type TopoGroupKind='pieces'|'openings'|'lines'|'glyphs'|'areas';
 
 export interface TopoGlyph{d:string;name:string}
 export interface TopoScoreLine{lines:LineMm[];label?:string}
@@ -66,8 +86,12 @@ export interface TopoExportGroup{
 }
 
 export interface TopoBoard{
+ style:TopoProject['style'];
  widthMm:number;heightMm:number;
  groups:TopoExportGroup[];
+ // The water openings in the base. On a topo board this is cut/water's geometry; a street map does
+ // not emit it as a group (the base's holes are the cut), so preflight reads it from here.
+ waterOpenings:MultiPolygonMm;
  bridgeTabs:MultiPolygonMm;
  roads?:TopoRoadLayer;
  route?:TopoRouteLayer;
@@ -88,37 +112,65 @@ const operationOf=(id:TopoGroupId):TopoOperation=>id.split('/')[0] as TopoOperat
 export function buildTopoBoard(input:TopoBoardInput):TopoBoard{
  const {project,terrain,capture}=input;
  const view=terrain.view,W=view.widthMm,H=view.heightMm;
- const land=terrain.layers[0]?.geometry??[];
+ const street=project.style==='street';
  const water=terrain.water;
+ // Water removes material under the roads only where it is cut: a topo board always, a street map
+ // only in cutout mode. Otherwise roads and the route lie on the whole board and need no tabs.
+ const waterCut=!street||project.street.water==='cutout';
+ const land=waterCut?terrain.layers[0]?.geometry??[]:boardRectangle(W,H);
+ const cutWater=waterCut?water:[];
  const overlay=buildOverlay({capture,view,water,settings:{roads:project.roads,labels:project.labels,frame:project.frame,title:project.title,route:project.route},font:input.font}).overlay;
 
- const roads=capture&&project.roads.enabled?buildTopoRoads(capture.features.roads,view,{detail:project.roads.detail,thicknessScale:project.roads.thicknessScale},land,{water,tunnelRoadKeys:capture.tunnelRoadKeys,simplifyToleranceMm:capture.simplifyToleranceMm}):undefined;
+ const roads=capture&&project.roads.enabled?buildTopoRoads(capture.features.roads,view,{detail:project.roads.detail,thicknessScale:project.roads.thicknessScale},land,{water:cutWater,tunnelRoadKeys:capture.tunnelRoadKeys,simplifyToleranceMm:capture.simplifyToleranceMm}):undefined;
  const routeLines=overlay.route&&!overlay.route.lines.outsideBoard?overlay.route.lines.lines:undefined;
- const route=routeLines&&project.route?buildRouteGeometry(routeLines,project.route.widthMm,land,water,{widthMm:W,heightMm:H}):undefined;
+ const route=routeLines&&project.route?buildRouteGeometry(routeLines,project.route.widthMm,land,cutWater,{widthMm:W,heightMm:H}):undefined;
 
  const tabParts=[roads?.bridgeTabs??[],route?.bridgeTabs??[]].filter(part=>part.length);
  const bridgeTabs=tabParts.length>1?unionAll(tabParts,'Bridge tabs'):tabParts[0]??[];
- const terrainOne=bridgeTabs.length?unionAll([land,bridgeTabs],'Terrain layer 1'):land;
- const openings=bridgeTabs.length?subtract(water,bridgeTabs,'Water'):water;
+ const base=bridgeTabs.length?unionAll([land,bridgeTabs],street?'Street base':'Terrain layer 1'):land;
+ const openings=bridgeTabs.length?subtract(cutWater,bridgeTabs,'Water'):cutWater;
 
  const empty=(id:TopoGroupId,kind:TopoGroupKind,reason:string):TopoExportGroup=>({id,operation:operationOf(id),kind,geometry:[],lines:[],glyphs:[],emptyReason:reason});
  const group=(id:TopoGroupId,kind:TopoGroupKind,parts:Partial<TopoExportGroup>):TopoExportGroup=>({id,operation:operationOf(id),kind,geometry:[],lines:[],glyphs:[],...parts});
  const layer=(k:number)=>terrain.layers.find(l=>l.index===k);
+ const roadsEmpty=project.roads.enabled?'No roads on this board.':'Roads are off.';
 
- const groups:TopoExportGroup[]=[
-  overlay.frame?group('cut/frame','pieces',{geometry:overlay.frame.geometry}):empty('cut/frame','pieces','The frame is off.'),
-  group('cut/terrain-1','pieces',{geometry:terrainOne}),
+ const frame=overlay.frame?group('cut/frame','pieces',{geometry:overlay.frame.geometry}):empty('cut/frame','pieces','The frame is off.');
+ const routeGroup=routeLines&&project.route?group('score/route','lines',{lines:[{lines:clipLinesToArea(routeLines,base),...(project.route.name?{label:project.route.name}:{})}],strokeWidthMm:project.route.widthMm}):empty('score/route','lines',project.route?'The route does not cross this board.':'No route is loaded.');
+ const labels=overlay.labels.visible&&overlay.labels.layer?.placed.length?group('engrave/labels','glyphs',{glyphs:overlay.labels.layer.placed.map(l=>({d:l.d,name:l.name}))}):empty('engrave/labels','glyphs','No labels are placed.');
+ const title=overlay.title?group('engrave/title','glyphs',{glyphs:[{d:overlay.title.d,name:overlay.title.text}]}):empty('engrave/title','glyphs','No title.');
+
+ let groups:TopoExportGroup[];
+ if(street){
+  const roadGeometry=roads?.geometry??[];
+  const engraveRoads=project.street.roads==='engrave';
+  const engravedWater=project.street.water==='engrave'&&water.length?(roadGeometry.length?subtract(water,roadGeometry,'Engraved water'):water):[];
+  const waterReason={engrave:'No water on this board.',cutout:'Water is cut out: its outline is the holes in cut/base.',none:'Water is left off.'}[project.street.water];
+  groups=[
+   frame,
+   group('cut/base','pieces',{geometry:base}),
+   !engraveRoads&&roadGeometry.length?group('cut/roads','openings',{geometry:roadGeometry}):empty('cut/roads','openings',engraveRoads?'Roads are engraved (engrave/roads).':roadsEmpty),
+   routeGroup,
+   engravedWater.length?group('engrave-light/water','areas',{geometry:engravedWater}):empty('engrave-light/water','areas',waterReason),
+   engraveRoads&&roadGeometry.length?group('engrave/roads','areas',{geometry:roadGeometry}):empty('engrave/roads','areas',engraveRoads?roadsEmpty:'Roads are cut out (cut/roads).'),
+   labels,
+   title,
+  ];
+ }else groups=[
+  frame,
+  group('cut/terrain-1','pieces',{geometry:base}),
   ...[2,3,4].map(k=>{const l=layer(k);return l?group(`cut/terrain-${k}` as TopoGroupId,'pieces',{geometry:l.geometry}):empty(`cut/terrain-${k}` as TopoGroupId,'pieces',`The board has ${terrain.layers.length} layer${terrain.layers.length===1?'':'s'}.`)}),
   openings.length?group('cut/water','openings',{geometry:openings}):empty('cut/water','openings','No water on this board.'),
-  roads&&roads.geometry.length?group('cut/roads','openings',{geometry:roads.geometry}):empty('cut/roads','openings',project.roads.enabled?'No roads on this board.':'Roads are off.'),
+  roads&&roads.geometry.length?group('cut/roads','openings',{geometry:roads.geometry}):empty('cut/roads','openings',roadsEmpty),
   terrain.contours.length?group('score/contours','lines',{lines:terrain.contours.map(level=>({lines:level.lines,label:`${Number(level.elevation.toFixed(2))} m`}))}):empty('score/contours','lines',project.terrain.contoursEnabled?'No contours on this board.':'Contours are off.'),
-  routeLines&&project.route?group('score/route','lines',{lines:[{lines:clipLinesToArea(routeLines,terrainOne),...(project.route.name?{label:project.route.name}:{})}],strokeWidthMm:project.route.widthMm}):empty('score/route','lines',project.route?'The route does not cross this board.':'No route is loaded.'),
-  overlay.labels.visible&&overlay.labels.layer?.placed.length?group('engrave/labels','glyphs',{glyphs:overlay.labels.layer.placed.map(l=>({d:l.d,name:l.name}))}):empty('engrave/labels','glyphs','No labels are placed.'),
-  overlay.title?group('engrave/title','glyphs',{glyphs:[{d:overlay.title.d,name:overlay.title.text}]}):empty('engrave/title','glyphs','No title.'),
+  routeGroup,
+  labels,
+  title,
   empty('engrave/compass','glyphs','The compass is not built yet.'),
  ];
  return {
-  widthMm:W,heightMm:H,groups,bridgeTabs,
+  style:project.style,
+  widthMm:W,heightMm:H,groups,waterOpenings:openings,bridgeTabs,
   ...(roads?{roads}:{}),...(route?{route}:{}),
   overlay,
   warnings:[...overlay.warnings,...(roads?.warnings??[]),...(route?.warnings??[])],

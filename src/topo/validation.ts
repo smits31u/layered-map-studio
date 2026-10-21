@@ -83,6 +83,11 @@ export function clampTopoProject(input:TopoProject):TopoProject{
    heightMm:round3(clampTo(p.output?.heightMm,TOPO_LIMITS.outputMm,d.output.heightMm)),
   },
   displayUnit:oneOf(p.displayUnit,['mm','in'] as const,d.displayUnit),
+  style:oneOf(p.style,['topo','street'] as const,d.style),
+  street:{
+   roads:oneOf(p.street?.roads,['engrave','cut'] as const,d.street.roads),
+   water:oneOf(p.street?.water,['engrave','cutout','none'] as const,d.street.water),
+  },
   terrain:{
    layerCount:oneOf(p.terrain?.layerCount,[1,2,3,4] as const,d.terrain.layerCount),
    coveragePercent:[100,Math.round(c2),Math.round(c3),Math.round(c4)],

@@ -19,6 +19,8 @@ export function createDefaultTopoProject():TopoProject{
   viewport:{center:[...DEFAULT_TOPO_CENTER],zoom:14,bearing:0,pitch:0},
   output:{widthMm:nineInches,heightMm:nineInches},
   displayUnit:'in',
+  style:'topo',
+  street:{roads:'engrave',water:'engrave'},
   terrain:{layerCount:1,coveragePercent:[100,50,25,12],contoursEnabled:true,contourCount:8},
   roads:{enabled:true,detail:'high',thicknessScale:1},
   labels:{enabled:true,poiEnabled:false,sizeMm:3},

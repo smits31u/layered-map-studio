@@ -3,7 +3,7 @@ import type {CapturedWater} from '../../ornament/capture/featureTypes';
 import {unionAll} from '../../ornament/geometry/polygonRepair';
 import type {WaterGeometryMetrics} from '../../ornament/geometry/waterGeometry';
 import {buildBoardWater} from '../features/water';
-import {buildTerrainBands,type TerrainBandOptions,type TerrainBandSettings,type TerrainBands} from './bands';
+import {buildFlatBands,buildTerrainBands,type TerrainBandOptions,type TerrainBandSettings,type TerrainBands} from './bands';
 import {buildMosaic,resampleToBoard,workingGridSpec} from './elevationGrid';
 import {TerrainError} from './errors';
 import {smoothGrid} from './smooth';
@@ -45,11 +45,15 @@ export interface TerrainSettings extends TerrainBandSettings{
  smoothingRadius:number;
  // Overrides the working grid's long side. Tests use it to stay fast; the app leaves it unset.
  gridLongSide?:number;
+ // A street map: no elevation at all. No tiles are planned, fetched or decoded; the result is the
+ // board minus the water as layer 1, with no further layers and no contours (buildFlatBands).
+ flat?:boolean;
 }
 
 export interface TerrainJob{
  view:FrozenTerrainView;
  // Terrarium PNG bytes keyed "z/x/y", for every tile in planTerrainTiles(view.bounds, view.zoom).
+ // Empty, and never read, when settings.flat is set.
  tiles:Record<string,Uint8Array>;
  // Water already in board millimetres. Tests pass polygons here directly.
  water:MultiPolygonMm;
@@ -78,8 +82,21 @@ export const terrainTilePlan=(view:FrozenTerrainView):TilePlan=>{
  catch(error){throw new TerrainError('invalid-view',(error as Error).message)}
 };
 
+function boardWater(job:TerrainJob,onStage?:(stage:TerrainStage)=>void):{water:MultiPolygonMm;waterMetrics?:WaterGeometryMetrics}{
+ if(!job.capturedWater?.length)return {water:job.water};
+ onStage?.('water');
+ const built=buildBoardWater(job.capturedWater,job.view,job.waterSimplifyToleranceMm);
+ return {water:job.water.length?unionAll([job.water,built.geometry],'Water'):built.geometry,waterMetrics:built.metrics};
+}
+
 export function generateTerrain(job:TerrainJob,onStage?:(stage:TerrainStage)=>void):TerrainResult{
  const {view,settings}=job;
+ if(settings.flat){
+  const {water,waterMetrics}=boardWater(job,onStage);
+  onStage?.('bands');
+  const bands=buildFlatBands(view.widthMm,view.heightMm,water);
+  return {...bands,view,settings,grid:{columns:0,rows:0,cellMm:0,tileZoom:0,tileCount:0},water,...(waterMetrics?{waterMetrics}:{})};
+ }
  const plan=terrainTilePlan(view);
  onStage?.('decode');
  const mosaic=buildMosaic(plan,job.tiles);
@@ -88,13 +105,7 @@ export function generateTerrain(job:TerrainJob,onStage?:(stage:TerrainStage)=>vo
  const grid=resampleToBoard(mosaic,view.bounds,view.widthMm,view.heightMm,spec);
  onStage?.('smooth');
  const smoothed={...grid,values:smoothGrid(grid.values,grid.columns,grid.rows,settings.smoothingRadius)};
- let water=job.water,waterMetrics:WaterGeometryMetrics|undefined;
- if(job.capturedWater?.length){
-  onStage?.('water');
-  const built=buildBoardWater(job.capturedWater,view,job.waterSimplifyToleranceMm);
-  water=job.water.length?unionAll([job.water,built.geometry],'Water'):built.geometry;
-  waterMetrics=built.metrics;
- }
+ const {water,waterMetrics}=boardWater(job,onStage);
  onStage?.(settings.contoursEnabled?'contours':'bands');
  const bands=buildTerrainBands(smoothed,water,settings,job.options);
  return {...bands,view,settings,grid:{columns:grid.columns,rows:grid.rows,cellMm:grid.cellMm,tileZoom:plan.z,tileCount:plan.tiles.length},water,...(waterMetrics?{waterMetrics}:{})};

@@ -6,7 +6,7 @@ import {MIN_ENGRAVABLE_WIDTH_MM} from '../../ornament/geometry/roadWidths';
 import {MIN_BRIDGE_TAB_WIDTH_MM} from '../features/bridges';
 import type {TerrainResult} from '../terrain/pipeline';
 import type {TopoProject} from '../types';
-import type {TopoBoard,TopoExportGroup,TopoGroupId} from './board';
+import {baseGroupId,type TopoBoard,type TopoExportGroup,type TopoGroupId} from './board';
 import {ELEVATION_PROVIDER_ID,type TopoExportMetadata} from './metadata';
 
 // Preflight for the topo board: the plan's Phase 4 list, every item of it, run on the groups exactly
@@ -116,12 +116,16 @@ export function runTopoPreflight(input:TopoPreflightInput):TopoPreflightReport{
   findings.push(finding('dimensions','error','board-size-changed',`The board is set to ${round(set.widthMm)} × ${round(set.heightMm)} mm, but the terrain was generated for ${round(W)} × ${round(H)} mm. Go back to the map and generate again at the new size.`));
  if(!(W>0&&H>0)||Math.abs(Number(W.toFixed(3))-W)>BOARD_TOLERANCE_MM||Math.abs(Number(H.toFixed(3))-H)>BOARD_TOLERANCE_MM)
   findings.push(finding('dimensions','error','document-size',`The document would not be ${round(W)} × ${round(H)} mm.`));
- const terrainOne=byId.get('cut/terrain-1')!,water=byId.get('cut/water')!;
- if(!poisoned.has('cut/terrain-1')&&!poisoned.has('cut/water')){
-  const covered=geometryAreaMm2(terrainOne.geometry)+geometryAreaMm2(water.geometry);
+ // The base material: cut/terrain-1 on a topo board, cut/base on a street map. Its water openings are
+ // cut/water on a topo board; a street map has no such group (its base's holes are the cut).
+ const street=board.style==='street';
+ const baseId=baseGroupId(board.style),terrainOne=byId.get(baseId)!;
+ const waterPoisoned=street?geometryHasNonFinite(board.waterOpenings):poisoned.has('cut/water');
+ if(!poisoned.has(baseId)&&!waterPoisoned){
+  const covered=geometryAreaMm2(terrainOne.geometry)+geometryAreaMm2(street?board.waterOpenings:byId.get('cut/water')!.geometry);
   // Land and water tile the board: their areas sum to the board's, to within 0.1 mm along its edge.
   if(Math.abs(covered-W*H)>BOARD_TOLERANCE_MM*2*(W+H))
-   findings.push(finding('dimensions','error','board-not-covered',`Layer 1 and the water cover ${round(covered)} mm², but the board is ${round(W*H)} mm² — more than 0.1 mm around its edge adrift. The cut would not be the board's size.`));
+   findings.push(finding('dimensions','error','board-not-covered',`${street?'The base':'Layer 1'} and the water cover ${round(covered)} mm², but the board is ${round(W*H)} mm² — more than 0.1 mm around its edge adrift. The cut would not be the board's size.`));
  }
  if(!terrainOne.geometry.length)findings.push(finding('dimensions','error','no-land','There is no land on this board, so there is nothing to cut. Move the map onto land and generate again.'));
  for(const group of board.groups){
@@ -163,7 +167,7 @@ export function runTopoPreflight(input:TopoPreflightInput):TopoPreflightReport{
  // built from). Every 0.25 mm along the part of the span over water, the distance to the nearest
  // edge of cut/terrain-1 is half the material's width there; the narrowest is the bridge's width.
  const spans=[...(board.roads?.bridgeSpans??[]).map(span=>({span,what:'road' as const})),...(board.route?.bridgeSpanLines??[]).map(span=>({span,what:'route' as const}))];
- if(spans.length&&!poisoned.has('cut/terrain-1')){
+ if(spans.length&&!poisoned.has(baseId)){
   const measured=guard(()=>spans.map(({span,what})=>({what,span,widthMm:measureSpanWidthMm(span.line,terrainOne.geometry)})),[],message=>findings.push(finding('minimum-width','error','tab-width-unmeasurable',`The bridges could not be measured on the exported geometry (${message}). An unmeasured bridge is not an acceptable bridge.`)));
   const severed=measured.filter(m=>m.widthMm<MIN_ENGRAVABLE_WIDTH_MM-TAB_WIDTH_MEASUREMENT_SLACK_MM);
   if(severed.length){
@@ -177,8 +181,8 @@ export function runTopoPreflight(input:TopoPreflightInput):TopoPreflightReport{
    findings.push(finding('minimum-width','warning','bridge-under-neck-minimum',`${fragile.length} bridge${fragile.length>1?'s measure':' measures'} under the ornament's ${MIN_BRIDGE_TAB_WIDTH_MM} mm minimum neck on the cut geometry (narrowest ${worst.widthMm.toFixed(2)} mm, longest span ${longest.toFixed(1)} mm). They cut, but may snap; raise ${fragile.some(m=>m.what==='route')?'Road thickness or Route width':'Road thickness'} to widen them, or test-cut the material.`));
   }
  }
- for(const k of [1,2,3,4]){
-  const group=byId.get(`cut/terrain-${k}` as TopoGroupId)!;
+ for(const id of street?['cut/base' as const]:[1,2,3,4].map(k=>`cut/terrain-${k}` as TopoGroupId)){
+  const group=byId.get(id)!;
   if(!group.geometry.length||poisoned.has(group.id))continue;
   const thin=guard(()=>thinFeatures(group.geometry,MIN_ENGRAVABLE_WIDTH_MM),{geometry:[],areaMm2:0,regions:0,minWidthMm:MIN_ENGRAVABLE_WIDTH_MM},()=>undefined);
   if(thin.regions)findings.push(finding('minimum-width','warning','terrain-sliver',`${group.id} has ${thin.regions} sliver${thin.regions>1?'s':''} narrower than ${MIN_ENGRAVABLE_WIDTH_MM} mm (${round(thin.areaMm2)} mm² in all), usually a thin spit of land or band. The laser cannot resolve them; they will burn away.`,firstPoint(thin.geometry)));
@@ -190,7 +194,9 @@ export function runTopoPreflight(input:TopoPreflightInput):TopoPreflightReport{
  if(!metadata.generatedAt||Number.isNaN(Date.parse(metadata.generatedAt)))missing.push('a generation timestamp');
  const basemap=metadata.providers.find(p=>p.role==='basemap'),elevation=metadata.providers.find(p=>p.role==='elevation'&&p.id===ELEVATION_PROVIDER_ID);
  if(!basemap?.attribution.includes('OpenStreetMap'))missing.push('the OpenStreetMap attribution');
- if(!elevation?.attribution.includes('Terrain Tiles')||!elevation.source)missing.push('the Terrain Tiles attribution and source');
+ // A street map uses no elevation, so it must not claim a source it did not use.
+ if(!street&&(!elevation?.attribution.includes('Terrain Tiles')||!elevation.source))missing.push('the Terrain Tiles attribution and source');
+ if(street&&elevation)findings.push(finding('attribution','error','elevation-not-used','The file names Terrain Tiles as a source, but a street map uses no elevation data.'));
  if(!metadata.viewport||!Number.isFinite(metadata.viewport.zoom))missing.push('the viewport');
  if(missing.length)findings.push(finding('attribution','error','metadata-missing',`The file would be missing ${missing.join(', ')}. Attribution travels with the file under the data licences, and the metadata is how a board is made again.`));
 

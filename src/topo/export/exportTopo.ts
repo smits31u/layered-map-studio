@@ -43,7 +43,7 @@ const size=(mm:number)=>String(Number(mm.toFixed(1)));
 export function topoFileNames(project:TopoProject,terrain:TerrainResult):{svg:string;project:string}{
  const [lng,lat]=terrain.view.center;
  const where=slug(project.viewport.selectedPlaceLabel??'')||`${Math.abs(lat).toFixed(4)}${lat<0?'s':'n'}-${Math.abs(lng).toFixed(4)}${lng<0?'w':'e'}`.replace(/\./g,'_');
- const stem=`topo-${where}-${size(terrain.view.widthMm)}x${size(terrain.view.heightMm)}mm`;
+ const stem=`${project.style==='street'?'street':'topo'}-${where}-${size(terrain.view.widthMm)}x${size(terrain.view.heightMm)}mm`;
  return {svg:`${stem}.svg`,project:`${stem}.json`};
 }
 

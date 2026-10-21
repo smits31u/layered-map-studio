@@ -775,6 +775,45 @@ coordinate within about 10⁻⁶ of a whole number the fraction stringifies in e
   measures the bridges; "Exporting…" shows while it runs. Moving it to the feature worker is a
   follow-up.
 
+## Street Map mode — built (2026-10-21, branch feat/street-map-mode)
+
+A flat rectangular street map from the topo builder: roads, water, labels, frame, title and the GPX
+route, with no terrain. It is a style of the topo project, not a fourth tool. Every stage it needs
+was already free of elevation: the capture, the road and water pipelines, labels, title, frame and
+route all read only the frozen view, the capture and the water.
+
+- **Model.** `project.style` is `'topo' | 'street'`. `project.street` is `{roads:'engrave'|'cut',
+  water:'engrave'|'cutout'|'none'}`, defaulting to engrave and engrave. schemaVersion stays 1: a
+  record saved before the mode loads as `'topo'`, because persistence merges over the defaults.
+- **No elevation.** In street mode `terrainSettingsOf` adds `flat:true`, so the style is part of the
+  regeneration key. The street options are not. With `flat`, the hook plans and fetches no tiles
+  (so the 64-tile cap and missing tiles cannot block it), and `generateTerrain` builds only the
+  water and `buildFlatBands`: layer 1 is the board minus the water, with no contours and no
+  elevation. Switching to topographic in edit mode reruns with a download, as a layer change would.
+- **Export groups** (`STREET_GROUP_ORDER`): `cut/frame`, `cut/base`, `cut/roads`, `score/route`,
+  `engrave-light/water`, `engrave/roads`, `engrave/labels`, `engrave/title`. Every group is always
+  emitted. `cut/base` is the board rectangle; in water-cutout mode it is the land plus bridge tabs,
+  as `cut/terrain-1` is. There is no `cut/water`: the topo board emits the shoreline twice (holes in
+  layer 1, and again as `cut/water`), and a laser cutting both cuts it twice. When water is not cut
+  out, roads are kept over it and no tabs are built. Engraved water has the roads subtracted, so a
+  bridge is not burned twice. Light engrave is grey `#777777` (the ornament's monochrome
+  engrave-light), because blue is the score colour and laser software groups layers by colour.
+- **Metadata and preflight.** A street file lists only the basemap provider and has no
+  `lms:terrain` block. Preflight's attribution check does not require Terrain Tiles for a street
+  map, and treats an elevation provider on one as an error. The land-and-water coverage check uses
+  `board.waterOpenings`, since there is no `cut/water` group to read.
+- **Estimate.** One base piece. `engrave/roads` and `engrave-light/water` are costed as engraved
+  area, not cut length. The product id stays `topo-map`, so the topo recipes and 3D colours apply.
+- **Topographic output is unchanged** apart from the project record in the metadata, which gained
+  `style` and `street`. The golden SVG hash was re-pinned for that; with those two fields removed
+  it matches the old pin byte for byte.
+- **Not done:** street-name labels (labels are still place names and POIs; the lake tool's
+  `geometry/scene/roadLabels.ts` is the starting point); a separate backing-board piece in the
+  estimate when roads are cut out; any check of the colours against xTool Studio.
+- **Tests:** `tests/unit/topoStreetMap.test.ts` (Golden Gate fixture, built with `tiles:{}`, every
+  road and water setting, metadata, estimate, settings), and `tests/unit/topoStreetMapUi.test.tsx`
+  (the page builds a street map with `fetch` failing on any call).
+
 ## Data attribution
 
 - **Basemap:** © OpenStreetMap contributors, via OpenFreeMap. This is shown in the map pane.

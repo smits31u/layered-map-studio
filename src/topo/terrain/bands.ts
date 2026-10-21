@@ -80,6 +80,20 @@ export function landArea(widthMm:number,heightMm:number,water:MultiPolygonMm):Mu
  return clip(ClipperLib.ClipType.ctDifference,board,orientedPaths(water),ClipperLib.PolyFillType.pftNonZero,'land','Terrain bands');
 }
 
+// A street map's board: layer 1 only, the board minus the water, with no elevation behind it. The
+// same shape buildTerrainBands returns, so the overlay, the board and preflight take either.
+export function buildFlatBands(widthMm:number,heightMm:number,water:MultiPolygonMm):TerrainBands{
+ const land=landArea(widthMm,heightMm,water),total=areaMm2(land);
+ const warnings:TerrainWarning[]=land.length?[]:[{code:'no-land',message:'There is no land inside the board, so there is nothing to put the streets on.'}];
+ return {
+  widthMm,heightMm,land,
+  layers:[{index:1,targetCoveragePercent:100,thresholdM:null,geometry:land,areaMm2:total,coveragePercent:total>0?100:0,vertexCount:vertexCount(land)}],
+  contours:[],
+  elevation:{minM:NaN,maxM:NaN,rangeM:0,landSamples:0},
+  warnings,
+ };
+}
+
 // The threshold with (at least) p of the sorted samples at or above it: the ⌈p·n⌉-th largest.
 export function quantileThreshold(sortedAscending:ArrayLike<number>,fraction:number):number{
  const n=sortedAscending.length;

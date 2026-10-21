@@ -305,4 +305,7 @@ describe('preflight: each check blocks on its own failure',()=>{
 });
 
 // Pinned from the first run of the golden above; a change here is a change in the exported file.
-const GOLDEN_SVG_SHA256='da137a7dbf34c6a3e7c42a9d026e98b09d43acb0638f132c218b937814203604';
+// Re-pinned for the Street Map mode: the project record in the metadata gained "style" and
+// "street". With those two fields removed the file hashes to the previous pin (da137a7d…) exactly,
+// so the geometry and every other byte are unchanged.
+const GOLDEN_SVG_SHA256='9f1c124d73322242b3a872909a45397fb5e4900266b6e6a42a86b0b050392cf4';

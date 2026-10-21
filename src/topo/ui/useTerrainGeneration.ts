@@ -66,20 +66,25 @@ export function useTerrainGeneration(deps:TerrainGenerationDeps={}){
   const mine=++token.current,isCurrent=()=>token.current===mine;
   const abort=new AbortController();
   active.current={abort};
-  setState(previous=>({status:'working',stage:'download',done:0,total:0,result:keepResult?previous.result:undefined}));
+  // A street map (settings.flat) has no elevation: no tile plan, no download, straight to the worker.
+  setState(previous=>({status:'working',stage:settings.flat?'water':'download',done:0,total:0,result:keepResult?previous.result:undefined}));
   try{
-   const plan=terrainTilePlan(view);
-   const key=plan.tiles.map(tileKey).join('|');
-   let tiles=tileCache.current?.key===key?tileCache.current.tiles:undefined;
-   if(!tiles){
-    tiles=await fetchTerrainTiles(plan,{fetchImpl:depsRef.current.fetchImpl,signal:abort.signal,onProgress:(done,total)=>{if(isCurrent())setState(s=>({...s,stage:'download',done,total}))}});
-    if(!isCurrent())return;
-    tileCache.current={key,tiles};
+   let tiles:Record<string,Uint8Array>|undefined;
+   if(settings.flat)tiles={};
+   else{
+    const plan=terrainTilePlan(view);
+    const key=plan.tiles.map(tileKey).join('|');
+    tiles=tileCache.current?.key===key?tileCache.current.tiles:undefined;
+    if(!tiles){
+     tiles=await fetchTerrainTiles(plan,{fetchImpl:depsRef.current.fetchImpl,signal:abort.signal,onProgress:(done,total)=>{if(isCurrent())setState(s=>({...s,stage:'download',done,total}))}});
+     if(!isCurrent())return;
+     tileCache.current={key,tiles};
+    }
    }
    runner.current??=(depsRef.current.createRunner??createTerrainRunner)();
    const handle=runner.current.run({view,tiles,water:[],...(water?.length?{capturedWater:water,waterSimplifyToleranceMm}:{}),settings},{onStage:stage=>{if(isCurrent())setState(s=>({...s,stage}))}});
    if(active.current)active.current.handle=handle;
-   setState(s=>({...s,stage:'decode'}));
+   setState(s=>({...s,stage:settings.flat?'water':'decode'}));
    const result=await handle.result;
    if(isCurrent()){active.current=null;setState({status:'ready',result})}
   }catch(error){

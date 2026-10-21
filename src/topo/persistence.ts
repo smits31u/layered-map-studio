@@ -51,6 +51,7 @@ function merge(base:TopoProject,patch:Partial<TopoProject>):TopoProject{
   schemaVersion:1,
   viewport:{...base.viewport,...patch.viewport,bearing:0,pitch:0},
   output:{...base.output,...patch.output},
+  street:{...base.street,...patch.street},
   terrain:{...base.terrain,...patch.terrain},
   roads:{...base.roads,...patch.roads},
   labels:{...base.labels,...patch.labels},

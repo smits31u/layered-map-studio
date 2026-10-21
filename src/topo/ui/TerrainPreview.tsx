@@ -42,8 +42,10 @@ const TerrainLayers=memo(function TerrainLayers({result,landClipId}:{result:Terr
  </>;
 });
 
-function OverlayLayers({overlay,landClipId}:{overlay:BoardOverlay;landClipId:string}){
- const clip=`url(#${landClipId})`;
+// clipToLand is false for a street map whose water is not cut out: its roads run on across the water,
+// as the export keeps them.
+function OverlayLayers({overlay,landClipId,clipToLand}:{overlay:BoardOverlay;landClipId:string;clipToLand:boolean}){
+ const clip=clipToLand?`url(#${landClipId})`:undefined;
  return <>
   {overlay.roads.visible&&overlay.roads.classes.length>0&&<g data-testid="board-roads" clipPath={clip} fill="none" stroke={ROAD_STROKE} strokeLinecap="round" strokeLinejoin="round">
    {overlay.roads.classes.map(group=><path key={group.roadClass} data-testid="board-road-class" data-road-class={group.roadClass} data-width-mm={group.widthMm.toFixed(3)} d={group.d} strokeWidth={group.widthMm}/>)}
@@ -69,11 +71,11 @@ function OverlayLayers({overlay,landClipId}:{overlay:BoardOverlay;landClipId:str
  </>;
 }
 
-export function TerrainPreview({result,overlay}:{result:TerrainResult;overlay?:BoardOverlay}){
+export function TerrainPreview({result,overlay,clipToLand=true}:{result:TerrainResult;overlay?:BoardOverlay;clipToLand?:boolean}){
  const {widthMm:w,heightMm:h}=result;
  const landClipId=`topo-land-${useId().replace(/:/g,'')}`;
  return <svg className="topo-terrain-preview" data-testid="terrain-preview" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label={`Terrain preview: ${result.layers.length} layer${result.layers.length===1?'':'s'}${result.contours.length?`, ${result.contours.length} contour elevations`:''}`}>
   <TerrainLayers result={result} landClipId={landClipId}/>
-  {overlay&&<OverlayLayers overlay={overlay} landClipId={landClipId}/>}
+  {overlay&&<OverlayLayers overlay={overlay} landClipId={landClipId} clipToLand={clipToLand}/>}
  </svg>;
 }

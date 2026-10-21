@@ -34,7 +34,10 @@ export interface TopoExportMetadata{
  viewport:{center:[number,number];zoom:number;bearing:0;pitch:0;place?:string;frameWidthPx:number;frameHeightPx:number;bounds:[number,number,number,number]};
  board:{widthMm:number;heightMm:number};
  providers:TopoProvider[];
- terrain:{tileZoom:number;tileCount:number;grid:string;smoothingRadius:number;elevationMinM:number;elevationMaxM:number;layers:{index:number;thresholdM:number|null;coveragePercent:number}[];contourElevationsM:number[]};
+ // Written by every export; optional only so a record built before the Street Map mode still reads.
+ style?:TopoProject['style'];
+ // Absent on a street map: no elevation was used, so there is no elevation provider and no terrain.
+ terrain?:{tileZoom:number;tileCount:number;grid:string;smoothingRadius:number;elevationMinM:number;elevationMaxM:number;layers:{index:number;thresholdM:number|null;coveragePercent:number}[];contourElevationsM:number[]};
  capture?:{takenAt:string;water:number;roads:number;duplicateRoads:number;labels:number};
  bridges:{spans:number;narrowestTabMm?:number};
  // The project, with a loaded route summarised rather than inlined: the route is already in the file
@@ -60,6 +63,7 @@ export function buildTopoMetadata(input:TopoMetadataInput):TopoExportMetadata{
  const {project,terrain,capture}=input;
  const view=terrain.view;
  const retrieved=capture?new Date(capture.capturedAt).toISOString():input.generatedAt.toISOString();
+ const street=project.style==='street';
  return {
   appVersion:input.appVersion??APP_VERSION,
   projectSchemaVersion:project.schemaVersion,
@@ -76,16 +80,17 @@ export function buildTopoMetadata(input:TopoMetadataInput):TopoExportMetadata{
   providers:[
    {id:OPENFREEMAP.id,role:'basemap',title:OPENFREEMAP.label,attribution:OPENFREEMAP.attribution,source:OPENFREEMAP.tileJsonUrl,retrievedAt:retrieved,
     quality:capture?'Water, roads and labels captured from the rendered vector tiles in the frozen view.':'No map features were captured for this board.'},
-   {id:ELEVATION_PROVIDER_ID,role:'elevation',title:'Terrain Tiles (Terrarium encoding)',attribution:'Terrain Tiles: Mapzen, hosted by the AWS Open Data Registry; sources include USGS, NOAA and others (github.com/tilezen/joerd/blob/master/docs/attribution.md)',source:DEFAULT_TERRAIN_TILES_URL,retrievedAt:retrieved,
-    quality:`Zoom ${terrain.grid.tileZoom}, ${terrain.grid.tileCount} tiles, resampled to ${terrain.grid.columns}×${terrain.grid.rows}. Terrarium includes bathymetry; water captured from the map is cut out of every layer. Not survey data.`},
+   ...(street?[]:[{id:ELEVATION_PROVIDER_ID,role:'elevation' as const,title:'Terrain Tiles (Terrarium encoding)',attribution:'Terrain Tiles: Mapzen, hosted by the AWS Open Data Registry; sources include USGS, NOAA and others (github.com/tilezen/joerd/blob/master/docs/attribution.md)',source:DEFAULT_TERRAIN_TILES_URL,retrievedAt:retrieved,
+    quality:`Zoom ${terrain.grid.tileZoom}, ${terrain.grid.tileCount} tiles, resampled to ${terrain.grid.columns}×${terrain.grid.rows}. Terrarium includes bathymetry; water captured from the map is cut out of every layer. Not survey data.`}]),
   ],
-  terrain:{
+  style:project.style,
+  ...(street?{}:{terrain:{
    tileZoom:terrain.grid.tileZoom,tileCount:terrain.grid.tileCount,grid:`${terrain.grid.columns}x${terrain.grid.rows}`,
    smoothingRadius:terrain.settings.smoothingRadius,
    elevationMinM:round(terrain.elevation.minM,2),elevationMaxM:round(terrain.elevation.maxM,2),
    layers:terrain.layers.map(layer=>({index:layer.index,thresholdM:layer.thresholdM===null?null:round(layer.thresholdM,2),coveragePercent:round(layer.coveragePercent,2)})),
    contourElevationsM:terrain.contours.map(level=>round(level.elevation,2)),
-  },
+  }}),
   ...(capture?{capture:{takenAt:new Date(capture.capturedAt).toISOString(),water:capture.features.water.length,roads:capture.features.roads.length,duplicateRoads:capture.features.counts.duplicateRoads,labels:capture.labels.length}}:{}),
   bridges:input.bridges,
   settings:{...project,route:project.route?{source:project.route.source,...(project.route.name?{name:project.route.name}:{}),pointCount:project.route.pointCount,widthMm:project.route.widthMm,segments:`${project.route.segments.length} segment(s), in the project JSON`}:null},
@@ -104,11 +109,12 @@ export function topoMetadataXml(metadata:TopoExportMetadata):string{
   element('project-schema',metadata.projectSchemaVersion),
   element('generated-at',metadata.generatedAt),
   `<lms:viewport${attrs({center:`${viewport.center[0]} ${viewport.center[1]}`,zoom:viewport.zoom,bearing:0,pitch:0,place:viewport.place,'frame-px':`${viewport.frameWidthPx} ${viewport.frameHeightPx}`,bounds:viewport.bounds.join(' ')})}/>`,
-  `<lms:board${attrs({'width-mm':board.widthMm,'height-mm':board.heightMm})}/>`,
+  // Only a street map says so: a topographic file stays byte for byte what it was before the mode.
+  `<lms:board${attrs({'width-mm':board.widthMm,'height-mm':board.heightMm,style:metadata.style==='street'?'street':undefined})}/>`,
   '<lms:providers>',
   ...metadata.providers.map(p=>`<lms:provider${attrs({id:p.id,role:p.role,title:p.title,source:p.source,'retrieved-at':p.retrievedAt,quality:p.quality})}>${escapeXml(p.attribution)}</lms:provider>`),
   '</lms:providers>',
-  `<lms:terrain${attrs({'tile-zoom':terrain.tileZoom,tiles:terrain.tileCount,grid:terrain.grid,smoothing:terrain.smoothingRadius,'elevation-min-m':terrain.elevationMinM,'elevation-max-m':terrain.elevationMaxM,contours:terrain.contourElevationsM.join(' ')})}>${terrain.layers.map(l=>`<lms:layer${attrs({index:l.index,'threshold-m':l.thresholdM===null?'all land':l.thresholdM,'coverage-percent':l.coveragePercent})}/>`).join('')}</lms:terrain>`,
+  !terrain?'':`<lms:terrain${attrs({'tile-zoom':terrain.tileZoom,tiles:terrain.tileCount,grid:terrain.grid,smoothing:terrain.smoothingRadius,'elevation-min-m':terrain.elevationMinM,'elevation-max-m':terrain.elevationMaxM,contours:terrain.contourElevationsM.join(' ')})}>${terrain.layers.map(l=>`<lms:layer${attrs({index:l.index,'threshold-m':l.thresholdM===null?'all land':l.thresholdM,'coverage-percent':l.coveragePercent})}/>`).join('')}</lms:terrain>`,
   capture?`<lms:capture${attrs({'taken-at':capture.takenAt,water:capture.water,roads:capture.roads,'duplicate-roads':capture.duplicateRoads,labels:capture.labels})}/>`:'',
   `<lms:bridges${attrs({spans:bridges.spans,'narrowest-tab-mm':bridges.narrowestTabMm})}/>`,
   // As the ornament does: `]]>` split defensively, so the project can never close the CDATA early.

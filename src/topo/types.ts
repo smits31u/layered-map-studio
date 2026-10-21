@@ -18,6 +18,8 @@ import type {FontId} from '../types/project';
 //   - route.source/name/pointCount — which GPX element the route came from (track → route →
 //     waypoint fallback), for the UI to say so.
 //   - title.fontId is the existing FontId union rather than `string`, per ADR 0002.
+//   - style/street — the Street Map mode, not in the plan. A record saved before it existed loads
+//     as 'topo' (persistence merges over the defaults), so schemaVersion stays 1.
 //
 // bearing and pitch are the literal type 0: the plan fixes them at 0 for the first release so that
 // screen-to-output projection is deterministic, and a literal type makes that a compile error.
@@ -27,6 +29,15 @@ export type TopoDetail='low'|'medium'|'high';
 export type TopoCompassPosition='top-left'|'top-right'|'bottom-left'|'bottom-right'|'off';
 export type TopoContourCount=3|5|8|12|18;
 export type TopoRouteSource='track'|'route'|'waypoints';
+// 'topo' layers the terrain; 'street' is a flat board — roads, water, labels, frame, title — built
+// without downloading any elevation (terrain/pipeline.ts, export/board.ts).
+export type TopoMapStyle='topo'|'street';
+// A street map's roads: engraved into the base (the default: Ben's boards engrave roads), or cut out
+// of it as openings, for a top sheet over a contrasting backing.
+export type StreetRoadOperation='engrave'|'cut';
+// A street map's water: engraved lightly on the base, cut out of it (bridge tabs kept, as on a topo
+// board), or left off the file.
+export type StreetWaterOperation='engrave'|'cutout'|'none';
 
 export interface TopoRoute{
  // [longitude, latitude] pairs, GeoJSON order like viewport.center. Every segment has ≥2 points.
@@ -42,6 +53,8 @@ export interface TopoProject{
  viewport:{center:[number,number];zoom:number;bearing:0;pitch:0;selectedPlaceLabel?:string};
  output:{widthMm:number;heightMm:number};
  displayUnit:TopoUnit;
+ style:TopoMapStyle;
+ street:{roads:StreetRoadOperation;water:StreetWaterOperation};
  terrain:{layerCount:1|2|3|4;coveragePercent:[100,number,number,number];contoursEnabled:boolean;contourCount:TopoContourCount};
  roads:{enabled:boolean;detail:TopoDetail;thicknessScale:number};
  // enabled: place names (towns, neighbourhoods). poiEnabled: points of interest (bus stops, shops,

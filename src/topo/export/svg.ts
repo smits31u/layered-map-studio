@@ -13,12 +13,18 @@ import {topoMetadataXml,type TopoExportMetadata} from './metadata';
 // Group ids are the fabrication contract; colours are a convenience on top of it, the ornament's
 // LightBurn convention (red cut, black engrave) plus blue for score lines. As CLAUDE.md records,
 // that convention is unverified against xTool Studio — the ids are what to rely on.
+//
+// A street map's light engrave (its water) is grey, the ornament's monochrome engrave-light colour:
+// blue is taken by score lines here, and laser software sorts layers by colour, so a light engrave
+// sharing it would land on the score layer.
 
 const STYLE:Record<TopoOperation,{fill:string;stroke:string}>={
  cut:{fill:'none',stroke:'#FF0000'},
  score:{fill:'none',stroke:'#0000FF'},
  engrave:{fill:'#000000',stroke:'none'},
+ 'engrave-light':{fill:'#777777',stroke:'none'},
 };
+const engraves=(operation:TopoOperation)=>operation==='engrave'||operation==='engrave-light';
 
 const linePath=(line:[number,number][])=>line.map(([x,y],i)=>`${i?'L':'M'}${n(x)} ${n(y)}`).join(' ');
 
@@ -43,7 +49,7 @@ function groupBody(group:TopoExportGroup):string{
 export function topoSvg(board:TopoBoard,metadata:TopoExportMetadata):string{
  const groups=board.groups.map(group=>{
   const style=STYLE[group.operation];
-  const strokeWidth=group.operation==='engrave'?undefined:group.strokeWidthMm??CUT_STROKE_MM;
+  const strokeWidth=engraves(group.operation)?undefined:group.strokeWidthMm??CUT_STROKE_MM;
   const body=groupBody(group);
   const attributes=[
    `id="${group.id}"`,
@@ -67,7 +73,7 @@ export function topoSvg(board:TopoBoard,metadata:TopoExportMetadata):string{
   ` width="${n(board.widthMm)}mm" height="${n(board.heightMm)}mm"`,
   ` viewBox="0 0 ${n(board.widthMm)} ${n(board.heightMm)}"`,
   ' data-units="mm" stroke-linejoin="round" stroke-linecap="round">',
-  `<title>Topographic map · ${escapeXml(place)} · ${n(board.widthMm)}×${n(board.heightMm)} mm</title>`,
+  `<title>${board.style==='street'?'Street map':'Topographic map'} · ${escapeXml(place)} · ${n(board.widthMm)}×${n(board.heightMm)} mm</title>`,
   topoMetadataXml(metadata),
   groups,
   '</svg>',

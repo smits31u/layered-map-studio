@@ -24,6 +24,10 @@ export type TopoAction=
  |{type:'setTerrain';patch:Partial<Omit<TopoProject['terrain'],'coveragePercent'>>&{coveragePercent?:readonly number[]}}
  // The board's vector features (Phase 3). None of these is in the terrain's regeneration key.
  |{type:'setRoads';patch:Partial<TopoProject['roads']>}
+ // Topographic or street map. The style is in the regeneration key (a street map needs no
+ // elevation); the street options below are not — they only change what the export emits.
+ |{type:'setStyle';value:TopoProject['style']}
+ |{type:'setStreet';patch:Partial<TopoProject['street']>}
  |{type:'setLabels';patch:Partial<TopoProject['labels']>}
  |{type:'setFrame';patch:Partial<TopoProject['frame']>}
  |{type:'setTitle';patch:Partial<TopoProject['title']>}
@@ -42,6 +46,8 @@ export function topoReducer(state:TopoProject,action:TopoAction):TopoProject{
   case 'clearRoute':return {...state,route:null};
   case 'setTerrain':return clampTopoProject({...state,terrain:{...state.terrain,...action.patch} as TopoProject['terrain']});
   case 'setRoads':return clampTopoProject({...state,roads:{...state.roads,...action.patch}});
+  case 'setStyle':return clampTopoProject({...state,style:action.value});
+  case 'setStreet':return clampTopoProject({...state,street:{...state.street,...action.patch}});
   case 'setLabels':return clampTopoProject({...state,labels:{...state.labels,...action.patch}});
   case 'setFrame':return clampTopoProject({...state,frame:{...state.frame,...action.patch}});
   case 'setTitle':return clampTopoProject({...state,title:{...state.title,...action.patch}});

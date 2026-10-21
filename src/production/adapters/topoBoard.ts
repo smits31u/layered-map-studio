@@ -20,16 +20,23 @@ import type {JobPiece,JobShape,ProductionJob} from '../job';
 //    would double that cut length.
 //
 // Layers 2-4 float on the base, so their stock is their own bounding box, not the whole board.
+//
+// A street map is one layer, cut/base, with everything else on it. Its engraved roads and lightly
+// engraved water are filled areas (kind 'areas') and are costed as engraving, not as cut length. It
+// keeps the topo product id, so the topo recipes and 3D colours apply to it.
 
 export const TOPO_PRODUCT='topo-map';
 const BANDS:TopoGroupId[]=['cut/terrain-1','cut/terrain-2','cut/terrain-3','cut/terrain-4'];
+const STREET_BANDS:TopoGroupId[]=['cut/base'];
 // Counted on layer 1 (see above), in the file's group order.
 const ON_BASE:TopoGroupId[]=['cut/roads','score/contours','score/route','engrave/labels','engrave/title','engrave/compass'];
+const STREET_ON_BASE:TopoGroupId[]=['cut/roads','score/route','engrave-light/water','engrave/roads','engrave/labels','engrave/title'];
 
 const outlineShapes=(group:TopoExportGroup):JobShape[]=>group.geometry.map((polygon,i)=>({id:`${group.id}#${i}`,d:polygonPathData(polygon),operation:'cut',outline:true}));
 
 function groupShapes(group:TopoExportGroup):JobShape[]{
  if(group.operation==='cut')return group.geometry.map((polygon,i)=>({id:`${group.id}#${i}`,d:polygonPathData(polygon),operation:'cut'}));
+ if(group.kind==='areas')return group.geometry.map((polygon,i)=>({id:`${group.id}#${i}`,d:polygonPathData(polygon),operation:'engrave'}));
  if(group.operation==='score')return group.lines.map((score,i)=>({id:`${group.id}#${i}`,d:scorePathData(score),operation:'score' as const,...(group.strokeWidthMm?{strokeWidthMm:group.strokeWidthMm}:{})})).filter(s=>s.d);
  return group.glyphs.filter(g=>g.d).map((glyph,i)=>({id:`${group.id}#${i}`,d:glyph.d,operation:'engrave'}));
 }
@@ -44,11 +51,12 @@ function bounds(group:TopoExportGroup):{widthMm:number;heightMm:number}{
 export function topoBoardToJob(board:TopoBoard):ProductionJob{
  const group=(id:TopoGroupId)=>board.groups.find(g=>g.id===id);
  const layers:JobPiece[]=[];
- BANDS.forEach((id,index)=>{
+ const street=board.style==='street';
+ (street?STREET_BANDS:BANDS).forEach((id,index)=>{
   const g=group(id);
   if(!g||!g.geometry.length)return;
   const base=index===0;
-  const shapes=[...outlineShapes(g),...(base?ON_BASE.flatMap(other=>{const o=group(other);return o?groupShapes(o):[]}):[])];
+  const shapes=[...outlineShapes(g),...(base?(street?STREET_ON_BASE:ON_BASE).flatMap(other=>{const o=group(other);return o?groupShapes(o):[]}):[])];
   const size=base?{widthMm:board.widthMm,heightMm:board.heightMm}:bounds(g);
   layers.push({id:`terrain-${index+1}`,name:base?'Layer 1 (base)':`Layer ${index+1}`,role:'layer',...size,shapes});
  });
