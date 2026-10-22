@@ -1,12 +1,19 @@
 import {useId,useRef,useState} from 'react';
 import {GeocodeError,ProxyGeocoder,type GeocodeSearchResponse} from '../../map/geocoding/GeocoderService';
-import type {GeocodeCandidate,GeocodeProviderId,GeocodeProviderInfo} from '../../server/geocode/types';
+import type {GeocodeCandidate,GeocodeFilter,GeocodeProviderId,GeocodeProviderInfo} from '../../server/geocode/types';
 
 type Props={
  selectedLabel?:string;
  onSelect:(candidate:GeocodeCandidate,fitBounds:boolean)=>void;
  // The prompt shown before any search. Defaults to the ornament's wording; the topo builder passes its own.
  hint?:string;
+ // The golf starter searches for courses only, and starts on Photon (docs/GOLF_MODULE_PLAN.md §2.1);
+ // every other caller leaves both unset and gets exactly the old behaviour. Providers that cannot
+ // apply the filter are left out of the chooser rather than offered and refused.
+ filter?:GeocodeFilter;
+ defaultProvider?:GeocodeProviderId;
+ label?:string;
+ placeholder?:string;
 };
 
 // Place search.
@@ -20,11 +27,13 @@ type Props={
 // knowingly if they are told who they are about to ask.
 
 const DEFAULT_PROVIDER:GeocodeProviderId='nominatim';
+// What the chooser says before the first answer lists the providers.
+const PROVIDER_LABELS:Record<GeocodeProviderId,string>={nominatim:'Nominatim (OpenStreetMap)',photon:'Photon (Komoot)',census:'US Census Bureau'};
 
-export function PlaceSearch({selectedLabel,onSelect,hint='Search for the place this ornament is of.'}:Props){
+export function PlaceSearch({selectedLabel,onSelect,hint='Search for the place this ornament is of.',filter,defaultProvider=DEFAULT_PROVIDER,label='Place or address',placeholder='Crivitz, Wisconsin'}:Props){
  const inputId=useId();
  const [query,setQuery]=useState('');
- const [provider,setProvider]=useState<GeocodeProviderId>(DEFAULT_PROVIDER);
+ const [provider,setProvider]=useState<GeocodeProviderId>(defaultProvider);
  const [response,setResponse]=useState<GeocodeSearchResponse|undefined>(undefined);
  const [providers,setProviders]=useState<GeocodeProviderInfo[]>([]);
  const [error,setError]=useState('');
@@ -42,10 +51,10 @@ export function PlaceSearch({selectedLabel,onSelect,hint='Search for the place t
   inFlight.current=controller;
   setSearching(true);setError('');
   try{
-   const result=await new ProxyGeocoder(withProvider).searchDetailed(trimmed,controller.signal);
+   const result=await new ProxyGeocoder(withProvider,undefined,undefined,filter).searchDetailed(trimmed,controller.signal);
    if(controller.signal.aborted)return;
    setResponse(result);
-   setProviders(result.providers);
+   setProviders(filter?result.providers.filter(entry=>entry.filters?.includes(filter)):result.providers);
    if(!result.results.length)setError(`No matches from ${describe(result.providers,withProvider)}.`);
   }catch(reason){
    if((reason as Error).name==='AbortError')return;
@@ -61,13 +70,13 @@ export function PlaceSearch({selectedLabel,onSelect,hint='Search for the place t
  return <div className="ornament-search">
   <form onSubmit={event=>{event.preventDefault();void run(provider,query)}}>
    <div className="ornament-field">
-    <label htmlFor={inputId}>Place or address</label>
-    <input id={inputId} type="search" value={query} placeholder="Crivitz, Wisconsin" autoComplete="off" onChange={event=>setQuery(event.target.value)}/>
+    <label htmlFor={inputId}>{label}</label>
+    <input id={inputId} type="search" value={query} placeholder={placeholder} autoComplete="off" onChange={event=>setQuery(event.target.value)}/>
    </div>
    <div className="ornament-field">
     <label htmlFor={`${inputId}-provider`}>Search with</label>
     <select id={`${inputId}-provider`} value={provider} onChange={event=>setProvider(event.target.value as GeocodeProviderId)}>
-     {(providers.length?providers:[{id:DEFAULT_PROVIDER,label:'Nominatim (OpenStreetMap)',attribution:'',note:''}]).map(entry=>
+     {(providers.length?providers:[{id:defaultProvider,label:PROVIDER_LABELS[defaultProvider],attribution:'',note:''}]).map(entry=>
       <option key={entry.id} value={entry.id}>{entry.label}</option>)}
     </select>
    </div>

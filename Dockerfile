@@ -19,8 +19,8 @@ COPY --from=build /app/dist-server ./server
 # The terrain tile cache (ADR 0004). Created here, owned by the unprivileged user the server runs
 # as, because /app is root-owned. docker-compose mounts a named volume at this path; Docker seeds a
 # new named volume from the image directory, ownership included, so the volume starts writable.
-ENV TERRAIN_CACHE_DIR=/app/cache/terrain
-RUN mkdir -p /app/cache/terrain && chown -R node:node /app/cache
+ENV TERRAIN_CACHE_DIR=/app/cache/terrain GOLF_CACHE_DIR=/app/cache/golf
+RUN mkdir -p /app/cache/terrain /app/cache/golf && chown -R node:node /app/cache
 USER node
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -qO- http://127.0.0.1:8080/health || exit 1

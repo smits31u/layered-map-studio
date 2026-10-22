@@ -3,6 +3,9 @@ import {defineConfig} from 'vitest/config';
 import type {PluginOption} from 'vite';
 import {createGeocodeHandler} from './src/server/geocode/handler';
 import {GEOCODE_PATH,serveGeocode} from './src/server/geocode/httpRoute';
+import {createGolfSnapshotHandler} from './src/server/golf/handler';
+import {serveGolf} from './src/server/golf/httpRoute';
+import {createDiskSnapshotCache} from './src/server/golf/snapshotCache';
 import {createTerrainTileHandler} from './src/server/terrain/handler';
 import {serveTerrainTile} from './src/server/terrain/httpRoute';
 import {createDiskTileCache} from './src/server/terrain/tileCache';
@@ -37,13 +40,28 @@ const terrainApi=():PluginOption=>{
  };
 };
 
+// The golf starter's course snapshot route, mounted the same way and created on first request for
+// the same reason. Dev caches courses under .cache/golf (git-ignored).
+const golfApi=():PluginOption=>{
+ let handler:ReturnType<typeof createGolfSnapshotHandler>|undefined;
+ const serve=(request:{url?:string;originalUrl?:string;method?:string},response:Parameters<typeof serveGolf>[1])=>{
+  handler??=createGolfSnapshotHandler({cache:createDiskSnapshotCache(process.env.GOLF_CACHE_DIR??'.cache/golf')});
+  void serveGolf(request,response,handler);
+ };
+ return {
+  name:'layered-map-studio:golf-api',
+  configureServer(server){server.middlewares.use('/api/golf',(request,response)=>serve(request as {url?:string;originalUrl?:string;method?:string},response))},
+  configurePreviewServer(server){server.middlewares.use('/api/golf',(request,response)=>serve(request as {url?:string;originalUrl?:string;method?:string},response))},
+ };
+};
+
 // The app version reaches the bundle as a define rather than as an import of package.json: an
 // exported cut file records which build produced it, and that string should not drag the whole
 // manifest (dependency versions, scripts) into the client bundle to get there.
 const pkg=JSON.parse(readFileSync(new URL('./package.json',import.meta.url),'utf8')) as {version:string};
 
 export default defineConfig({
- plugins:[geocodeApi(),terrainApi()],
+ plugins:[geocodeApi(),terrainApi(),golfApi()],
  define:{__APP_VERSION__:JSON.stringify(pkg.version)},
  test:{environment:'jsdom',include:['tests/**/*.test.ts','tests/**/*.test.tsx'],setupFiles:['tests/setup.ts']},
 });

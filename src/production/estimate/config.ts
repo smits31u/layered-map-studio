@@ -49,7 +49,7 @@ export type RecipeSlot={kind:'layer'|'border';materialId:string;count:number;upT
 export type LayerRecipe={id:string;label:string;widthIn:number;heightIn:number;slots:RecipeSlot[];frameCost:number|null;machineId?:string;products?:string[]};
 
 // The products a recipe can be limited to, as the tools name their jobs.
-export const PRODUCTS:Record<string,string>={'lake-map':'Lake maps','topo-map':'Topo maps'};
+export const PRODUCTS:Record<string,string>={'lake-map':'Lake maps','topo-map':'Topo maps','golf-map':'Golf course maps'};
 
 // designHours is the default for a job with no design timer running.
 export type Rates={designPerHour:number;designHours:number;suppliesPct:number};

@@ -20,7 +20,7 @@ export async function serveGeocode(request:HttpRequestLike,response:HttpResponse
  }
  // A base is required to parse a server-side request URL, which is path-only. It is discarded.
  const url=new URL(request.url??GEOCODE_PATH,'http://localhost');
- const outcome=await handler({q:url.searchParams.get('q'),provider:url.searchParams.get('provider')});
+ const outcome=await handler({q:url.searchParams.get('q'),provider:url.searchParams.get('provider'),filter:url.searchParams.get('filter')});
  response.statusCode=outcome.status;
  response.setHeader('Content-Type','application/json; charset=utf-8');
  // The proxy already caches server-side, where the entry is shared and expires on a schedule the

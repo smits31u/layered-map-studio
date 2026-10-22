@@ -1,0 +1,27 @@
+/* Golf starter styles. Imported by GolfPage.tsx only. Layout and controls come from the design
+   system (styles/studio.css, tokens.css); this adds only what the golf page has that others do not. */
+.golf-segmented{display:flex;gap:6px;margin:7px 0}.golf-segmented button{flex:1 1 auto;padding:5px 9px;font-size:var(--lms-text-xs)}
+.golf-dimension{display:flex;align-items:center;gap:6px}.golf-dimension input{width:92px}
+.golf-inline{display:flex;gap:6px}.golf-inline input{flex:1 1 auto;min-width:0}
+.golf-course-status{display:grid;gap:4px;margin-top:8px;padding:8px;border:1px solid var(--lms-line);border-radius:var(--lms-radius-sm);background:var(--lms-surface-sunken)}
+.golf-coverage{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:3px 10px;font-size:var(--lms-text-xs)}
+.golf-coverage li.missing{color:var(--lms-ink-muted)}.golf-coverage b{float:right;font-variant-numeric:tabular-nums}
+.golf-finding{margin:6px 0 0;padding:6px 8px;font-size:var(--lms-text-xs);border-radius:var(--lms-radius-sm);border:1px solid var(--lms-info-line);background:var(--lms-info-bg);color:var(--lms-info-ink)}
+.golf-finding.blocking{border-color:var(--lms-error-line);background:var(--lms-error-bg);color:var(--lms-error-ink)}
+.golf-finding.soft{border-color:var(--lms-warning-line);background:var(--lms-warning-bg);color:var(--lms-warning-ink)}
+.golf-fields{display:grid;gap:4px}.golf-field input[type=text]{width:100%}
+.golf-note,.golf-empty{font-size:var(--lms-text-sm);color:var(--lms-ink-muted)}
+.golf-empty{margin:auto;padding:32px;text-align:center;max-width:42ch}
+.golf-reset{width:100%;margin-top:14px}
+.golf-progress{font-size:var(--lms-text-xs);color:var(--lms-warning-ink)}
+.golf-attribution{margin-left:auto;font-size:var(--lms-text-2xs);color:var(--lms-chrome-ink-muted)}
+.golf-edit{position:relative;min-height:0;display:grid;grid-template-rows:auto auto 1fr auto;gap:8px;padding:12px;background:var(--lms-artboard);overflow:auto}
+.golf-banner{margin:0;padding:7px 10px;font-size:var(--lms-text-xs);border-radius:var(--lms-radius-sm);border:1px solid var(--lms-info-line);background:var(--lms-info-bg);color:var(--lms-info-ink)}
+.golf-banner.warning{border-color:var(--lms-warning-line);background:var(--lms-warning-bg);color:var(--lms-warning-ink)}
+.golf-banner.error{border-color:var(--lms-error-line);background:var(--lms-error-bg);color:var(--lms-error-ink)}
+.golf-preview-frame{min-height:0;display:grid;place-items:center}.golf-preview-frame.busy{opacity:.55}
+.golf-board-preview{width:100%;height:100%;max-height:calc(100vh - 190px);box-shadow:var(--lms-shadow-1)}
+.golf-preview-3d{min-height:540px;height:calc(100vh - 230px)}
+.golf-stats{display:flex;flex-wrap:wrap;gap:4px 16px;margin:0;font-size:var(--lms-text-2xs);color:var(--lms-ink-muted)}.golf-stats div{display:flex;gap:5px}.golf-stats dt{color:var(--lms-ink)}.golf-stats dd{margin:0}
+.golf-export{display:grid;gap:6px;margin-top:14px}.golf-export button{width:100%}
+.golf-preflight{margin:0;padding-left:16px;font-size:var(--lms-text-xs);display:grid;gap:4px}.golf-preflight li.error{color:var(--lms-error-ink)}.golf-preflight li.warning{color:var(--lms-warning-ink)}

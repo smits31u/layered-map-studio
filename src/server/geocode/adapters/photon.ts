@@ -1,4 +1,4 @@
-import type {GeocodeCandidate,ProviderAdapter} from '../types';
+import type {GeocodeCandidate,GeocodeOsmRef,ProviderAdapter} from '../types';
 
 // Komoot's Photon: OSM data, better at partial and misspelt place names than Nominatim, worse at
 // exact street addresses. It is offered as an explicit alternative the user can pick, never as an
@@ -18,6 +18,15 @@ const label=(properties:Record<string,unknown>):string=>{
  return unique.join(', ');
 };
 
+// Photon names the element N, W or R. The golf filter is Photon's own `osm_tag=key:value` query
+// parameter; `osm_key`/`osm_value` are the matching response fields, checked again on the way back so
+// a self-hosted instance that ignores the parameter still cannot hand the golf starter a town.
+const OSM_TYPES:Record<string,GeocodeOsmRef['type']>={N:'node',W:'way',R:'relation'};
+const osmRef=(properties:Record<string,unknown>):GeocodeOsmRef|undefined=>{
+ const type=OSM_TYPES[String(properties.osm_type??'')],id=Number(properties.osm_id);
+ return type&&Number.isSafeInteger(id)&&id>0?{type,id}:undefined;
+};
+
 export function createPhotonAdapter(endpoint:string='https://photon.komoot.io'):ProviderAdapter{
  return {
   id:'photon',
@@ -26,9 +35,10 @@ export function createPhotonAdapter(endpoint:string='https://photon.komoot.io'):
   note:'Forgiving place-name search. Weaker on exact street addresses.',
   minIntervalMs:250,
   endpoint,
-  buildUrl:(query,limit)=>`${endpoint.replace(/\/+$/,'')}/api/?q=${encodeURIComponent(query)}&limit=${limit}`,
+  filters:['golf-course'],
+  buildUrl:(query,limit,filter)=>`${endpoint.replace(/\/+$/,'')}/api/?q=${encodeURIComponent(query)}&limit=${limit}${filter==='golf-course'?'&osm_tag=leisure:golf_course':''}`,
   headers:userAgent=>({'User-Agent':userAgent,Accept:'application/json'}),
-  parse(body,limit){
+  parse(body,limit,filter){
    const features=(body as {features?:unknown})?.features;
    if(!Array.isArray(features))throw new Error('Photon returned a response with no feature list.');
    const results:GeocodeCandidate[]=[];
@@ -41,6 +51,7 @@ export function createPhotonAdapter(endpoint:string='https://photon.komoot.io'):
     const lon=Number(coordinates[0]),lat=Number(coordinates[1]);
     if(!Number.isFinite(lon)||!Number.isFinite(lat))continue;
     const properties=(feature.properties??{}) as Record<string,unknown>;
+    if(filter==='golf-course'&&(properties.osm_key!=='leisure'||properties.osm_value!=='golf_course'))continue;
     // Photon's `extent` is [west, north, east, south] — north and south are the other way round
     // from the [west, south, east, north] convention used everywhere else here.
     const extent=Array.isArray(properties.extent)?properties.extent.map(Number):undefined;
@@ -56,6 +67,7 @@ export function createPhotonAdapter(endpoint:string='https://photon.komoot.io'):
      provider:'photon',
      attribution:ATTRIBUTION,
      kind:typeof properties.osm_value==='string'?properties.osm_value:typeof properties.type==='string'?properties.type:undefined,
+     ...(osmRef(properties)?{osm:osmRef(properties)}:{}),
     });
     if(results.length>=limit)break;
    }
