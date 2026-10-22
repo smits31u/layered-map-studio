@@ -11,7 +11,11 @@ services:
       # cached tiles survive `docker compose build` and container recreation. Public, immutable
       # elevation data only; safe to delete (`docker volume rm`) at any time — tiles refetch.
       - terrain-cache:/app/cache/terrain
+      # Golf course snapshots from Overpass (docs/GOLF_MODULE_PLAN.md §2.3). Public OSM data; a named
+      # volume so cached courses survive a rebuild. Safe to delete: courses refetch on next open.
+      - golf-cache:/app/cache/golf
     restart: unless-stopped
 
 volumes:
   terrain-cache:
+  golf-cache:

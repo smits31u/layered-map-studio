@@ -1,5 +1,6 @@
 import {mkdir,readFile,readdir,rename,rm,stat,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import {createSerialLock} from '../serialLock';
 import {tileKey,type TileCoord} from './tilePath';
 
 // Tile caches for the terrain proxy.
@@ -47,12 +48,7 @@ export function createDiskTileCache(directory:string,options:DiskTileCacheOption
  // on this cache instance can't race (e.g. two calls both seeing `index` undefined and both
  // rebuilding it, or two evictions mis-accounting `total` against each other). `get()` stays
  // lock-free: it only ever reads a file that a prior write already renamed atomically into place.
- let lockTail:Promise<void>=Promise.resolve();
- const withLock=<T>(fn:()=>Promise<T>):Promise<T>=>{
-  const result=lockTail.then(fn,fn);
-  lockTail=result.then(()=>undefined,()=>undefined);
-  return result;
- };
+ const withLock=createSerialLock();
 
  const buildIndex=async()=>{
   index=new Map();total=0;

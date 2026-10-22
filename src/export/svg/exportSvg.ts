@@ -1,6 +1,6 @@
-import {strToU8,zipSync} from 'fflate';
 import {assertManufacturingSceneUsable,layerExportShapes,type ManufacturingScene,type Shape} from '../scene';
 import type {ExportLayout} from '../../types/project';
+import {deterministicZip} from '../zip';
 const n=(v:number)=>Number(v.toFixed(3));
 export function layoutDimensions(scene:ManufacturingScene,layout:ExportLayout,gap:number){assertManufacturingSceneUsable(scene);return layout==='production'?{width:scene.layers.length*scene.widthMm+Math.max(0,scene.layers.length-1)*gap,height:scene.heightMm}:{width:scene.widthMm,height:scene.heightMm}}
 const shapeXml=(s:Shape)=>s.kind==='rect'?`<rect id="${s.id}" x="${s.x}" y="${s.y}" width="${s.width}" height="${s.height}"${s.transform?` transform="${s.transform}"`:''}/>`:`<path id="${s.id}" d="${s.d}" fill-rule="evenodd"${s.strokeWidthMm?` stroke-width="${s.strokeWidthMm}"`:''}${s.transform?` transform="${s.transform}"`:''}/>`;
@@ -23,16 +23,12 @@ export function individualSvgs(scene:ManufacturingScene){return Object.fromEntri
 // Name follows the same `layered-map-<layout>` convention App.tsx uses for single-file exports,
 // plus physical size so packages for differently-sized projects never collide in a downloads folder.
 export const individualZipName=(scene:ManufacturingScene)=>`layered-map-individual-${n(scene.widthMm)}x${n(scene.heightMm)}mm.zip`;
-// ZIP timestamps are pinned instead of defaulting to "now" so the same scene always produces
-// byte-identical archive bytes — a re-export can be diffed against the one that went to the cutter.
-// Built from local-time components on purpose: the ZIP header stores local time with no zone, and
-// fflate reads it back the same way, so a fixed UTC instant would encode differently per timezone
-// (and a UTC 1980-01-01 lands in 1979 west of Greenwich, outside the format's range entirely).
-const ZIP_MTIME=new Date(2000,0,1,12,0,0);
+// The archive's timestamps are pinned (src/export/zip.ts), so an unchanged scene re-exports to
+// byte-identical bytes.
 // `extra` adds text files beside the panels (the estimate summary); a name that collides with a
 // panel file is refused rather than allowed to replace a cut file.
 export function individualSvgsZip(scene:ManufacturingScene,extra:Record<string,string>={}):Uint8Array{
  const svgs=individualSvgs(scene);
  for(const name of Object.keys(extra))if(name in svgs)throw new Error(`${name} would replace a panel file in the ZIP.`);
- return zipSync(Object.fromEntries([...Object.entries(svgs),...Object.entries(extra)].map(([name,text])=>[name,strToU8(text)])),{level:6,mtime:ZIP_MTIME});
+ return deterministicZip([...Object.entries(svgs),...Object.entries(extra)]);
 }

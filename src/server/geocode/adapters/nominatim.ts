@@ -1,4 +1,4 @@
-import type {GeocodeCandidate,ProviderAdapter} from '../types';
+import type {GeocodeCandidate,GeocodeOsmRef,ProviderAdapter} from '../types';
 
 // OpenStreetMap's public Nominatim.
 //
@@ -17,6 +17,13 @@ const num=(value:unknown):number|undefined=>{
  return Number.isFinite(n)?n:undefined;
 };
 
+// Nominatim's free-text search has no class/type parameter, so the golf filter is applied to the
+// answer (jsonv2's `category`/`type`), and the upstream request asks for more rows than will be shown
+// so that a course ranked below a few same-named roads or towns still comes back. 40 is Nominatim's
+// own maximum for `limit`.
+export const FILTERED_UPSTREAM_LIMIT=40;
+const OSM_TYPES=new Set<GeocodeOsmRef['type']>(['node','way','relation']);
+
 export const ATTRIBUTION='© OpenStreetMap contributors — geocoding by Nominatim';
 
 export function createNominatimAdapter(endpoint:string='https://nominatim.openstreetmap.org'):ProviderAdapter{
@@ -27,14 +34,16 @@ export function createNominatimAdapter(endpoint:string='https://nominatim.openst
   note:'Addresses and places worldwide. Rate limited to one request per second.',
   minIntervalMs:1000,
   endpoint,
-  buildUrl:(query,limit)=>`${endpoint.replace(/\/+$/,'')}/search?q=${encodeURIComponent(query)}&format=jsonv2&addressdetails=0&limit=${limit}`,
+  filters:['golf-course'],
+  buildUrl:(query,limit,filter)=>`${endpoint.replace(/\/+$/,'')}/search?q=${encodeURIComponent(query)}&format=jsonv2&addressdetails=0&limit=${filter?FILTERED_UPSTREAM_LIMIT:limit}`,
   headers:userAgent=>({'User-Agent':userAgent,Accept:'application/json','Accept-Language':'en'}),
-  parse(body,limit){
+  parse(body,limit,filter){
    if(!Array.isArray(body))throw new Error('Nominatim returned a response that was not a result list.');
    const results:GeocodeCandidate[]=[];
    for(const raw of body){
     if(!raw||typeof raw!=='object')continue;
     const row=raw as Record<string,unknown>;
+    if(filter==='golf-course'&&(row.category!=='leisure'||row.type!=='golf_course'))continue;
     const lon=num(row.lon),lat=num(row.lat);
     if(lon===undefined||lat===undefined)continue;
     // Nominatim's boundingbox is [south, north, west, east] as strings; every other consumer here
@@ -51,10 +60,16 @@ export function createNominatimAdapter(endpoint:string='https://nominatim.openst
      provider:'nominatim',
      attribution:ATTRIBUTION,
      kind:typeof row.type==='string'?row.type:undefined,
+     ...(osmOf(row)?{osm:osmOf(row)}:{}),
     });
     if(results.length>=limit)break;
    }
    return results;
   },
  };
+}
+
+function osmOf(row:Record<string,unknown>):GeocodeOsmRef|undefined{
+ const type=row.osm_type as GeocodeOsmRef['type'],id=num(row.osm_id);
+ return OSM_TYPES.has(type)&&id!==undefined&&Number.isSafeInteger(id)&&id>0?{type,id}:undefined;
 }

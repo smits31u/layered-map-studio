@@ -1,6 +1,6 @@
-import type {GeocodeCandidate,GeocodeProviderId,GeocodeProviderInfo} from '../../server/geocode/types';
+import type {GeocodeCandidate,GeocodeFilter,GeocodeProviderId,GeocodeProviderInfo} from '../../server/geocode/types';
 
-export type {GeocodeCandidate,GeocodeProviderId,GeocodeProviderInfo};
+export type {GeocodeCandidate,GeocodeFilter,GeocodeProviderId,GeocodeProviderInfo};
 
 // Browser-side geocoding. Every provider now sits behind the localhost proxy at `/api/geocode`.
 //
@@ -48,12 +48,12 @@ export class GeocodeError extends Error{
 }
 
 export class ProxyGeocoder implements GeocoderService{
- constructor(private provider?:GeocodeProviderId,private endpoint:string=GEOCODE_ENDPOINT,private fetchImpl:typeof fetch=(...args)=>fetch(...args)){}
+ constructor(private provider?:GeocodeProviderId,private endpoint:string=GEOCODE_ENDPOINT,private fetchImpl:typeof fetch=(...args)=>fetch(...args),private filter?:GeocodeFilter){}
 
  // The full proxy response, including attribution and the provider list — what the ornament's
  // result chooser renders. `search` below is the narrower shape the lake tool already consumes.
  async searchDetailed(query:string,signal?:AbortSignal):Promise<GeocodeSearchResponse>{
-  const url=`${this.endpoint}?q=${encodeURIComponent(query)}${this.provider?`&provider=${encodeURIComponent(this.provider)}`:''}`;
+  const url=`${this.endpoint}?q=${encodeURIComponent(query)}${this.provider?`&provider=${encodeURIComponent(this.provider)}`:''}${this.filter?`&filter=${encodeURIComponent(this.filter)}`:''}`;
   let response:Response;
   try{
    response=await this.fetchImpl(url,{signal,headers:{Accept:'application/json'}});

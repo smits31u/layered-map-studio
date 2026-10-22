@@ -3,7 +3,7 @@ import {createRateLimiter,type Clock,type RateLimiter,systemClock} from './rateL
 import {createCensusAdapter} from './adapters/census';
 import {createNominatimAdapter} from './adapters/nominatim';
 import {createPhotonAdapter} from './adapters/photon';
-import type {FetchLike,GeocodeCandidate,GeocodeFailureCode,GeocodeOutcome,GeocodeProviderId,GeocodeProviderInfo,ProviderAdapter} from './types';
+import {GEOCODE_FILTERS,type FetchLike,type GeocodeCandidate,type GeocodeFailureCode,type GeocodeFilter,type GeocodeOutcome,type GeocodeProviderId,type GeocodeProviderInfo,type ProviderAdapter} from './types';
 
 // The plan caps the result list at five: "Return up to five normalized candidates".
 export const MAX_RESULTS=5;
@@ -36,7 +36,7 @@ export interface GeocodeHandlerOptions{
  maxResults?:number;
 }
 
-export interface GeocodeRequest{q?:string|null;provider?:string|null}
+export interface GeocodeRequest{q?:string|null;provider?:string|null;filter?:string|null}
 export type GeocodeHandler=(request:GeocodeRequest)=>Promise<GeocodeOutcome>;
 
 // Endpoints are server-side environment variables, not `VITE_` ones: they are never read by the
@@ -48,7 +48,7 @@ export const createDefaultAdapters=():ProviderAdapter[]=>[
  createCensusAdapter(fromEnv('CENSUS_GEOCODER_URL')),
 ];
 
-const describe=(adapters:ProviderAdapter[]):GeocodeProviderInfo[]=>adapters.map(a=>({id:a.id,label:a.label,attribution:a.attribution,note:a.note}));
+const describe=(adapters:ProviderAdapter[]):GeocodeProviderInfo[]=>adapters.map(a=>({id:a.id,label:a.label,attribution:a.attribution,note:a.note,...(a.filters?.length?{filters:[...a.filters]}:{})}));
 
 // Collapses runs of whitespace so "Crivitz,   WI" and "Crivitz, WI" are one cache entry rather than
 // two upstream requests. Control characters are rejected separately, below.
@@ -98,23 +98,28 @@ export function createGeocodeHandler(options:GeocodeHandlerOptions={}):GeocodeHa
   const providerId=(requestedProvider||defaultProvider) as GeocodeProviderId;
   const adapter=byId.get(providerId);
   if(!adapter)return fail(400,'unknown-provider',`Unknown geocoding provider "${requestedProvider}". Available: ${adapters.map(a=>a.id).join(', ')}.`);
+  const requestedFilter=request.filter?normalizeQuery(request.filter).toLowerCase():'';
+  if(requestedFilter&&!(GEOCODE_FILTERS as readonly string[]).includes(requestedFilter))return fail(400,'unknown-filter',`Unknown search filter "${requestedFilter}". Available: ${GEOCODE_FILTERS.join(', ')}.`);
+  const filter=requestedFilter?requestedFilter as GeocodeFilter:undefined;
+  if(filter&&!adapter.filters?.includes(filter))return fail(400,'filter-unsupported',`${adapter.label} cannot search for golf courses only. Choose another provider.`);
 
   // Case-insensitive cache key: address search is case-insensitive upstream, so treating "CRIVITZ"
   // and "crivitz" as two entries would mean two upstream requests for one answer.
-  const key=`${adapter.id}::${query.toLowerCase()}`;
+  // The filter is part of the key: "Mid Vallee" filtered and unfiltered are different answers.
+  const key=`${adapter.id}::${filter??''}::${query.toLowerCase()}`;
   const hit=cache.get(key);
-  if(hit)return {status:200,body:{query,provider:adapter.id,attribution:hit.attribution,results:hit.results,cached:true,providers}};
+  if(hit)return {status:200,body:{query,provider:adapter.id,attribution:hit.attribution,results:hit.results,cached:true,...(filter?{filter}:{}),providers}};
 
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),timeoutMs);
   try{
    // The rate limiter wraps the upstream call only. A cache hit never enters the queue, so a
    // repeated search stays instant even while the one-per-second gate is holding a real request.
-   const response=await limiters.get(adapter.id)!.run(()=>doFetch(adapter.buildUrl(query,limit),{headers:adapter.headers(userAgent),signal:controller.signal}));
+   const response=await limiters.get(adapter.id)!.run(()=>doFetch(adapter.buildUrl(query,limit,filter),{headers:adapter.headers(userAgent),signal:controller.signal}));
    if(!response.ok)return fail(502,'upstream-failed',`${adapter.label} returned HTTP ${response.status}.`);
-   const results=adapter.parse(await response.json(),limit);
+   const results=adapter.parse(await response.json(),limit,filter);
    cache.set(key,{results,attribution:adapter.attribution});
-   return {status:200,body:{query,provider:adapter.id,attribution:adapter.attribution,results,cached:false,providers}};
+   return {status:200,body:{query,provider:adapter.id,attribution:adapter.attribution,results,cached:false,...(filter?{filter}:{}),providers}};
   }catch(error){
    const reason=error as Error;
    if(reason?.name==='AbortError'||controller.signal.aborted)return fail(504,'upstream-timeout',`${adapter.label} did not respond within ${timeoutMs}ms.`);

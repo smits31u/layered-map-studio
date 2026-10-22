@@ -46,12 +46,15 @@ const SHALLOW=[0x9c,0xcf,0xe8],DEEP=[0x12,0x3a,0x66];
 const hex=(rgb:number[])=>`#${rgb.map(c=>Math.round(c).toString(16).padStart(2,'0')).join('')}`;
 
 const LOWLAND=[0x5f,0x7d,0x4e],SUMMIT=[0xd9,0xc9,0xa3];
+// A golf board: a plain wood floor, the course a muted green on it, the fairways and greens brighter.
+const GOLF=['#c9a46c','#6f8f55','#9cc17a'];
 
 // The lake-map look: wood for the top piece, then water from light to deep blue going down, the
 // bench piece the deepest. A topo board climbs instead: green lowland at the base to pale summit
 // stone at the top. Returned bottom-up, matching stackLayers.
 export function defaultLayerColors(layers:StackLayer[],product='lake-map'):string[]{
  const n=layers.length;
+ if(product==='golf-map')return layers.map(layer=>GOLF[Math.min(GOLF.length-1,layer.level)]);
  if(product==='topo-map')return layers.map(layer=>{const t=n<=1?0:layer.level/(n-1);return hex(LOWLAND.map((c,i)=>c+(SUMMIT[i]-c)*t))});
  return layers.map(layer=>{
   if(layer.level===n-1)return WOOD;

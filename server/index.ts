@@ -4,6 +4,9 @@ import {stat} from 'node:fs/promises';
 import {extname,join,normalize,resolve,sep} from 'node:path';
 import {createGeocodeHandler} from '../src/server/geocode/handler';
 import {GEOCODE_PATH,serveGeocode} from '../src/server/geocode/httpRoute';
+import {createGolfSnapshotHandler} from '../src/server/golf/handler';
+import {GOLF_PATH_PREFIX,serveGolf} from '../src/server/golf/httpRoute';
+import {createDiskSnapshotCache} from '../src/server/golf/snapshotCache';
 import {createTerrainTileHandler} from '../src/server/terrain/handler';
 import {serveTerrainTile} from '../src/server/terrain/httpRoute';
 import {createDiskTileCache} from '../src/server/terrain/tileCache';
@@ -47,12 +50,17 @@ const terrain=createTerrainTileHandler({
  cache:createDiskTileCache(TERRAIN_CACHE_DIR,{maxBytes:Number(process.env.TERRAIN_CACHE_MAX_BYTES)||undefined}),
  urlTemplate:process.env.TERRAIN_TILES_URL||DEFAULT_TERRAIN_TILES_URL,
 });
+// The golf starter's course snapshots (docs/GOLF_MODULE_PLAN.md §2.2): same process, its own route,
+// and its own named volume (docker-compose.yml) so cached courses survive a rebuild.
+const GOLF_CACHE_DIR=resolve(process.env.GOLF_CACHE_DIR??'.cache/golf');
+const golf=createGolfSnapshotHandler({cache:createDiskSnapshotCache(GOLF_CACHE_DIR)});
 
 const server=createServer(async(request,response)=>{
  try{
   const url=new URL(request.url??'/','http://localhost');
   if(url.pathname===GEOCODE_PATH){await serveGeocode(request,response,geocode);return}
   if(url.pathname.startsWith(TERRAIN_PATH_PREFIX)){await serveTerrainTile(request,response,terrain);return}
+  if(url.pathname.startsWith(GOLF_PATH_PREFIX)){await serveGolf(request,response,golf);return}
   if(url.pathname==='/health'){response.statusCode=200;response.setHeader('Content-Type','text/plain; charset=utf-8');response.end('ok');return}
   if(request.method!=='GET'&&request.method!=='HEAD'){response.statusCode=405;response.setHeader('Allow','GET, HEAD');response.end();return}
 
@@ -78,5 +86,5 @@ async function isFile(path:string):Promise<boolean>{
 
 server.listen(PORT,HOST,()=>{
  if(!process.env.GEOCODER_CONTACT)console.warn('GEOCODER_CONTACT is not set. Nominatim requires a contactable identifier in the User-Agent; set it before using the public instance.');
- console.log(`Layered Map Studio listening on http://${HOST}:${PORT} (static root ${ROOT}, terrain cache ${TERRAIN_CACHE_DIR})`);
+ console.log(`Layered Map Studio listening on http://${HOST}:${PORT} (static root ${ROOT}, terrain cache ${TERRAIN_CACHE_DIR}, golf cache ${GOLF_CACHE_DIR})`);
 });
