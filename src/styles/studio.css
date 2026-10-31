@@ -43,6 +43,7 @@
 .studio .field-pair{display:grid;grid-template-columns:1fr 1fr;gap:var(--lms-space-2)}
 .studio .field-pair label{grid-template-columns:none;gap:var(--lms-space-1)}
 .studio .field-pair input[type=number]{width:100%}
+.studio input[aria-invalid=true]{border-color:var(--lms-error-line)}
 .studio .search-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--lms-space-2)}
 .studio .readout{font-size:var(--lms-text-xs);color:var(--lms-ink-muted);font-variant-numeric:tabular-nums}
 
